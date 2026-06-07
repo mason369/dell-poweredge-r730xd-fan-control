@@ -109,6 +109,16 @@
       border-color: transparent;
     }
 
+    .dashboard-tooltip {
+      z-index: 999999 !important;
+      max-width: min(380px, calc(100vw - 24px));
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+      box-shadow: 0 14px 34px rgba(15, 23, 42, .2) !important;
+    }
+
     .metric-strip {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -360,7 +370,7 @@
       charts.get("trend").setOption({
         color: colorSet(),
         title: chartTitle(labels.trendTitle, labels.trendSubtitle),
-        tooltip: { trigger: "axis" },
+        tooltip: dashboardTooltip({ trigger: "axis" }),
         legend: { top: 34, textStyle: { color: axisColor() } },
         grid: { top: 78, right: 62, bottom: 62, left: 54, containLabel: true },
         dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
@@ -388,7 +398,7 @@
       charts.get("overall").setOption({
         color: ["#0f766e", "#2563eb", "#d97706", "#16a34a"],
         title: chartTitle(labels.overallTitle, labels.overallSubtitle),
-        tooltip: {
+        tooltip: dashboardTooltip({
           formatter: () => [
             `${labels.maxCpuTemp}: ${number(s.maxTemperature, 1)} ${labels.tempUnit}`,
             `${labels.averageFanRpm}: ${number(s.averageFanRpm, 0)} RPM`,
@@ -399,7 +409,7 @@
             `${labels.healthState}: ${s.okCount} / ${s.sensorCount}`,
             `${labels.hardwareTypes}: ${s.sensorCount}`
           ].join("<br/>")
-        },
+        }),
         radar: {
           center: ["50%", "58%"],
           radius: "62%",
@@ -494,10 +504,10 @@
       charts.get("power").setOption({
         color: ["#7c3aed", "#a16207", "#0891b2", "#db2777"],
         title: chartTitle(labels.powerTitle, labels.powerSubtitle),
-        tooltip: {
+        tooltip: dashboardTooltip({
           trigger: "item",
           formatter: (params) => `${escapeHtml(params.name)}<br/>${labels.value}: ${params.value} ${escapeHtml(params.data.unit || "")}<br/>${labels.hardwareTypes}: ${escapeHtml(params.data.type || "")}<br/>${labels.status}: ${escapeHtml(params.data.status || "")}`
-        },
+        }),
         grid: { top: 74, right: 64, bottom: 54, left: 142, containLabel: true },
         xAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
         yAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), formatter: shortAxisLabel } },
@@ -515,7 +525,7 @@
       charts.get("types").setOption({
         color: colorSet(),
         title: chartTitle(labels.typeTitle, labels.typeSubtitle),
-        tooltip: {
+        tooltip: dashboardTooltip({
           trigger: "item",
           formatter: (params) => {
             const data = params.data || {};
@@ -525,7 +535,7 @@
 
             return `${escapeHtml(params.name)}<br/>${labels.hardwareTypes}: ${params.value}`;
           }
-        },
+        }),
         series: [
           {
             name: labels.hardwareTypes,
@@ -581,11 +591,28 @@
       };
     }
 
+    function dashboardTooltip(options) {
+      return Object.assign({
+        renderMode: "html",
+        appendToBody: true,
+        confine: true,
+        className: "dashboard-tooltip",
+        extraCssText: [
+          "z-index:999999",
+          "max-width:min(380px, calc(100vw - 24px))",
+          "white-space:normal",
+          "word-break:break-word",
+          "overflow-wrap:anywhere",
+          "line-height:1.45"
+        ].join(";")
+      }, options || {});
+    }
+
     function valueTooltip(unit) {
-      return {
+      return dashboardTooltip({
         trigger: "item",
         formatter: (params) => `${escapeHtml(params.name)}<br/>${params.value} ${escapeHtml(unit)}<br/>${escapeHtml(params.data.status || "")}`
-      };
+      });
     }
 
     function shortAxisLabel(value) {
