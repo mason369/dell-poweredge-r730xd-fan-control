@@ -35,6 +35,7 @@ public sealed partial class MainPage : Page
     private bool _sensorPollingTickRunning;
     private bool _loadingSettings;
     private bool _autoPolicyRunning;
+    private bool _isConnecting;
     private bool _hasDisconnected;
     private DateTime? _lastPollTime;
     private TimeSpan? _lastPollDuration;
@@ -307,6 +308,7 @@ public sealed partial class MainPage : Page
 
     private async Task ConnectAndStartPollingAsync()
     {
+        SetConnectingState();
         await RunUiCommandAsync(T("Status.Connecting"), async token =>
         {
             var profile = ReadProfile();
@@ -323,6 +325,7 @@ public sealed partial class MainPage : Page
         var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
         _sensorPollingTimer.Interval = TimeSpan.FromSeconds(intervalSeconds);
         _sensorPollingTimer.Start();
+        _isConnecting = false;
         _hasDisconnected = false;
         _pollingWasDegraded = false;
         _lastPollingWarningAt = DateTimeOffset.MinValue;
@@ -333,6 +336,7 @@ public sealed partial class MainPage : Page
     private void StopSensorPolling(string reason)
     {
         _sensorPollingTimer.Stop();
+        _isConnecting = false;
         _hasDisconnected = true;
         UpdatePollingStatusTexts();
         AddLog(T("Log.Warn"), F("Status.PollingStopped", reason));
@@ -814,6 +818,13 @@ public sealed partial class MainPage : Page
         }
         catch (Exception ex)
         {
+            if (_isConnecting)
+            {
+                _isConnecting = false;
+                _hasDisconnected = true;
+                UpdatePollingStatusTexts();
+            }
+
             ShowFailure(ex);
         }
         finally
@@ -1662,6 +1673,12 @@ public sealed partial class MainPage : Page
             LastPollText.Text = T("Overview.WaitingPoll");
         }
 
+        if (_isConnecting)
+        {
+            ConnectionStateText.Text = T("State.Connecting");
+            return;
+        }
+
         if (_sensorPollingTimer.IsEnabled)
         {
             var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
@@ -1672,6 +1689,14 @@ public sealed partial class MainPage : Page
         }
 
         ConnectionStateText.Text = _hasDisconnected ? T("State.Disconnected") : T("State.NotConnected");
+    }
+
+    private void SetConnectingState()
+    {
+        _isConnecting = true;
+        _hasDisconnected = false;
+        ConnectionStateText.Text = T("State.Connecting");
+        ShowStatus(T("Status.Connecting"), InfoBarSeverity.Informational);
     }
 
     private void CheckSensorPollingLatency(TimeSpan elapsed)
