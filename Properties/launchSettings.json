@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "DellR730xdFanControlCenter (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "DellR730xdFanControlCenter (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
