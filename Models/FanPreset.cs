@@ -60,6 +60,9 @@ public sealed class FanPreset
     public string CurrentMarker => IsActive ? LocalizationService.T("Preset.Current") : string.Empty;
 
     [JsonIgnore]
+    public double CurrentMarkerOpacity => IsActive ? 1 : 0;
+
+    [JsonIgnore]
     public string ApplyButtonLabel => LocalizationService.T("Preset.Apply");
 
     [JsonIgnore]
@@ -67,6 +70,75 @@ public sealed class FanPreset
 
     [JsonIgnore]
     public string DeleteButtonLabel => LocalizationService.T("Preset.Delete");
+
+    [JsonIgnore]
+    public string IconGlyph => Id switch
+    {
+        "restore-manual" => "\uE777",
+        "balanced" => "\uE9D9",
+        "cooling" => "\uE9CA",
+        "performance" => "\uE7C1",
+        "dell-auto" => "\uE950",
+        _ => "\uE713",
+    };
+
+    [JsonIgnore]
+    public string Detail
+    {
+        get
+        {
+            if (string.Equals(Id, "restore-manual", StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationService.T("Preset.RestoreManualDetail");
+            }
+
+            if (string.Equals(Id, "balanced", StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationService.T("Preset.BalancedDetail");
+            }
+
+            if (string.Equals(Id, "cooling", StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationService.T("Preset.CoolingDetail");
+            }
+
+            if (string.Equals(Id, "performance", StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationService.T("Preset.PerformanceDetail");
+            }
+
+            if (string.Equals(Kind, DellAutoKind, StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationService.T("Preset.DellAutoDetail");
+            }
+
+            return LocalizationService.T("Preset.CustomDetail");
+        }
+    }
+
+    [JsonIgnore]
+    public string ModeBadge
+    {
+        get
+        {
+            if (string.Equals(Kind, RestoreManualKind, StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationService.T("Preset.RestoreManualBadge");
+            }
+
+            if (string.Equals(Kind, DellAutoKind, StringComparison.OrdinalIgnoreCase))
+            {
+                return LocalizationService.T("Preset.DellAutoBadge");
+            }
+
+            return LocalizationService.T("Preset.ManualBadge");
+        }
+    }
+
+    [JsonIgnore]
+    public string PrimaryMetric => string.Equals(Kind, DellAutoKind, StringComparison.OrdinalIgnoreCase)
+        ? LocalizationService.T("Preset.BmcMetric")
+        : LocalizationService.Format("Preset.PercentMetric", Percent);
 
     public void SetActive(bool isActive)
     {
