@@ -26,15 +26,28 @@ public sealed class SettingsStore
         }
 
         var json = File.ReadAllText(SettingsPath, Encoding.UTF8);
-        return JsonSerializer.Deserialize<AppSettings>(json, _jsonOptions)
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, _jsonOptions)
             ?? throw new InvalidOperationException($"Settings file is empty or invalid: {SettingsPath}");
+        Normalize(settings);
+        return settings;
     }
 
     public void Save(AppSettings settings)
     {
+        Normalize(settings);
         Directory.CreateDirectory(SettingsDirectory);
         var json = JsonSerializer.Serialize(settings, _jsonOptions);
         File.WriteAllText(SettingsPath, json, Encoding.UTF8);
+    }
+
+    private static void Normalize(AppSettings settings)
+    {
+        settings.IpmiToolPath = AppSettings.BundledIpmiToolRelativePath;
+
+        if (settings.SensorRefreshSeconds < 1)
+        {
+            settings.SensorRefreshSeconds = 1;
+        }
     }
 
     public string ProtectPassword(string password)

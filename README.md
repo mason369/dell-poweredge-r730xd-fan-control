@@ -16,10 +16,12 @@ Windows WinUI 3 desktop app for managing Dell PowerEdge R730xd fan speed through
 - Restore default local mode: manual all-fan 10%.
 - Dell automatic fan mode remains available as a separate action.
 - Smart auto policy: reads BMC sensors, calculates CPU temperature, and adjusts all fans.
+- Persistent polling: after connect/save, the app keeps reading BMC sensors automatically with a minimum interval of 1 second.
+- Bundled `ipmitool.exe` and required Cygwin DLLs under `BundledTools/ipmitool`; no external `C:\Program Files\...` tool path is required.
 - Tray behavior: close button minimizes to tray; right-click tray menu provides quick fan presets, reset auto mode, settings, restore, and exit.
 - iDRAC web console shortcut.
-- SDR sensor table for fan RPM, temperatures, power, voltage, and platform status.
-- Explicit failures: missing `ipmitool.exe`, authentication errors, iDRAC privilege errors, and unsupported firmware commands are shown directly.
+- Live dashboard cards for every BMC temperature sensor, fan RPM, power, voltage, and platform status.
+- Explicit failures: missing bundled `ipmitool.exe`, authentication errors, iDRAC privilege errors, and unsupported firmware commands are shown directly.
 - Password can be stored locally with Windows DPAPI; it is not committed to the repository.
 
 - 现代 WinUI 3 界面，支持浅色、深色、跟随系统主题。
@@ -28,10 +30,12 @@ Windows WinUI 3 desktop app for managing Dell PowerEdge R730xd fan speed through
 - 还原本机默认模式：手动模式 + 全部风扇 10%。
 - Dell 自动风扇模式保留为单独操作。
 - 软件恒温策略：读取 BMC 传感器，根据 CPU 温度自动调整全部风扇。
+- 持续轮询：连接/保存设置后自动持续读取 BMC 传感器，最短轮询间隔 1 秒。
+- 内置 `ipmitool.exe` 和所需 Cygwin DLL，路径为 `BundledTools/ipmitool`，不再依赖外部 `C:\Program Files\...` 工具。
 - 托盘行为：点击关闭最小化到托盘；右键托盘图标可快速设置风扇、恢复自动模式、进入设置、打开主窗口和退出。
 - iDRAC Web 控制台快捷入口。
-- SDR 传感器表格展示风扇 RPM、温度、功耗、电压和平台状态。
-- 失败显式展示：缺少 `ipmitool.exe`、认证失败、iDRAC 权限不足、固件不支持 raw 命令都会直接报错。
+- 实时大看板展示每个 BMC 温度传感器、风扇 RPM、功耗、电压和平台状态。
+- 失败显式展示：缺少内置 `ipmitool.exe`、认证失败、iDRAC 权限不足、固件不支持 raw 命令都会直接报错。
 - 密码可用 Windows DPAPI 本机加密保存，不会提交到仓库。
 
 ## Screens / 界面
@@ -40,10 +44,10 @@ The app is organized into four views:
 
 应用包含四个主要页面：
 
-- Overview / 总览: CPU temperature, fan RPM summary, quick actions, recent logs.
+- Overview / 总览: live temperature board, fan RPM board, power and health board, quick actions, recent logs.
 - Fan Control / 风扇: presets, all-fan control, Fan 1-6 individual control, smart auto thresholds.
 - Sensors / 传感器: complete `ipmitool sdr elist` table.
-- Settings / 设置: iDRAC credentials, `ipmitool.exe` path, tray behavior, fan count, timeout, theme, auto policy range.
+- Settings / 设置: iDRAC credentials, read-only bundled `ipmitool.exe` path, tray behavior, fan count, polling interval, timeout, theme, auto policy range.
 
 ## Requirements / 运行要求
 
@@ -51,14 +55,14 @@ The app is organized into four views:
 - .NET 8 desktop runtime or a self-contained published build.
 - Dell PowerEdge R730xd with reachable iDRAC/BMC.
 - IPMI over LAN enabled in iDRAC.
-- `ipmitool.exe` installed locally.
+- Bundled `BundledTools/ipmitool/ipmitool.exe` included by the project.
 - iDRAC user with enough privilege to send OEM raw IPMI commands.
 
 - Windows 10 2004 / build 19041 或更新版本。
 - .NET 8 Desktop Runtime，或使用自包含发布包。
 - 可访问的 Dell PowerEdge R730xd iDRAC/BMC。
 - iDRAC 中已启用 IPMI over LAN。
-- 本机已安装 `ipmitool.exe`。
+- 项目已内置 `BundledTools/ipmitool/ipmitool.exe`。
 - iDRAC 用户具备发送 OEM raw IPMI 命令的权限。
 
 ## Build / 构建
@@ -75,9 +79,9 @@ cd C:\DellR730xdFanControlCenter
 dotnet run --project .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x64
 ```
 
-The first run opens the Settings page with default host `192.168.1.73`, username `root`, detected local `ipmitool.exe` path, and default restore speed 10%. Enter the password locally before sending commands.
+The first run opens the Settings page with default host `192.168.1.73`, username `root`, bundled `ipmitool.exe` path, default restore speed 10%, and 1 second polling. Enter the password locally before sending commands. If the password is saved with DPAPI, the app reconnects and starts polling on launch.
 
-首次运行可在设置页看到默认主机 `192.168.1.73`、用户名 `root`、本机已检测到的 `ipmitool.exe` 路径，以及默认还原速度 10%。发送命令前请在本机输入密码。
+首次运行可在设置页看到默认主机 `192.168.1.73`、用户名 `root`、内置 `ipmitool.exe` 路径、默认还原速度 10% 和 1 秒轮询。发送命令前请在本机输入密码。若使用 DPAPI 保存密码，应用启动后会自动连接并开始轮询。
 
 ## IPMI Commands / IPMI 命令
 

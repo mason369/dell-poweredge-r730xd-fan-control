@@ -6,6 +6,8 @@ public sealed class AppSettings
 {
     public const int LocalDefaultManualFanPercent = 10;
 
+    public const string BundledIpmiToolRelativePath = @"BundledTools\ipmitool\ipmitool.exe";
+
     public string Host { get; set; } = "192.168.1.73";
 
     public string UserName { get; set; } = "root";
@@ -14,7 +16,7 @@ public sealed class AppSettings
 
     public string ProtectedPassword { get; set; } = string.Empty;
 
-    public string IpmiToolPath { get; set; } = @"C:\Program Files\kvm_client_windows\ipmitool\ipmitool.exe";
+    public string IpmiToolPath { get; set; } = BundledIpmiToolRelativePath;
 
     public int FanCount { get; set; } = 6;
 
@@ -24,7 +26,7 @@ public sealed class AppSettings
 
     public bool EnableIndividualFanTargets { get; set; }
 
-    public int SensorRefreshSeconds { get; set; } = 20;
+    public int SensorRefreshSeconds { get; set; } = 1;
 
     public int CommandTimeoutSeconds { get; set; } = 35;
 

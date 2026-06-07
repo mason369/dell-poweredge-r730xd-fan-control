@@ -4,6 +4,10 @@ This app intentionally executes direct IPMI commands and reports failures exactl
 
 本应用会直接执行 IPMI 命令并显示真实失败原因。命令失败时不会静默切换到其他后端。
 
+The app bundles `ipmitool.exe` and its required Cygwin DLLs in `BundledTools/ipmitool`. Runtime execution resolves the bundled path from the application output directory.
+
+应用已在 `BundledTools/ipmitool` 内置 `ipmitool.exe` 及所需 Cygwin DLL。运行时会从应用输出目录解析内置工具路径。
+
 ## Required iDRAC Settings / 必要 iDRAC 设置
 
 - Enable IPMI over LAN.
@@ -24,6 +28,12 @@ raw 0x30 0x30 0x02 0xff <percent-hex>
 raw 0x30 0x30 0x02 <fan-target-byte> <percent-hex>
 raw 0x30 0x30 0x01 0x01
 ```
+
+## Polling / 轮询
+
+After connection succeeds, the app starts persistent sensor polling. The minimum supported interval is 1 second. If one SDR read is still running when the next tick arrives, the next tick is skipped instead of launching overlapping IPMI commands.
+
+连接成功后，应用会启动持续传感器轮询。最短间隔为 1 秒。如果上一次 SDR 读取尚未完成，下一次 tick 会跳过，避免同时发起多条 IPMI 命令。
 
 ## Local Default Restore / 本机默认还原
 

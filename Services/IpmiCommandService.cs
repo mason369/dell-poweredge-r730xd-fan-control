@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -85,14 +86,16 @@ public sealed partial class IpmiCommandService
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(profile.CommandTimeoutSeconds));
 
+        var toolPath = ResolveToolPath(profile.IpmiToolPath);
         var arguments = BuildArguments(profile, ipmiArguments);
-        var commandLine = $"{Quote(profile.IpmiToolPath)} {string.Join(" ", arguments.Select(Quote))}";
+        var commandLine = $"{Quote(toolPath)} {string.Join(" ", arguments.Select(Quote))}";
         var stopwatch = Stopwatch.StartNew();
 
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
         {
-            FileName = profile.IpmiToolPath,
+            FileName = toolPath,
+            WorkingDirectory = Path.GetDirectoryName(toolPath) ?? AppContext.BaseDirectory,
             UseShellExecute = false,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
@@ -117,7 +120,7 @@ public sealed partial class IpmiCommandService
         catch (Win32Exception ex)
         {
             throw new InvalidOperationException(
-                $"Cannot start ipmitool at '{profile.IpmiToolPath}'. Install ipmitool.exe or set the exact path in Settings.",
+                $"Cannot start bundled ipmitool at '{toolPath}'. Rebuild the app so BundledTools\\ipmitool is included.",
                 ex);
         }
 
@@ -164,11 +167,28 @@ public sealed partial class IpmiCommandService
         return ["-I", "lanplus", "-H", profile.Host, "-U", profile.UserName, "-E", .. ipmiArguments];
     }
 
+    public static string ResolveToolPath(string configuredPath)
+    {
+        var path = string.IsNullOrWhiteSpace(configuredPath)
+            ? AppSettings.BundledIpmiToolRelativePath
+            : configuredPath;
+
+        return Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, path));
+    }
+
     private static void ValidateProfile(IdracProfile profile)
     {
         if (string.IsNullOrWhiteSpace(profile.IpmiToolPath))
         {
-            throw new InvalidOperationException("ipmitool path is empty. Set it in Settings.");
+            throw new InvalidOperationException("Bundled ipmitool path is empty.");
+        }
+
+        var resolvedToolPath = ResolveToolPath(profile.IpmiToolPath);
+        if (!File.Exists(resolvedToolPath))
+        {
+            throw new FileNotFoundException("Bundled ipmitool.exe is missing from the application output.", resolvedToolPath);
         }
 
         if (string.IsNullOrWhiteSpace(profile.Host))
@@ -208,6 +228,8 @@ public sealed partial class IpmiCommandService
             yield return new SensorReading
             {
                 Key = parts[0],
+                SensorId = parts.Length >= 5 ? parts[1] : string.Empty,
+                Entity = parts.Length >= 5 ? parts[3] : string.Empty,
                 Value = readingParts.Value,
                 Unit = readingParts.Unit,
                 Status = status,

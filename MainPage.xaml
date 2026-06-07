@@ -134,6 +134,8 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -164,6 +166,134 @@
                         </Border>
 
                         <Border Grid.Row="1" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                            <StackPanel Spacing="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="温度大看板 / Temperature Board" />
+                                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="逐项显示 BMC SDR 中的每一个温度传感器。" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        x:Name="LastPollText"
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource MutedTextStyle}"
+                                        Text="等待轮询 / Waiting" />
+                                </Grid>
+                                <GridView
+                                    MaxHeight="300"
+                                    IsItemClickEnabled="False"
+                                    ItemsSource="{x:Bind TemperatureTiles, Mode=OneWay}"
+                                    SelectionMode="None">
+                                    <GridView.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <ItemsWrapGrid Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </GridView.ItemsPanel>
+                                    <GridView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border
+                                                Width="220"
+                                                MinHeight="122"
+                                                Margin="0,0,10,10"
+                                                Padding="16"
+                                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8">
+                                                <StackPanel Spacing="6">
+                                                    <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                        <TextBlock FontSize="32" FontWeight="SemiBold" Text="{Binding Value}" />
+                                                        <TextBlock VerticalAlignment="Bottom" Style="{StaticResource MutedTextStyle}" Text="{Binding Unit}" />
+                                                    </StackPanel>
+                                                    <TextBlock Style="{StaticResource MutedTextStyle}" Text="{Binding Subtitle}" />
+                                                    <TextBlock Style="{StaticResource MutedTextStyle}" Text="{Binding Status}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </GridView.ItemTemplate>
+                                </GridView>
+                            </StackPanel>
+                        </Border>
+
+                        <Grid Grid.Row="2" Grid.ColumnSpan="3" Margin="0,18,0,0" ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="3*" />
+                                <ColumnDefinition Width="2*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource CardBorderStyle}">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="风扇 RPM 看板 / Fan RPM Board" />
+                                    <GridView
+                                        MaxHeight="260"
+                                        IsItemClickEnabled="False"
+                                        ItemsSource="{x:Bind FanTiles, Mode=OneWay}"
+                                        SelectionMode="None">
+                                        <GridView.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <ItemsWrapGrid Orientation="Horizontal" />
+                                            </ItemsPanelTemplate>
+                                        </GridView.ItemsPanel>
+                                        <GridView.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border
+                                                    Width="180"
+                                                    MinHeight="106"
+                                                    Margin="0,0,10,10"
+                                                    Padding="14"
+                                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="8">
+                                                    <StackPanel Spacing="4">
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                                            <TextBlock FontSize="26" FontWeight="SemiBold" Text="{Binding Value}" />
+                                                            <TextBlock VerticalAlignment="Bottom" Style="{StaticResource MutedTextStyle}" Text="{Binding Unit}" />
+                                                        </StackPanel>
+                                                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="{Binding Status}" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </GridView.ItemTemplate>
+                                    </GridView>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}">
+                                <StackPanel Spacing="12">
+                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="功耗与状态 / Power &amp; Health" />
+                                    <ListView
+                                        MaxHeight="260"
+                                        ItemsSource="{x:Bind PowerTiles, Mode=OneWay}"
+                                        SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Padding="0,6" ColumnSpacing="10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                                                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="{Binding Status}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                                                        <TextBlock FontSize="20" FontWeight="SemiBold" Text="{Binding Value}" />
+                                                        <TextBlock VerticalAlignment="Bottom" Style="{StaticResource MutedTextStyle}" Text="{Binding Unit}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Border Grid.Row="3" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <Grid ColumnSpacing="18">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="2*" />
@@ -175,7 +305,7 @@
                                         <AppBarButton
                                             Click="OnTestConnectionClick"
                                             Icon="Contact"
-                                            Label="测试连接" />
+                                            Label="连接" />
                                         <AppBarButton
                                             Click="OnRefreshSensorsClick"
                                             Icon="Refresh"
@@ -223,7 +353,7 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="2" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                        <Border Grid.Row="4" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <Grid ColumnSpacing="18">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -406,7 +536,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="3" Spacing="6">
                                     <TextBlock Text="轮询秒数 / Poll seconds" />
-                                    <NumberBox x:Name="SensorRefreshSecondsBox" Maximum="300" Minimum="5" SpinButtonPlacementMode="Inline" />
+                                    <NumberBox x:Name="SensorRefreshSecondsBox" Maximum="300" Minimum="1" SpinButtonPlacementMode="Inline" />
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -439,11 +569,15 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
                                             <TextBlock FontWeight="SemiBold" Text="Key / 传感器" />
-                                            <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="Value / 读数" />
-                                            <TextBlock Grid.Column="2" FontWeight="SemiBold" Text="Unit / 单位" />
-                                            <TextBlock Grid.Column="3" FontWeight="SemiBold" Text="Status / 状态" />
+                                            <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="ID" />
+                                            <TextBlock Grid.Column="2" FontWeight="SemiBold" Text="Entity" />
+                                            <TextBlock Grid.Column="3" FontWeight="SemiBold" Text="Value / 读数" />
+                                            <TextBlock Grid.Column="4" FontWeight="SemiBold" Text="Unit / 单位" />
+                                            <TextBlock Grid.Column="5" FontWeight="SemiBold" Text="Status / 状态" />
                                         </Grid>
                                     </ListView.Header>
                                     <ListView.ItemTemplate>
@@ -454,11 +588,15 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="{Binding Key}" />
-                                                <TextBlock Grid.Column="1" Text="{Binding Value}" />
-                                                <TextBlock Grid.Column="2" Text="{Binding Unit}" />
-                                                <TextBlock Grid.Column="3" Text="{Binding Status}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding SensorId}" />
+                                                <TextBlock Grid.Column="2" Text="{Binding Entity}" />
+                                                <TextBlock Grid.Column="3" Text="{Binding Value}" />
+                                                <TextBlock Grid.Column="4" Text="{Binding Unit}" />
+                                                <TextBlock Grid.Column="5" Text="{Binding Status}" />
                                             </Grid>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
@@ -482,7 +620,10 @@
                                     Header="密码 / Password"
                                     PasswordRevealMode="Peek" />
                                 <ToggleSwitch x:Name="RememberPasswordSwitch" Header="使用 DPAPI 保存密码 / Remember password with DPAPI" />
-                                <TextBox x:Name="IpmiToolPathBox" Header="ipmitool.exe 路径 / ipmitool path" />
+                                <TextBox
+                                    x:Name="IpmiToolPathBox"
+                                    Header="内置 ipmitool 路径 / Bundled ipmitool path"
+                                    IsReadOnly="True" />
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -497,7 +638,7 @@
                                     <Button Grid.Column="1" Click="OnTestConnectionClick">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE8FB;" />
-                                            <TextBlock Text="测试 / Test" />
+                                            <TextBlock Text="连接 / Connect" />
                                         </StackPanel>
                                     </Button>
                                 </Grid>

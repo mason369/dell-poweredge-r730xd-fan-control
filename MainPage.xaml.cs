@@ -15,9 +15,12 @@ public sealed partial class MainPage : Page
     private readonly SettingsStore _settingsStore = new();
     private readonly IpmiCommandService _ipmi = new();
     private readonly DispatcherTimer _autoPolicyTimer = new();
+    private readonly DispatcherTimer _sensorPollingTimer = new();
+    private readonly SemaphoreSlim _ipmiOperationLock = new(1, 1);
     private AppSettings _settings = new();
     private bool _syncingAllFanControls;
     private bool _autoPolicyTickRunning;
+    private bool _sensorPollingTickRunning;
 
     public MainPage()
     {
@@ -26,9 +29,14 @@ public sealed partial class MainPage : Page
         Sensors = [];
         Logs = [];
         FanChannels = [];
+        TemperatureTiles = [];
+        FanTiles = [];
+        PowerTiles = [];
+        StatusTiles = [];
 
         _ipmi.CommandCompleted += OnCommandCompleted;
         _autoPolicyTimer.Tick += OnAutoPolicyTimerTick;
+        _sensorPollingTimer.Tick += OnSensorPollingTimerTick;
     }
 
     public ObservableCollection<SensorReading> Sensors { get; }
@@ -36,6 +44,14 @@ public sealed partial class MainPage : Page
     public ObservableCollection<LogEntry> Logs { get; }
 
     public ObservableCollection<FanChannelViewModel> FanChannels { get; }
+
+    public ObservableCollection<DashboardTileViewModel> TemperatureTiles { get; }
+
+    public ObservableCollection<DashboardTileViewModel> FanTiles { get; }
+
+    public ObservableCollection<DashboardTileViewModel> PowerTiles { get; }
+
+    public ObservableCollection<DashboardTileViewModel> StatusTiles { get; }
 
     public bool MinimizeToTrayOnClose => MinimizeToTraySwitch?.IsOn ?? true;
 
@@ -46,6 +62,10 @@ public sealed partial class MainPage : Page
         RebuildFanChannels();
         ApplyTheme(_settings.Theme);
         AddLog("Info", "Application loaded. Settings are ready.");
+        if (!string.IsNullOrWhiteSpace(PasswordBox.Password))
+        {
+            _ = ConnectAndStartPollingAsync();
+        }
     }
 
     public void ShowSettingsView()
@@ -71,7 +91,7 @@ public sealed partial class MainPage : Page
         UserNameBox.Text = settings.UserName;
         PasswordBox.Password = settings.RememberPassword ? _settingsStore.UnprotectPassword(settings.ProtectedPassword) : string.Empty;
         RememberPasswordSwitch.IsOn = settings.RememberPassword;
-        IpmiToolPathBox.Text = settings.IpmiToolPath;
+        IpmiToolPathBox.Text = IpmiCommandService.ResolveToolPath(settings.IpmiToolPath);
         FanCountBox.Value = settings.FanCount;
         CommandTimeoutBox.Value = settings.CommandTimeoutSeconds;
         SensorRefreshSecondsBox.Value = settings.SensorRefreshSeconds;
@@ -94,7 +114,7 @@ public sealed partial class MainPage : Page
         };
     }
 
-    private void PersistSettingsFromControls()
+    private void CaptureSettingsFromControls()
     {
         _settings.Host = HostBox.Text.Trim();
         _settings.UserName = UserNameBox.Text.Trim();
@@ -102,10 +122,10 @@ public sealed partial class MainPage : Page
         _settings.ProtectedPassword = RememberPasswordSwitch.IsOn
             ? _settingsStore.ProtectPassword(PasswordBox.Password)
             : string.Empty;
-        _settings.IpmiToolPath = IpmiToolPathBox.Text.Trim();
+        _settings.IpmiToolPath = AppSettings.BundledIpmiToolRelativePath;
         _settings.FanCount = ReadInt(FanCountBox, "Fan count");
         _settings.CommandTimeoutSeconds = ReadInt(CommandTimeoutBox, "Command timeout");
-        _settings.SensorRefreshSeconds = ReadInt(SensorRefreshSecondsBox, "Sensor refresh seconds");
+        _settings.SensorRefreshSeconds = Math.Max(1, ReadInt(SensorRefreshSecondsBox, "Sensor refresh seconds"));
         _settings.MinimizeToTrayOnClose = MinimizeToTraySwitch.IsOn;
         _settings.EnableIndividualFanTargets = IndividualFanSwitch.IsOn;
         _settings.TargetCpuTemperatureCelsius = ReadDouble(TargetTempBox, "Target temperature");
@@ -126,14 +146,28 @@ public sealed partial class MainPage : Page
             throw new InvalidOperationException("Temperature thresholds must be ordered as Target < High < Emergency.");
         }
 
-        _settingsStore.Save(_settings);
         CurrentTargetText.Text = _settings.Host;
         ApplyTheme(_settings.Theme);
+        IpmiToolPathBox.Text = IpmiCommandService.ResolveToolPath(_settings.IpmiToolPath);
     }
 
-    private IdracProfile ReadProfile()
+    private void PersistSettingsFromControls()
     {
-        PersistSettingsFromControls();
+        CaptureSettingsFromControls();
+        _settingsStore.Save(_settings);
+    }
+
+    private IdracProfile ReadProfile(bool saveSettings = true)
+    {
+        if (saveSettings)
+        {
+            PersistSettingsFromControls();
+        }
+        else
+        {
+            CaptureSettingsFromControls();
+        }
+
         return new IdracProfile
         {
             Host = _settings.Host,
@@ -146,12 +180,7 @@ public sealed partial class MainPage : Page
 
     private async void OnTestConnectionClick(object sender, RoutedEventArgs e)
     {
-        await RunUiCommandAsync("Testing iDRAC connection", async token =>
-        {
-            await _ipmi.TestConnectionAsync(ReadProfile(), token);
-            ConnectionStateText.Text = "已连接 / Connected";
-            ShowStatus("连接成功 / Connection succeeded", InfoBarSeverity.Success);
-        });
+        await ConnectAndStartPollingAsync();
     }
 
     private async void OnRefreshSensorsClick(object sender, RoutedEventArgs e)
@@ -163,12 +192,76 @@ public sealed partial class MainPage : Page
     {
         await RunUiCommandAsync("Refreshing sensors", async token =>
         {
-            var readings = await _ipmi.ReadSensorsAsync(ReadProfile(), token);
-            ReplaceSensors(readings);
-            UpdateMetricSummaries();
-            ConnectionStateText.Text = $"已刷新 {DateTime.Now:HH:mm:ss}";
+            await RefreshSensorsCoreAsync(ReadProfile(), token);
             ShowStatus("传感器已刷新 / Sensors refreshed", InfoBarSeverity.Success);
         });
+    }
+
+    private async Task ConnectAndStartPollingAsync()
+    {
+        await RunUiCommandAsync("Connecting to iDRAC and starting polling", async token =>
+        {
+            var profile = ReadProfile();
+            await _ipmi.TestConnectionAsync(profile, token);
+            StartSensorPolling();
+            await RefreshSensorsCoreAsync(profile, token);
+            ShowStatus("已连接并开始自动轮询 / Connected and polling", InfoBarSeverity.Success);
+        });
+    }
+
+    private void StartSensorPolling()
+    {
+        var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
+        _sensorPollingTimer.Interval = TimeSpan.FromSeconds(intervalSeconds);
+        _sensorPollingTimer.Start();
+        ConnectionStateText.Text = $"已连接，{intervalSeconds}s 轮询 / Connected";
+        AddLog("Info", $"Sensor polling started at {intervalSeconds}s interval.");
+    }
+
+    private void StopSensorPolling(string reason)
+    {
+        _sensorPollingTimer.Stop();
+        ConnectionStateText.Text = "已断开 / Disconnected";
+        AddLog("Warn", $"Sensor polling stopped: {reason}");
+    }
+
+    private async void OnSensorPollingTimerTick(object? sender, object e)
+    {
+        if (_sensorPollingTickRunning)
+        {
+            return;
+        }
+
+        _sensorPollingTickRunning = true;
+        if (!await _ipmiOperationLock.WaitAsync(0))
+        {
+            _sensorPollingTickRunning = false;
+            return;
+        }
+
+        try
+        {
+            await RefreshSensorsCoreAsync(ReadProfile(saveSettings: false), CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            StopSensorPolling(ex.Message);
+            ShowFailure(ex);
+        }
+        finally
+        {
+            _ipmiOperationLock.Release();
+            _sensorPollingTickRunning = false;
+        }
+    }
+
+    private async Task RefreshSensorsCoreAsync(IdracProfile profile, CancellationToken token)
+    {
+        var readings = await _ipmi.ReadSensorsAsync(profile, token);
+        ReplaceSensors(readings);
+        UpdateMetricSummaries();
+        LastPollText.Text = $"最后轮询 / Last poll {DateTime.Now:HH:mm:ss}";
+        ConnectionStateText.Text = $"已连接，{Math.Max(1, _settings.SensorRefreshSeconds)}s 轮询 · {DateTime.Now:HH:mm:ss}";
     }
 
     private async void OnSetAllFansClick(object sender, RoutedEventArgs e)
@@ -363,7 +456,7 @@ public sealed partial class MainPage : Page
         await Task.CompletedTask;
     }
 
-    private void OnSaveSettingsClick(object sender, RoutedEventArgs e)
+    private async void OnSaveSettingsClick(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -371,6 +464,11 @@ public sealed partial class MainPage : Page
             RebuildFanChannels();
             ShowStatus("设置已保存 / Settings saved", InfoBarSeverity.Success);
             AddLog("Info", "Settings saved.");
+
+            if (!string.IsNullOrWhiteSpace(PasswordBox.Password))
+            {
+                await ConnectAndStartPollingAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -425,15 +523,25 @@ public sealed partial class MainPage : Page
 
     private async Task RunUiCommandAsync(string description, Func<CancellationToken, Task> command)
     {
+        var lockTaken = false;
         try
         {
             AddLog("Info", description);
             using var cancellation = new CancellationTokenSource();
+            await _ipmiOperationLock.WaitAsync(cancellation.Token);
+            lockTaken = true;
             await command(cancellation.Token);
         }
         catch (Exception ex)
         {
             ShowFailure(ex);
+        }
+        finally
+        {
+            if (lockTaken)
+            {
+                _ipmiOperationLock.Release();
+            }
         }
     }
 
@@ -448,8 +556,23 @@ public sealed partial class MainPage : Page
 
     private void UpdateMetricSummaries()
     {
-        var cpuTemp = IpmiCommandService.FindCpuTemperatureCelsius(Sensors);
+        var temperatureReadings = Sensors
+            .Where(IsTemperatureSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .ToList();
+
+        var cpuTemp = IpmiCommandService.FindCpuTemperatureCelsius(temperatureReadings);
         CpuTemperatureText.Text = $"{cpuTemp:0.0} °C";
+        ReplaceTiles(
+            TemperatureTiles,
+            temperatureReadings.Select(sensor => new DashboardTileViewModel
+            {
+                Title = BuildSensorTitle(sensor),
+                Value = sensor.NumericValue!.Value.ToString("0.#", CultureInfo.InvariantCulture),
+                Unit = "°C",
+                Subtitle = BuildSensorSubtitle(sensor),
+                Status = sensor.Status,
+            }));
 
         var fanReadings = Sensors
             .Where(sensor => sensor.Key.StartsWith("Fan", StringComparison.OrdinalIgnoreCase) &&
@@ -461,6 +584,84 @@ public sealed partial class MainPage : Page
         FanRpmSummaryText.Text = fanReadings.Count == 0
             ? "未读取到风扇 RPM"
             : $"{fanReadings.Min(f => f.NumericValue):0} - {fanReadings.Max(f => f.NumericValue):0} RPM";
+        ReplaceTiles(
+            FanTiles,
+            fanReadings.Select(sensor => new DashboardTileViewModel
+            {
+                Title = sensor.Key,
+                Value = sensor.NumericValue!.Value.ToString("0", CultureInfo.InvariantCulture),
+                Unit = "RPM",
+                Subtitle = BuildSensorSubtitle(sensor),
+                Status = sensor.Status,
+            }));
+
+        var powerAndHealth = Sensors
+            .Where(sensor => IsPowerSensor(sensor) || IsHealthSensor(sensor))
+            .Take(14)
+            .Select(sensor => new DashboardTileViewModel
+            {
+                Title = BuildSensorTitle(sensor),
+                Value = string.IsNullOrWhiteSpace(sensor.Value) ? "--" : sensor.Value,
+                Unit = sensor.Unit,
+                Subtitle = BuildSensorSubtitle(sensor),
+                Status = sensor.Status,
+            });
+        ReplaceTiles(PowerTiles, powerAndHealth);
+    }
+
+    private static void ReplaceTiles(
+        ObservableCollection<DashboardTileViewModel> target,
+        System.Collections.Generic.IEnumerable<DashboardTileViewModel> tiles)
+    {
+        target.Clear();
+        foreach (var tile in tiles)
+        {
+            target.Add(tile);
+        }
+    }
+
+    private static bool IsTemperatureSensor(SensorReading sensor)
+    {
+        return sensor.Unit.Contains("degrees C", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Temp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPowerSensor(SensorReading sensor)
+    {
+        return sensor.Unit.Contains("Watts", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Unit.Contains("Volts", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Unit.Contains("Amps", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Usage", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Current", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Voltage", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Pwr", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsHealthSensor(SensorReading sensor)
+    {
+        return sensor.Key.Contains("Redundancy", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Battery", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Intrusion", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Power Optimized", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildSensorTitle(SensorReading sensor)
+    {
+        if (string.IsNullOrWhiteSpace(sensor.Entity) ||
+            !sensor.Key.Equals("Temp", StringComparison.OrdinalIgnoreCase))
+        {
+            return sensor.Key;
+        }
+
+        return $"{sensor.Key} {sensor.Entity}";
+    }
+
+    private static string BuildSensorSubtitle(SensorReading sensor)
+    {
+        var parts = new[] { sensor.SensorId, sensor.Entity }
+            .Where(part => !string.IsNullOrWhiteSpace(part));
+        var subtitle = string.Join(" · ", parts);
+        return string.IsNullOrWhiteSpace(subtitle) ? "SDR" : subtitle;
     }
 
     private void RebuildFanChannels()
