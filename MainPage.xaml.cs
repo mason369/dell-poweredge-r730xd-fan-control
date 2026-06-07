@@ -63,6 +63,7 @@ public sealed partial class MainPage : Page
 
     private void OnPageLoaded(object sender, RoutedEventArgs e)
     {
+        var shouldShowSettingsOnStart = !_settingsStore.SettingsFileExists;
         _settings = _settingsStore.Load();
         LocalizationService.SetLanguage(_settings.Language);
         LoadSettingsToControls(_settings);
@@ -70,7 +71,13 @@ public sealed partial class MainPage : Page
         ApplyLocalization();
         RebuildFanChannels();
         AddLog(T("Log.Info"), T("Status.Loaded"));
-        if (!string.IsNullOrWhiteSpace(PasswordBox.Password))
+        shouldShowSettingsOnStart = shouldShowSettingsOnStart || string.IsNullOrWhiteSpace(PasswordBox.Password);
+        if (shouldShowSettingsOnStart)
+        {
+            SelectView("Settings");
+            ShowStatus(T("Status.FirstRunSettingsRequired"), InfoBarSeverity.Informational);
+        }
+        else
         {
             _ = ConnectAndStartPollingAsync();
         }
@@ -524,6 +531,17 @@ public sealed partial class MainPage : Page
         _syncingAllFanControls = false;
     }
 
+    private void OnIndividualFanSwitchToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loadingSettings)
+        {
+            return;
+        }
+
+        _settings.EnableIndividualFanTargets = IndividualFanSwitch.IsOn;
+        UpdateIndividualFanWarning();
+    }
+
     private void OnNavigationSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
@@ -572,7 +590,7 @@ public sealed partial class MainPage : Page
         var lockTaken = false;
         try
         {
-            AddLog("Info", description);
+            AddLog(T("Log.Info"), description);
             using var cancellation = new CancellationTokenSource();
             await _ipmiOperationLock.WaitAsync(cancellation.Token);
             lockTaken = true;
@@ -831,6 +849,7 @@ public sealed partial class MainPage : Page
         SetModeSummary(_modeSummaryKey, _modeSummaryArgs);
         SetAutoPolicySummary(_autoPolicyRunning);
         UpdatePollingStatusTexts();
+        UpdateIndividualFanWarning();
 
         foreach (var fanChannel in FanChannels)
         {
@@ -872,6 +891,21 @@ public sealed partial class MainPage : Page
         }
 
         ConnectionStateText.Text = _hasDisconnected ? T("State.Disconnected") : T("State.NotConnected");
+    }
+
+    private void UpdateIndividualFanWarning()
+    {
+        if (IndividualFanInfoBar is null)
+        {
+            return;
+        }
+
+        IndividualFanInfoBar.Severity = _settings.EnableIndividualFanTargets
+            ? InfoBarSeverity.Informational
+            : InfoBarSeverity.Warning;
+        IndividualFanInfoBar.Message = T(_settings.EnableIndividualFanTargets
+            ? "Control.IndividualEnabledWarning"
+            : "Control.IndividualDisabledWarning");
     }
 
     private static string T(string key)

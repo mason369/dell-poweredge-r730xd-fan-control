@@ -54,7 +54,7 @@ cd C:\DellR730xdFanControlCenter
 dotnet run --project .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x64
 ```
 
-On first run, Settings shows default host `192.168.1.73`, username `root`, the bundled `ipmitool.exe` path, default restore speed 10%, and 1 second polling. Enter the password locally before sending commands. If the password is saved with DPAPI, the app reconnects and starts polling on launch.
+On first run, or when no password is saved, the app opens Settings automatically. Settings shows default host `192.168.1.73`, username `root`, the bundled `ipmitool.exe` path, default restore speed 10%, and 1 second polling. Enter the account and password, then save to connect. If the password is saved with DPAPI, the app reconnects and starts polling on later launches.
 
 ## IPMI Commands
 

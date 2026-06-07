@@ -54,7 +54,7 @@ cd C:\DellR730xdFanControlCenter
 dotnet run --project .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x64
 ```
 
-首次运行可在设置页看到默认主机 `192.168.1.73`、用户名 `root`、内置 `ipmitool.exe` 路径、默认还原速度 10% 和 1 秒轮询。发送命令前请在本机输入密码。若使用 DPAPI 保存密码，应用启动后会自动连接并开始轮询。
+首次运行或未保存密码时会自动打开设置页。设置页会显示默认主机 `192.168.1.73`、用户名 `root`、内置 `ipmitool.exe` 路径、默认还原速度 10% 和 1 秒轮询。填写账号密码并保存后即可连接；若使用 DPAPI 保存密码，应用后续启动会自动连接并开始轮询。
 
 ## IPMI 命令
 

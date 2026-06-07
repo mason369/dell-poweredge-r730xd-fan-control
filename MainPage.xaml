@@ -551,10 +551,10 @@
                                     Style="{StaticResource SectionTitleStyle}"
                                     Text="单风扇控制" />
                                 <InfoBar
-                                    local:Localization.Key="Control.IndividualWarning"
+                                    x:Name="IndividualFanInfoBar"
                                     IsOpen="True"
                                     Severity="Warning"
-                                    Message="单风扇 raw target 默认关闭。本机 R730XD/iDRAC 2.82 实测 0x00 target 会让全部风扇高转，启用前请确认你的固件映射。" />
+                                    Message="单风扇 raw target 当前未启用。需要使用单风扇控制时，请先在设置中开启并保存。" />
                                 <TextBlock
                                     local:Localization.Key="Control.IndividualHelp"
                                     Style="{StaticResource MutedTextStyle}"
@@ -778,7 +778,8 @@
                                 <ToggleSwitch
                                     x:Name="IndividualFanSwitch"
                                     local:Localization.Key="Settings.EnableIndividualFanTargets"
-                                    Header="启用单风扇 raw target" />
+                                    Header="启用单风扇 raw target"
+                                    Toggled="OnIndividualFanSwitchToggled" />
                                 <NumberBox
                                     x:Name="FanCountBox"
                                     local:Localization.Key="Settings.FanCount"
