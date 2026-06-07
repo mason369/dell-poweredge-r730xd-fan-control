@@ -25,6 +25,9 @@ public sealed partial class MainPage : Page
     private bool _autoPolicyRunning;
     private bool _hasDisconnected;
     private DateTime? _lastPollTime;
+    private TimeSpan? _lastPollDuration;
+    private DateTimeOffset _lastPollingWarningAt = DateTimeOffset.MinValue;
+    private bool _pollingWasDegraded;
     private string _modeSummaryKey = "Mode.Idle";
     private object[] _modeSummaryArgs = Array.Empty<object>();
 
@@ -196,6 +199,11 @@ public sealed partial class MainPage : Page
             CaptureSettingsFromControls();
         }
 
+        return BuildProfileFromSettings();
+    }
+
+    private IdracProfile BuildProfileFromSettings()
+    {
         return new IdracProfile
         {
             Host = _settings.Host,
@@ -231,9 +239,10 @@ public sealed partial class MainPage : Page
         {
             var profile = ReadProfile();
             await _ipmi.TestConnectionAsync(profile, token);
+            var elapsed = await RefreshSensorsCoreAsync(profile, token);
             StartSensorPolling();
-            await RefreshSensorsCoreAsync(profile, token);
             ShowStatus(T("Status.ConnectedPolling"), InfoBarSeverity.Success);
+            CheckSensorPollingLatency(elapsed);
         });
     }
 
@@ -243,6 +252,8 @@ public sealed partial class MainPage : Page
         _sensorPollingTimer.Interval = TimeSpan.FromSeconds(intervalSeconds);
         _sensorPollingTimer.Start();
         _hasDisconnected = false;
+        _pollingWasDegraded = false;
+        _lastPollingWarningAt = DateTimeOffset.MinValue;
         UpdatePollingStatusTexts();
         AddLog(T("Log.Info"), F("Status.PollingStarted", intervalSeconds));
     }
@@ -257,8 +268,10 @@ public sealed partial class MainPage : Page
 
     private async void OnSensorPollingTimerTick(object? sender, object e)
     {
+        var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
         if (_sensorPollingTickRunning)
         {
+            ReportPollingWarning(F("Status.PollingSkippedPreviousRunning", intervalSeconds));
             return;
         }
 
@@ -266,12 +279,14 @@ public sealed partial class MainPage : Page
         if (!await _ipmiOperationLock.WaitAsync(0))
         {
             _sensorPollingTickRunning = false;
+            ReportPollingWarning(F("Status.PollingSkippedIpmiBusy", intervalSeconds));
             return;
         }
 
         try
         {
-            await RefreshSensorsCoreAsync(ReadProfile(saveSettings: false), CancellationToken.None);
+            var elapsed = await RefreshSensorsCoreAsync(BuildProfileFromSettings(), CancellationToken.None);
+            CheckSensorPollingLatency(elapsed);
         }
         catch (Exception ex)
         {
@@ -285,13 +300,17 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private async Task RefreshSensorsCoreAsync(IdracProfile profile, CancellationToken token)
+    private async Task<TimeSpan> RefreshSensorsCoreAsync(IdracProfile profile, CancellationToken token)
     {
+        var stopwatch = Stopwatch.StartNew();
         var readings = await _ipmi.ReadSensorsAsync(profile, token);
+        stopwatch.Stop();
         ReplaceSensors(readings);
         UpdateMetricSummaries();
         _lastPollTime = DateTime.Now;
+        _lastPollDuration = stopwatch.Elapsed;
         UpdatePollingStatusTexts();
+        return stopwatch.Elapsed;
     }
 
     private async void OnSetAllFansClick(object sender, RoutedEventArgs e)
@@ -874,7 +893,10 @@ public sealed partial class MainPage : Page
     {
         if (_lastPollTime.HasValue)
         {
-            LastPollText.Text = F("Overview.LastPoll", _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
+            var lastPollTime = _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            LastPollText.Text = _lastPollDuration.HasValue
+                ? F("Overview.LastPollWithDuration", lastPollTime, _lastPollDuration.Value.TotalSeconds)
+                : F("Overview.LastPoll", lastPollTime);
         }
         else
         {
@@ -891,6 +913,39 @@ public sealed partial class MainPage : Page
         }
 
         ConnectionStateText.Text = _hasDisconnected ? T("State.Disconnected") : T("State.NotConnected");
+    }
+
+    private void CheckSensorPollingLatency(TimeSpan elapsed)
+    {
+        var interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
+        if (elapsed > interval)
+        {
+            ReportPollingWarning(F("Status.PollingLatencyExceeded", elapsed.TotalSeconds, interval.TotalSeconds));
+            return;
+        }
+
+        if (_pollingWasDegraded)
+        {
+            _pollingWasDegraded = false;
+            var message = F("Status.PollingRecovered", elapsed.TotalSeconds);
+            ShowStatus(message, InfoBarSeverity.Success);
+            AddLog(T("Log.Info"), message);
+        }
+    }
+
+    private void ReportPollingWarning(string message)
+    {
+        _pollingWasDegraded = true;
+        var now = DateTimeOffset.Now;
+        var throttleSeconds = Math.Max(5, Math.Max(1, _settings.SensorRefreshSeconds) * 2);
+        if ((now - _lastPollingWarningAt).TotalSeconds < throttleSeconds)
+        {
+            return;
+        }
+
+        _lastPollingWarningAt = now;
+        ShowStatus(message, InfoBarSeverity.Warning);
+        AddLog(T("Log.Warn"), message);
     }
 
     private void UpdateIndividualFanWarning()

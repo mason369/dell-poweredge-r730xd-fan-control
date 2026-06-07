@@ -25,7 +25,7 @@ raw 0x30 0x30 0x01 0x01
 
 ## Polling
 
-After connection succeeds, the app starts persistent sensor polling. The minimum supported interval is 1 second. If one SDR read is still running when the next tick arrives, the next tick is skipped instead of launching overlapping IPMI commands.
+After connection succeeds, the app starts persistent sensor polling. The minimum supported interval is 1 second. The overview page shows the last polling time and the read duration. If one SDR read is still running, or another IPMI command is executing, the next tick is skipped with a visible warning instead of launching overlapping IPMI commands. If a read takes longer than the configured polling interval, the app warns that BMC network or iDRAC response latency is fluctuating.
 
 ## Local Default Restore
 
