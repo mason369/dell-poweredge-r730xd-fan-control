@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 
@@ -26,6 +27,7 @@ public sealed class TrayIconManager : IDisposable
     private const uint TpmRightButton = 0x0002;
     private const uint MfString = 0x0000;
     private const uint MfSeparator = 0x0800;
+    private const uint MfPopup = 0x0010;
     private const int RestoreCommand = 100;
     private const int Fans20Command = 120;
     private const int Fans35Command = 135;
@@ -33,10 +35,12 @@ public sealed class TrayIconManager : IDisposable
     private const int RestoreDefaultCommand = 200;
     private const int SettingsCommand = 300;
     private const int ExitCommand = 900;
+    private const int PresetCommandBase = 4000;
 
     private readonly IntPtr _windowHandle;
     private readonly SubclassProc _subclassProc;
     private readonly IntPtr _iconHandle;
+    private readonly Dictionary<int, FanPreset> _presetCommands = [];
     private bool _disposed;
 
     public TrayIconManager(IntPtr windowHandle, string iconPath)
@@ -69,6 +73,8 @@ public sealed class TrayIconManager : IDisposable
     public event EventHandler? RestoreRequested;
 
     public event EventHandler<int>? FanPercentRequested;
+
+    public event EventHandler<FanPreset>? PresetRequested;
 
     public event EventHandler? RestoreDefaultRequested;
 
@@ -161,15 +167,12 @@ public sealed class TrayIconManager : IDisposable
 
         try
         {
-            AppendMenu(menu, MfString, RestoreCommand, LocalizationService.T("Tray.Restore"));
-            AppendMenu(menu, MfSeparator, 0, string.Empty);
-            AppendMenu(menu, MfString, Fans20Command, LocalizationService.T("Tray.AllFans20"));
-            AppendMenu(menu, MfString, Fans35Command, LocalizationService.T("Tray.AllFans35"));
-            AppendMenu(menu, MfString, Fans50Command, LocalizationService.T("Tray.AllFans50"));
-            AppendMenu(menu, MfString, RestoreDefaultCommand, LocalizationService.T("Tray.RestoreDefault"));
-            AppendMenu(menu, MfSeparator, 0, string.Empty);
-            AppendMenu(menu, MfString, SettingsCommand, LocalizationService.T("Tray.Settings"));
-            AppendMenu(menu, MfString, ExitCommand, LocalizationService.T("Tray.Exit"));
+            AppendCommand(menu, RestoreCommand, LocalizationService.T("Tray.Restore"));
+            AppendSeparator(menu);
+            AppendPopup(menu, BuildFanControlMenu(), LocalizationService.T("Tray.FanControlGroup"));
+            AppendSeparator(menu);
+            AppendCommand(menu, SettingsCommand, LocalizationService.T("Tray.Settings"));
+            AppendCommand(menu, ExitCommand, LocalizationService.T("Tray.Exit"));
 
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TpmReturNcmd | TpmRightButton, point.X, point.Y, _windowHandle, IntPtr.Zero);
@@ -182,8 +185,70 @@ public sealed class TrayIconManager : IDisposable
         }
     }
 
+    private IntPtr BuildFanControlMenu()
+    {
+        var fanControlMenu = CreatePopupMenu();
+        if (fanControlMenu == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Unable to create fan control tray submenu.");
+        }
+
+        AppendPopup(fanControlMenu, BuildPresetMenu(), LocalizationService.T("Tray.Presets"));
+        AppendPopup(fanControlMenu, BuildAllFanSpeedMenu(), LocalizationService.T("Tray.AllFanSpeeds"));
+        AppendCommand(fanControlMenu, RestoreDefaultCommand, LocalizationService.T("Tray.RestoreDefault"));
+        return fanControlMenu;
+    }
+
+    private IntPtr BuildPresetMenu()
+    {
+        var presetMenu = CreatePopupMenu();
+        if (presetMenu == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Unable to create preset tray submenu.");
+        }
+
+        _presetCommands.Clear();
+        var presets = new SettingsStore().Load().Presets;
+        for (var index = 0; index < presets.Count; index++)
+        {
+            var preset = presets[index];
+            var commandId = PresetCommandBase + index;
+            _presetCommands[commandId] = preset.Clone();
+            AppendCommand(presetMenu, commandId, BuildPresetMenuLabel(preset));
+        }
+
+        return presetMenu;
+    }
+
+    private static IntPtr BuildAllFanSpeedMenu()
+    {
+        var speedMenu = CreatePopupMenu();
+        if (speedMenu == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("Unable to create all-fan speed tray submenu.");
+        }
+
+        AppendCommand(speedMenu, Fans20Command, LocalizationService.T("Tray.AllFans20"));
+        AppendCommand(speedMenu, Fans35Command, LocalizationService.T("Tray.AllFans35"));
+        AppendCommand(speedMenu, Fans50Command, LocalizationService.T("Tray.AllFans50"));
+        return speedMenu;
+    }
+
+    private static string BuildPresetMenuLabel(FanPreset preset)
+    {
+        return preset.IsManual
+            ? $"{preset.DisplayName} - {preset.Percent:0}%"
+            : preset.DisplayName;
+    }
+
     private void HandleCommand(int command)
     {
+        if (_presetCommands.TryGetValue(command, out var preset))
+        {
+            PresetRequested?.Invoke(this, preset);
+            return;
+        }
+
         switch (command)
         {
             case RestoreCommand:
@@ -210,6 +275,31 @@ public sealed class TrayIconManager : IDisposable
         }
     }
 
+    private static void AppendCommand(IntPtr menu, int command, string text)
+    {
+        if (!AppendMenu(menu, MfString, new UIntPtr((uint)command), text))
+        {
+            throw new InvalidOperationException($"Unable to append tray menu command: {text}");
+        }
+    }
+
+    private static void AppendSeparator(IntPtr menu)
+    {
+        if (!AppendMenu(menu, MfSeparator, UIntPtr.Zero, string.Empty))
+        {
+            throw new InvalidOperationException("Unable to append tray menu separator.");
+        }
+    }
+
+    private static void AppendPopup(IntPtr menu, IntPtr submenu, string text)
+    {
+        var submenuHandle = new UIntPtr(unchecked((ulong)submenu.ToInt64()));
+        if (!AppendMenu(menu, MfPopup, submenuHandle, text))
+        {
+            throw new InvalidOperationException($"Unable to append tray menu group: {text}");
+        }
+    }
+
     [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool ShellNotifyIcon(uint message, ref NotifyIconData data);
 
@@ -232,7 +322,7 @@ public sealed class TrayIconManager : IDisposable
     private static extern IntPtr CreatePopupMenu();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool AppendMenu(IntPtr menu, uint flags, int idNewItem, string newItem);
+    private static extern bool AppendMenu(IntPtr menu, uint flags, UIntPtr idNewItem, string newItem);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyMenu(IntPtr menu);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -55,6 +56,78 @@ public sealed class SettingsStore
         {
             settings.Language = LocalizationService.DefaultLanguage;
         }
+
+        settings.Presets = NormalizePresets(settings.Presets);
+    }
+
+    private static List<FanPreset> NormalizePresets(List<FanPreset>? presets)
+    {
+        var normalized = FanPreset.CreateDefaultPresets();
+        if (presets is null || presets.Count == 0)
+        {
+            return normalized;
+        }
+
+        foreach (var preset in presets)
+        {
+            if (string.IsNullOrWhiteSpace(preset.Id))
+            {
+                preset.Id = Guid.NewGuid().ToString("N");
+            }
+
+            if (string.IsNullOrWhiteSpace(preset.Kind))
+            {
+                throw new InvalidOperationException("Fan preset kind is empty.");
+            }
+
+            if (!preset.Kind.Equals(FanPreset.ManualKind, StringComparison.OrdinalIgnoreCase) &&
+                !preset.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase) &&
+                !preset.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Unsupported fan preset kind: {preset.Kind}");
+            }
+
+            if (preset.IsManual)
+            {
+                preset.Kind = FanPreset.ManualKind;
+                AppSettings.ValidatePercent((int)Math.Round(preset.Percent, MidpointRounding.AwayFromZero), nameof(preset.Percent));
+            }
+            else if (preset.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
+            {
+                preset.Kind = FanPreset.RestoreManualKind;
+                preset.Percent = AppSettings.LocalDefaultManualFanPercent;
+            }
+            else if (preset.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
+            {
+                preset.Kind = FanPreset.DellAutoKind;
+                preset.Percent = 0;
+            }
+
+            if (string.IsNullOrWhiteSpace(preset.NameKey) && string.IsNullOrWhiteSpace(preset.Name))
+            {
+                throw new InvalidOperationException("Fan preset name is required.");
+            }
+
+            preset.Name = preset.Name.Trim();
+
+            var existing = normalized.FindIndex(item => item.Id.Equals(preset.Id, StringComparison.OrdinalIgnoreCase));
+            if (existing >= 0)
+            {
+                var replacement = preset.Clone();
+                replacement.IsBuiltIn = normalized[existing].IsBuiltIn;
+                replacement.NameKey = string.IsNullOrWhiteSpace(normalized[existing].NameKey)
+                    ? replacement.NameKey
+                    : normalized[existing].NameKey;
+                replacement.Kind = normalized[existing].Kind;
+                normalized[existing] = replacement;
+            }
+            else
+            {
+                normalized.Add(preset.Clone());
+            }
+        }
+
+        return normalized;
     }
 
     public string ProtectPassword(string password)

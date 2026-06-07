@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
@@ -28,6 +29,7 @@ public sealed partial class MainPage : Page
     private TimeSpan? _lastPollDuration;
     private DateTimeOffset _lastPollingWarningAt = DateTimeOffset.MinValue;
     private bool _pollingWasDegraded;
+    private string? _activePresetId;
     private string _modeSummaryKey = "Mode.Idle";
     private object[] _modeSummaryArgs = Array.Empty<object>();
 
@@ -38,6 +40,7 @@ public sealed partial class MainPage : Page
         Sensors = [];
         Logs = [];
         FanChannels = [];
+        Presets = [];
         TemperatureTiles = [];
         FanTiles = [];
         PowerTiles = [];
@@ -53,6 +56,8 @@ public sealed partial class MainPage : Page
     public ObservableCollection<LogEntry> Logs { get; }
 
     public ObservableCollection<FanChannelViewModel> FanChannels { get; }
+
+    public ObservableCollection<FanPreset> Presets { get; }
 
     public ObservableCollection<DashboardTileViewModel> TemperatureTiles { get; }
 
@@ -71,8 +76,9 @@ public sealed partial class MainPage : Page
         LocalizationService.SetLanguage(_settings.Language);
         LoadSettingsToControls(_settings);
         ApplyTheme(_settings.Theme);
-        ApplyLocalization();
         RebuildFanChannels();
+        RebuildPresets(_settings.Presets);
+        ApplyLocalization();
         AddLog(T("Log.Info"), T("Status.Loaded"));
         shouldShowSettingsOnStart = shouldShowSettingsOnStart || string.IsNullOrWhiteSpace(PasswordBox.Password);
         if (shouldShowSettingsOnStart)
@@ -103,6 +109,11 @@ public sealed partial class MainPage : Page
         return RestoreDefaultManualAsync();
     }
 
+    public Task ApplyPresetFromTrayAsync(FanPreset preset)
+    {
+        return ApplyPresetAsync(preset);
+    }
+
     private void LoadSettingsToControls(AppSettings settings)
     {
         _loadingSettings = true;
@@ -125,6 +136,7 @@ public sealed partial class MainPage : Page
             AutoMaxFanBox.Value = settings.AutoMaximumFanPercent;
             AllFanSlider.Value = settings.DefaultAllFanPercent;
             AllFanPercentBox.Value = settings.DefaultAllFanPercent;
+            NewPresetPercentBox.Value = AppSettings.LocalDefaultManualFanPercent;
             CurrentTargetText.Text = settings.Host;
 
             ThemeComboBox.SelectedIndex = settings.Theme switch
@@ -164,6 +176,7 @@ public sealed partial class MainPage : Page
         _settings.AutoMinimumFanPercent = ReadInt(AutoMinFanBox, T("Field.AutoMinimumFanPercent"));
         _settings.AutoMaximumFanPercent = ReadInt(AutoMaxFanBox, T("Field.AutoMaximumFanPercent"));
         _settings.Theme = GetSelectedTheme();
+        _settings.Presets = Presets.Select(ValidateAndClonePreset).ToList();
 
         if (_settings.AutoMinimumFanPercent > _settings.AutoMaximumFanPercent)
         {
@@ -324,6 +337,7 @@ public sealed partial class MainPage : Page
         {
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
             SetModeSummary("Mode.Manual");
+            MarkActivePreset(null);
             ShowStatus(F("Status.AllFansSet", percent), InfoBarSeverity.Success);
         });
     }
@@ -349,15 +363,98 @@ public sealed partial class MainPage : Page
         {
             await _ipmi.SetSingleFanManualSpeedAsync(ReadProfile(), fanIndex, percent, token);
             SetModeSummary("Mode.Manual");
+            MarkActivePreset(null);
             ShowStatus(F("Status.FanSet", fanIndex, percent), InfoBarSeverity.Success);
         });
     }
 
-    private async void OnPresetClick(object sender, RoutedEventArgs e)
+    private async void OnApplyPresetClick(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string tag } && int.TryParse(tag, NumberStyles.Integer, CultureInfo.InvariantCulture, out var percent))
+        try
         {
-            await ApplyQuickFanSpeedAsync(percent);
+            await ApplyPresetAsync(ReadPresetFromSender(sender));
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
+    private void OnSavePresetClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var preset = ReadPresetFromSender(sender);
+            _settings.Presets = Presets.Select(ValidateAndClonePreset).ToList();
+            _settingsStore.Save(_settings);
+            RefreshPresetRows();
+            ShowStatus(F("Status.PresetSaved", preset.DisplayName), InfoBarSeverity.Success);
+            AddLog(T("Log.Info"), F("Status.PresetSaved", preset.DisplayName));
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
+    private void OnDeletePresetClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var preset = ReadPresetFromSender(sender);
+            if (!preset.CanDelete)
+            {
+                throw new InvalidOperationException(T("Validation.CannotDeleteBuiltInPreset"));
+            }
+
+            Presets.Remove(preset);
+            if (_activePresetId?.Equals(preset.Id, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _activePresetId = null;
+            }
+
+            _settings.Presets = Presets.Select(ValidateAndClonePreset).ToList();
+            _settingsStore.Save(_settings);
+            RefreshPresetRows();
+            ShowStatus(F("Status.PresetDeleted", preset.DisplayName), InfoBarSeverity.Success);
+            AddLog(T("Log.Info"), F("Status.PresetDeleted", preset.DisplayName));
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
+    private void OnAddPresetClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var name = NewPresetNameBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidOperationException(T("Validation.PresetNameRequired"));
+            }
+
+            var percent = CheckedPercent(NewPresetPercentBox.Value, T("Field.AllFanPercent"));
+            var preset = new FanPreset
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Kind = FanPreset.ManualKind,
+                Name = name,
+                Percent = percent,
+            };
+            Presets.Add(preset);
+            _settings.Presets = Presets.Select(ValidateAndClonePreset).ToList();
+            _settingsStore.Save(_settings);
+            NewPresetNameBox.Text = string.Empty;
+            NewPresetPercentBox.Value = AppSettings.LocalDefaultManualFanPercent;
+            RefreshPresetRows();
+            ShowStatus(F("Status.PresetAdded", preset.DisplayName), InfoBarSeverity.Success);
+            AddLog(T("Log.Info"), F("Status.PresetAdded", preset.DisplayName));
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
         }
     }
 
@@ -371,7 +468,41 @@ public sealed partial class MainPage : Page
         await RestoreDefaultManualAsync();
     }
 
-    private async Task RestoreDefaultManualAsync()
+    private Task ApplyPresetAsync(FanPreset preset)
+    {
+        if (string.Equals(preset.Kind, FanPreset.ManualKind, StringComparison.OrdinalIgnoreCase))
+        {
+            return ApplyManualPresetAsync(preset);
+        }
+
+        if (string.Equals(preset.Kind, FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
+        {
+            return RestoreDefaultManualAsync(preset.Id);
+        }
+
+        if (string.Equals(preset.Kind, FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
+        {
+            return ResetDellAutomaticModeAsync(preset.Id);
+        }
+
+        throw new InvalidOperationException($"Unsupported fan preset kind: {preset.Kind}");
+    }
+
+    private async Task ApplyManualPresetAsync(FanPreset preset)
+    {
+        var percent = CheckedPercent(preset.Percent, T("Field.AllFanPercent"));
+        await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
+        {
+            await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
+            AllFanSlider.Value = percent;
+            AllFanPercentBox.Value = percent;
+            SetModeSummary("Mode.PresetManual", preset.DisplayName, percent);
+            MarkActivePreset(preset.Id);
+            ShowStatus(F("Status.PresetApplied", preset.DisplayName), InfoBarSeverity.Success);
+        });
+    }
+
+    private async Task RestoreDefaultManualAsync(string? activePresetId = "restore-manual")
     {
         await RunUiCommandAsync(F("Status.RestoringDefault", AppSettings.LocalDefaultManualFanPercent), async token =>
         {
@@ -381,16 +512,18 @@ public sealed partial class MainPage : Page
             AllFanPercentBox.Value = percent;
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
             SetModeSummary("Mode.ManualPercent", percent);
+            MarkActivePreset(activePresetId);
             ShowStatus(F("Status.RestoredDefault", percent), InfoBarSeverity.Success);
         });
     }
 
-    private async Task ResetDellAutomaticModeAsync()
+    private async Task ResetDellAutomaticModeAsync(string? activePresetId = "dell-auto")
     {
         await RunUiCommandAsync(T("Status.ResettingDellAuto"), async token =>
         {
             await _ipmi.SetDellAutomaticModeAsync(ReadProfile(), token);
             SetModeSummary("Mode.DellAuto");
+            MarkActivePreset(activePresetId);
             ShowStatus(T("Status.DellAutoRestored"), InfoBarSeverity.Success);
         });
     }
@@ -511,6 +644,7 @@ public sealed partial class MainPage : Page
         {
             PersistSettingsFromControls();
             RebuildFanChannels();
+            RebuildPresets(_settings.Presets);
             ApplyLocalization();
             ShowStatus(T("Status.SettingsSaved"), InfoBarSeverity.Success);
             AddLog(T("Log.Info"), T("Status.SettingsSaved"));
@@ -758,6 +892,76 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void RebuildPresets(IEnumerable<FanPreset> presets)
+    {
+        Presets.Clear();
+        foreach (var preset in presets)
+        {
+            var clone = preset.Clone();
+            clone.SetActive(_activePresetId?.Equals(clone.Id, StringComparison.OrdinalIgnoreCase) == true);
+            Presets.Add(clone);
+        }
+    }
+
+    private void RefreshPresetRows()
+    {
+        RebuildPresets(Presets.Select(preset => preset.Clone()).ToList());
+    }
+
+    private void MarkActivePreset(string? presetId)
+    {
+        _activePresetId = presetId;
+        RefreshPresetRows();
+    }
+
+    private FanPreset ReadPresetFromSender(object sender)
+    {
+        if (sender is not Button { Tag: string presetId })
+        {
+            throw new InvalidOperationException(T("Validation.PresetNotFound"));
+        }
+
+        return Presets.FirstOrDefault(preset => preset.Id.Equals(presetId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException(F("Validation.PresetNotFound", presetId));
+    }
+
+    private FanPreset ValidateAndClonePreset(FanPreset preset)
+    {
+        if (string.IsNullOrWhiteSpace(preset.Kind))
+        {
+            throw new InvalidOperationException("Fan preset kind is empty.");
+        }
+
+        var clone = preset.Clone();
+        if (clone.Kind.Equals(FanPreset.ManualKind, StringComparison.OrdinalIgnoreCase))
+        {
+            clone.Kind = FanPreset.ManualKind;
+            clone.Percent = CheckedPercent(clone.Percent, T("Field.AllFanPercent"));
+        }
+        else if (clone.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
+        {
+            clone.Kind = FanPreset.RestoreManualKind;
+            clone.Percent = AppSettings.LocalDefaultManualFanPercent;
+        }
+        else if (clone.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
+        {
+            clone.Kind = FanPreset.DellAutoKind;
+            clone.Percent = 0;
+        }
+        else
+        {
+            throw new InvalidOperationException($"Unsupported fan preset kind: {clone.Kind}");
+        }
+
+        if (string.IsNullOrWhiteSpace(clone.NameKey) && string.IsNullOrWhiteSpace(clone.Name))
+        {
+            throw new InvalidOperationException(T("Validation.PresetNameRequired"));
+        }
+
+        clone.Name = clone.Name.Trim();
+        return clone;
+    }
+
     private void OnCommandCompleted(object? sender, CommandTraceEventArgs e)
     {
         var level = e.Succeeded ? T("Log.Ok") : T("Log.Fail");
@@ -855,6 +1059,7 @@ public sealed partial class MainPage : Page
         Localization.Apply(this);
         App.CurrentWindow?.ApplyLocalization();
         CurrentTargetText.Text = _settings.Host;
+        NewPresetNameBox.PlaceholderText = T("Preset.NewNamePlaceholder");
         FanSummaryText.Text = F("Overview.FansCount", _settings.FanCount);
         if (Sensors.Count == 0)
         {
@@ -869,6 +1074,7 @@ public sealed partial class MainPage : Page
         SetAutoPolicySummary(_autoPolicyRunning);
         UpdatePollingStatusTexts();
         UpdateIndividualFanWarning();
+        RefreshPresetRows();
 
         foreach (var fanChannel in FanChannels)
         {
@@ -880,7 +1086,9 @@ public sealed partial class MainPage : Page
     {
         _modeSummaryKey = key;
         _modeSummaryArgs = args;
-        ModeSummaryText.Text = args.Length == 0 ? T(key) : F(key, args);
+        var modeText = args.Length == 0 ? T(key) : F(key, args);
+        ModeSummaryText.Text = modeText;
+        ControlCurrentModeText.Text = F("Control.CurrentMode", modeText);
     }
 
     private void SetAutoPolicySummary(bool running)

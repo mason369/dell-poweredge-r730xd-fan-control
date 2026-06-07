@@ -48,6 +48,7 @@ public sealed partial class MainWindow : Window
         var trayIcon = new TrayIconManager(_windowHandle, iconPath);
         trayIcon.RestoreRequested += (_, _) => RestoreFromTray();
         trayIcon.FanPercentRequested += (_, percent) => RunPageCommand(page => page.ApplyQuickFanSpeedAsync(percent));
+        trayIcon.PresetRequested += (_, preset) => RunPageCommand(page => page.ApplyPresetFromTrayAsync(preset));
         trayIcon.RestoreDefaultRequested += (_, _) => RunPageCommand(page => page.RestoreDefaultManualFromTrayAsync());
         trayIcon.SettingsRequested += (_, _) =>
         {

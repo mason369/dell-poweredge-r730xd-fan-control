@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace DellR730xdFanControlCenter;
 
@@ -43,6 +44,8 @@ public sealed class AppSettings
     public string Theme { get; set; } = "Default";
 
     public string Language { get; set; } = "zh-CN";
+
+    public List<FanPreset> Presets { get; set; } = FanPreset.CreateDefaultPresets();
 
     public static void ValidatePercent(int percent, string fieldName)
     {
