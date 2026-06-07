@@ -342,7 +342,7 @@ public sealed partial class MainPage : Page
         var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
         if (_sensorPollingTickRunning)
         {
-            ReportPollingWarning(F("Status.PollingSkippedPreviousRunning", intervalSeconds));
+            ReportPollingWarning(BuildPollingSkippedWarning("Status.PollingSkippedPreviousRunning", "Status.PollingSkippedPreviousRunningNoSample", intervalSeconds));
             return;
         }
 
@@ -350,7 +350,7 @@ public sealed partial class MainPage : Page
         if (!await _ipmiOperationLock.WaitAsync(0))
         {
             _sensorPollingTickRunning = false;
-            ReportPollingWarning(F("Status.PollingSkippedIpmiBusy", intervalSeconds));
+            ReportPollingWarning(BuildPollingSkippedWarning("Status.PollingSkippedIpmiBusy", "Status.PollingSkippedIpmiBusyNoSample", intervalSeconds));
             return;
         }
 
@@ -1593,7 +1593,8 @@ public sealed partial class MainPage : Page
         var interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
         if (elapsed > interval)
         {
-            ReportPollingWarning(F("Status.PollingLatencyExceeded", elapsed.TotalSeconds, interval.TotalSeconds));
+            var recommendedSeconds = GetRecommendedPollingSeconds(elapsed);
+            ReportPollingWarning(F("Status.PollingLatencyExceeded", elapsed.TotalSeconds, interval.TotalSeconds, recommendedSeconds));
             return;
         }
 
@@ -1604,6 +1605,22 @@ public sealed partial class MainPage : Page
             ShowStatus(message, InfoBarSeverity.Success);
             AddLog(T("Log.Info"), message);
         }
+    }
+
+    private string BuildPollingSkippedWarning(string sampledKey, string noSampleKey, int intervalSeconds)
+    {
+        if (_lastPollDuration is not { } lastDuration)
+        {
+            return F(noSampleKey, intervalSeconds);
+        }
+
+        var recommendedSeconds = GetRecommendedPollingSeconds(lastDuration);
+        return F(sampledKey, intervalSeconds, lastDuration.TotalSeconds, recommendedSeconds);
+    }
+
+    private static int GetRecommendedPollingSeconds(TimeSpan observedDuration)
+    {
+        return Math.Max(1, (int)Math.Ceiling(observedDuration.TotalSeconds + 1));
     }
 
     private void ReportPollingWarning(string message)
