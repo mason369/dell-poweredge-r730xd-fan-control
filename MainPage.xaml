@@ -153,6 +153,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -195,6 +196,38 @@
                         </Border>
 
                         <Border Grid.Row="1" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                            <StackPanel Spacing="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock
+                                            local:Localization.Key="Overview.VisualizationBoard"
+                                            Style="{StaticResource SectionTitleStyle}"
+                                            Text="交互式数据可视化" />
+                                        <TextBlock
+                                            local:Localization.Key="Overview.VisualizationHelp"
+                                            Style="{StaticResource MutedTextStyle}"
+                                            Text="总览趋势、单项硬件、按硬件类型和健康状态的交互图表。" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        x:Name="VisualizationStateText"
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource MutedTextStyle}"
+                                        Text="等待图表加载" />
+                                </Grid>
+                                <WebView2
+                                    x:Name="VisualizationWebView"
+                                    MinHeight="760"
+                                    Loaded="OnVisualizationWebViewLoaded"
+                                    NavigationCompleted="OnVisualizationNavigationCompleted" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="2" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -255,7 +288,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Grid Grid.Row="2" Grid.ColumnSpan="3" Margin="0,18,0,0" ColumnSpacing="18">
+                        <Grid Grid.Row="3" Grid.ColumnSpan="3" Margin="0,18,0,0" ColumnSpacing="18">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="3*" />
                                 <ColumnDefinition Width="2*" />
@@ -334,7 +367,7 @@
                             </Border>
                         </Grid>
 
-                        <Border Grid.Row="3" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                        <Border Grid.Row="4" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <Grid ColumnSpacing="18">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="2*" />
@@ -404,7 +437,7 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="4" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                        <Border Grid.Row="5" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <Grid ColumnSpacing="18">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />

@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -13,11 +16,18 @@ namespace DellR730xdFanControlCenter;
 
 public sealed partial class MainPage : Page
 {
+    private const int SensorHistoryLimit = 120;
+    private static readonly JsonSerializerOptions VisualizationJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
     private readonly SettingsStore _settingsStore = new();
     private readonly IpmiCommandService _ipmi = new();
     private readonly DispatcherTimer _autoPolicyTimer = new();
     private readonly DispatcherTimer _sensorPollingTimer = new();
     private readonly SemaphoreSlim _ipmiOperationLock = new(1, 1);
+    private readonly List<SensorDashboardHistoryPoint> _sensorHistory = [];
     private AppSettings _settings = new();
     private bool _syncingAllFanControls;
     private bool _autoPolicyTickRunning;
@@ -29,6 +39,8 @@ public sealed partial class MainPage : Page
     private TimeSpan? _lastPollDuration;
     private DateTimeOffset _lastPollingWarningAt = DateTimeOffset.MinValue;
     private bool _pollingWasDegraded;
+    private bool _visualizationInitialized;
+    private bool _visualizationReady;
     private string? _activePresetId;
     private string _modeSummaryKey = "Mode.Idle";
     private object[] _modeSummaryArgs = Array.Empty<object>();
@@ -95,6 +107,52 @@ public sealed partial class MainPage : Page
     public void ShowSettingsView()
     {
         SelectView("Settings");
+    }
+
+    private async void OnVisualizationWebViewLoaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await InitializeVisualizationAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
+    private async Task InitializeVisualizationAsync()
+    {
+        if (_visualizationInitialized)
+        {
+            return;
+        }
+
+        var dashboardPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Charts", "dashboard.html");
+        if (!File.Exists(dashboardPath))
+        {
+            throw new FileNotFoundException("Visualization dashboard asset was not found.", dashboardPath);
+        }
+
+        await VisualizationWebView.EnsureCoreWebView2Async();
+        VisualizationWebView.Source = new Uri(dashboardPath);
+        _visualizationInitialized = true;
+        VisualizationStateText.Text = T("Dashboard.VisualizationLoading");
+    }
+
+    private void OnVisualizationNavigationCompleted(WebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
+    {
+        if (!args.IsSuccess)
+        {
+            var message = F("Dashboard.VisualizationLoadFailed", args.WebErrorStatus);
+            AddLog(T("Log.Error"), message);
+            ShowStatus(message, InfoBarSeverity.Error);
+            return;
+        }
+
+        _visualizationReady = true;
+        VisualizationStateText.Text = T("Dashboard.VisualizationReady");
+        SendVisualizationSnapshot();
     }
 
     public Task ApplyQuickFanSpeedAsync(int percent)
@@ -320,6 +378,8 @@ public sealed partial class MainPage : Page
         stopwatch.Stop();
         ReplaceSensors(readings);
         UpdateMetricSummaries();
+        RecordVisualizationHistoryPoint();
+        SendVisualizationSnapshot();
         _lastPollTime = DateTime.Now;
         _lastPollDuration = stopwatch.Elapsed;
         UpdatePollingStatusTexts();
@@ -586,6 +646,8 @@ public sealed partial class MainPage : Page
         var readings = await _ipmi.ReadSensorsAsync(profile, cancellationToken);
         ReplaceSensors(readings);
         UpdateMetricSummaries();
+        RecordVisualizationHistoryPoint();
+        SendVisualizationSnapshot();
 
         var cpuTemp = IpmiCommandService.FindCpuTemperatureCelsius(readings);
         var percent = CalculateAutoFanPercent(cpuTemp);
@@ -792,9 +854,8 @@ public sealed partial class MainPage : Page
             }));
 
         var fanReadings = Sensors
-            .Where(sensor => sensor.Key.StartsWith("Fan", StringComparison.OrdinalIgnoreCase) &&
-                             sensor.Unit.Contains("RPM", StringComparison.OrdinalIgnoreCase) &&
-                             sensor.NumericValue.HasValue)
+            .Where(IsFanSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
             .ToList();
 
         FanSummaryText.Text = F("Overview.FansCount", fanReadings.Count);
@@ -826,6 +887,378 @@ public sealed partial class MainPage : Page
         ReplaceTiles(PowerTiles, powerAndHealth);
     }
 
+    private void RecordVisualizationHistoryPoint()
+    {
+        var temperatures = Sensors
+            .Where(IsTemperatureSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .ToList();
+        var fans = Sensors
+            .Where(IsFanSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .ToList();
+
+        _sensorHistory.Add(new SensorDashboardHistoryPoint
+        {
+            Time = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+            MaxTemperature = temperatures.Count == 0 ? null : Math.Round(temperatures.Max(sensor => sensor.NumericValue!.Value), 1),
+            AverageFanRpm = fans.Count == 0 ? null : Math.Round(fans.Average(sensor => sensor.NumericValue!.Value), 0),
+            CpuUsage = FindNumericSensorValue("CPU Usage"),
+            MemUsage = FindNumericSensorValue("MEM Usage"),
+            IoUsage = FindNumericSensorValue("IO Usage"),
+            SysUsage = FindNumericSensorValue("SYS Usage"),
+            PowerWatts = Sensors.FirstOrDefault(IsPowerWattsSensor)?.NumericValue,
+        });
+
+        while (_sensorHistory.Count > SensorHistoryLimit)
+        {
+            _sensorHistory.RemoveAt(0);
+        }
+    }
+
+    private void SendVisualizationSnapshot()
+    {
+        if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var payload = BuildVisualizationPayload();
+            var json = JsonSerializer.Serialize(payload, VisualizationJsonOptions);
+            VisualizationWebView.CoreWebView2.PostWebMessageAsJson(json);
+            VisualizationStateText.Text = _lastPollTime.HasValue
+                ? F("Dashboard.VisualizationUpdated", _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
+                : T("Dashboard.VisualizationReady");
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
+    private object BuildVisualizationPayload()
+    {
+        var temperatures = Sensors
+            .Where(IsTemperatureSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeTemperature")))
+            .ToList();
+        var fans = Sensors
+            .Where(IsFanSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeFan")))
+            .ToList();
+        var power = Sensors
+            .Where(IsPowerSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypePower")))
+            .ToList();
+        var performance = Sensors
+            .Where(IsPerformanceSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypePerformance")))
+            .ToList();
+        var electrical = Sensors
+            .Where(sensor => IsPowerWattsSensor(sensor) || IsVoltageSensor(sensor) || IsCurrentSensor(sensor))
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
+            .ToList();
+        var allNumeric = Sensors
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
+            .ToList();
+        var statusSensors = Sensors
+            .Where(sensor => !sensor.NumericValue.HasValue)
+            .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
+            .ToList();
+        var health = Sensors
+            .Where(IsHealthSensor)
+            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeStatus")))
+            .ToList();
+
+        return new
+        {
+            MessageType = "sensorDashboard",
+            Language = _settings.Language,
+            Theme = ActualTheme == ElementTheme.Dark ? "Dark" : "Light",
+            Labels = BuildVisualizationLabels(),
+            Summary = BuildVisualizationSummary(),
+            Current = new
+            {
+                Temperatures = temperatures,
+                Fans = fans,
+                Power = power,
+                Performance = performance,
+                Electrical = electrical,
+                AllNumeric = allNumeric,
+                StatusSensors = statusSensors,
+                Health = health,
+            },
+            History = _sensorHistory,
+            TypeCounts = BuildTypeCounts(),
+            SensorTree = BuildSensorTree(),
+        };
+    }
+
+    private object BuildVisualizationLabels()
+    {
+        return new
+        {
+            Title = T("Dashboard.Title"),
+            Subtitle = T("Dashboard.Subtitle"),
+            ViewAll = T("Dashboard.ViewAll"),
+            ViewTemperature = T("Dashboard.ViewTemperature"),
+            ViewFans = T("Dashboard.ViewFans"),
+            ViewPower = T("Dashboard.ViewPower"),
+            ViewStatus = T("Dashboard.ViewStatus"),
+            MaxCpuTemp = T("Overview.MaxCpuTemp"),
+            AverageFanRpm = T("Dashboard.AverageFanRpm"),
+            HardwareTypes = T("Dashboard.HardwareTypes"),
+            LastUpdated = T("Dashboard.LastUpdated"),
+            HealthState = T("Dashboard.HealthState"),
+            PerformancePeak = T("Dashboard.PerformancePeak"),
+            ElectricalReadings = T("Dashboard.ElectricalReadings"),
+            WarningCount = T("Dashboard.WarningCount"),
+            FanRange = T("Dashboard.FanRange"),
+            TemperatureSensors = T("Dashboard.TemperatureSensors"),
+            TrendTitle = T("Dashboard.TrendTitle"),
+            TrendSubtitle = T("Dashboard.TrendSubtitle"),
+            TempUnit = "°C",
+            CpuUsage = T("Dashboard.CpuUsage"),
+            CurrentSnapshot = T("Dashboard.CurrentSnapshot"),
+            OverallTitle = T("Dashboard.OverallTitle"),
+            OverallSubtitle = T("Dashboard.OverallSubtitle"),
+            TemperatureTitle = T("Dashboard.TemperatureTitle"),
+            TemperatureSubtitle = T("Dashboard.TemperatureSubtitle"),
+            FanTitle = T("Dashboard.FanTitle"),
+            FanSubtitle = T("Dashboard.FanSubtitle"),
+            PowerTitle = T("Dashboard.PowerTitle"),
+            PowerSubtitle = T("Dashboard.PowerSubtitle"),
+            TypeTitle = T("Dashboard.TypeTitle"),
+            TypeSubtitle = T("Dashboard.TypeSubtitle"),
+            SensorTree = T("Dashboard.SensorTree"),
+            StatusByType = T("Dashboard.StatusByType"),
+            TypePerformance = T("Dashboard.TypePerformance"),
+            TypePower = T("Dashboard.TypePower"),
+            TypeVoltage = T("Dashboard.TypeVoltage"),
+            TypeCurrent = T("Dashboard.TypeCurrent"),
+            Value = T("Dashboard.Value"),
+            Status = T("Dashboard.Status"),
+            Unit = T("Dashboard.Unit"),
+        };
+    }
+
+    private object BuildVisualizationSummary()
+    {
+        var temperatureValues = Sensors
+            .Where(IsTemperatureSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => sensor.NumericValue!.Value)
+            .ToList();
+        var fanValues = Sensors
+            .Where(IsFanSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => sensor.NumericValue!.Value)
+            .ToList();
+        var performanceValues = Sensors
+            .Where(IsPerformanceSensor)
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .Select(sensor => sensor.NumericValue!.Value)
+            .ToList();
+        var electricalValues = Sensors
+            .Where(sensor => IsPowerWattsSensor(sensor) || IsVoltageSensor(sensor) || IsCurrentSensor(sensor))
+            .Where(sensor => sensor.NumericValue.HasValue)
+            .ToList();
+
+        var okCount = Sensors.Count(IsOkStatus);
+        var warningCount = Sensors.Count - okCount;
+        var powerWatts = Sensors.FirstOrDefault(IsPowerWattsSensor)?.NumericValue;
+        var voltageValues = Sensors.Where(IsVoltageSensor).Where(sensor => sensor.NumericValue.HasValue).Select(sensor => sensor.NumericValue!.Value).ToList();
+        var currentValues = Sensors.Where(IsCurrentSensor).Where(sensor => sensor.NumericValue.HasValue).Select(sensor => sensor.NumericValue!.Value).ToList();
+        return new
+        {
+            SensorCount = Sensors.Count,
+            TemperatureCount = temperatureValues.Count,
+            FanCount = fanValues.Count,
+            PerformanceCount = performanceValues.Count,
+            ElectricalCount = electricalValues.Count,
+            MaxTemperature = temperatureValues.Count == 0 ? (double?)null : Math.Round(temperatureValues.Max(), 1),
+            AverageFanRpm = fanValues.Count == 0 ? (double?)null : Math.Round(fanValues.Average(), 0),
+            MinFanRpm = fanValues.Count == 0 ? (double?)null : Math.Round(fanValues.Min(), 0),
+            MaxFanRpm = fanValues.Count == 0 ? (double?)null : Math.Round(fanValues.Max(), 0),
+            MaxPerformance = performanceValues.Count == 0 ? (double?)null : Math.Round(performanceValues.Max(), 1),
+            AveragePerformance = performanceValues.Count == 0 ? (double?)null : Math.Round(performanceValues.Average(), 1),
+            PowerWatts = powerWatts.HasValue ? Math.Round(powerWatts.Value, 1) : (double?)null,
+            VoltageCount = voltageValues.Count,
+            AverageVoltage = voltageValues.Count == 0 ? (double?)null : Math.Round(voltageValues.Average(), 1),
+            CurrentCount = currentValues.Count,
+            TotalCurrent = currentValues.Count == 0 ? (double?)null : Math.Round(currentValues.Sum(), 2),
+            CpuUsage = FindNumericSensorValue("CPU Usage"),
+            MemUsage = FindNumericSensorValue("MEM Usage"),
+            IoUsage = FindNumericSensorValue("IO Usage"),
+            SysUsage = FindNumericSensorValue("SYS Usage"),
+            OkCount = okCount,
+            WarningCount = warningCount,
+            LastUpdated = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+        };
+    }
+
+    private object BuildVisualizationPoint(SensorReading sensor, string type)
+    {
+        return new
+        {
+            Id = BuildSensorStableId(sensor),
+            Name = BuildSensorTitle(sensor),
+            Type = type,
+            Value = sensor.NumericValue.HasValue ? Math.Round(sensor.NumericValue.Value, 1) : (double?)null,
+            Unit = NormalizeVisualizationUnit(sensor),
+            Status = sensor.Status,
+            Subtitle = BuildSensorSubtitle(sensor),
+        };
+    }
+
+    private object[] BuildTypeCounts()
+    {
+        return Sensors
+            .GroupBy(GetHardwareTypeName)
+            .OrderByDescending(group => group.Count())
+            .Select(group => new { Name = group.Key, Value = group.Count() })
+            .Cast<object>()
+            .ToArray();
+    }
+
+    private object[] BuildSensorTree()
+    {
+        return Sensors
+            .GroupBy(GetHardwareTypeName)
+            .OrderByDescending(group => group.Count())
+            .Select(group => new
+            {
+                Name = group.Key,
+                Value = group.Count(),
+                Children = group
+                    .OrderBy(sensor => IsOkStatus(sensor) ? 0 : 1)
+                    .ThenBy(sensor => BuildSensorTitle(sensor), StringComparer.CurrentCultureIgnoreCase)
+                    .Select(sensor => new
+                    {
+                        Name = BuildSensorTitle(sensor),
+                        Value = 1,
+                        Status = sensor.Status,
+                        Reading = string.IsNullOrWhiteSpace(sensor.Value) ? sensor.Status : sensor.Value,
+                        Unit = NormalizeVisualizationUnit(sensor),
+                        Subtitle = BuildSensorSubtitle(sensor),
+                    })
+                    .Cast<object>()
+                    .ToArray(),
+            })
+            .Cast<object>()
+            .ToArray();
+    }
+
+    private double? FindNumericSensorValue(string key)
+    {
+        return Sensors.FirstOrDefault(sensor => sensor.Key.Equals(key, StringComparison.OrdinalIgnoreCase))?.NumericValue;
+    }
+
+    private string GetHardwareTypeName(SensorReading sensor)
+    {
+        if (IsTemperatureSensor(sensor))
+        {
+            return T("Dashboard.TypeTemperature");
+        }
+
+        if (IsFanSensor(sensor))
+        {
+            return T("Dashboard.TypeFan");
+        }
+
+        if (IsPerformanceSensor(sensor))
+        {
+            return T("Dashboard.TypePerformance");
+        }
+
+        if (IsPowerWattsSensor(sensor))
+        {
+            return T("Dashboard.TypePower");
+        }
+
+        if (IsVoltageSensor(sensor))
+        {
+            return T("Dashboard.TypeVoltage");
+        }
+
+        if (IsCurrentSensor(sensor))
+        {
+            return T("Dashboard.TypeCurrent");
+        }
+
+        if (IsHealthSensor(sensor))
+        {
+            return T("Dashboard.TypeStatus");
+        }
+
+        if (!sensor.NumericValue.HasValue)
+        {
+            return T("Dashboard.TypeStatus");
+        }
+
+        if (sensor.NumericValue.HasValue)
+        {
+            return T("Dashboard.TypeNumeric");
+        }
+
+        return T("Dashboard.TypeOther");
+    }
+
+    private static bool IsOkStatus(SensorReading sensor)
+    {
+        return sensor.Status.Equals("ok", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Status.Equals("ns", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Status.Equals("na", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeVisualizationUnit(SensorReading sensor)
+    {
+        if (sensor.Unit.Contains("degrees C", StringComparison.OrdinalIgnoreCase))
+        {
+            return "°C";
+        }
+
+        if (sensor.Unit.Contains("RPM", StringComparison.OrdinalIgnoreCase))
+        {
+            return "RPM";
+        }
+
+        if (sensor.Unit.Contains("Watts", StringComparison.OrdinalIgnoreCase))
+        {
+            return "W";
+        }
+
+        if (sensor.Unit.Contains("Volts", StringComparison.OrdinalIgnoreCase))
+        {
+            return "V";
+        }
+
+        if (sensor.Unit.Contains("Amps", StringComparison.OrdinalIgnoreCase))
+        {
+            return "A";
+        }
+
+        if (sensor.Unit.Contains("percent", StringComparison.OrdinalIgnoreCase))
+        {
+            return "%";
+        }
+
+        return sensor.Unit;
+    }
+
+    private static string BuildSensorStableId(SensorReading sensor)
+    {
+        return $"{sensor.SensorId}|{sensor.Key}|{sensor.Entity}";
+    }
+
     private static void ReplaceTiles(
         ObservableCollection<DashboardTileViewModel> target,
         System.Collections.Generic.IEnumerable<DashboardTileViewModel> tiles)
@@ -841,6 +1274,34 @@ public sealed partial class MainPage : Page
     {
         return sensor.Unit.Contains("degrees C", StringComparison.OrdinalIgnoreCase) ||
                sensor.Key.Contains("Temp", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFanSensor(SensorReading sensor)
+    {
+        return sensor.Key.StartsWith("Fan", StringComparison.OrdinalIgnoreCase) &&
+               sensor.Unit.Contains("RPM", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPerformanceSensor(SensorReading sensor)
+    {
+        return sensor.Key.Contains("Usage", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Unit.Contains("percent", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPowerWattsSensor(SensorReading sensor)
+    {
+        return sensor.Unit.Contains("Watts", StringComparison.OrdinalIgnoreCase) ||
+               sensor.Key.Contains("Pwr Consumption", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsVoltageSensor(SensorReading sensor)
+    {
+        return sensor.Unit.Contains("Volts", StringComparison.OrdinalIgnoreCase) && sensor.NumericValue.HasValue;
+    }
+
+    private static bool IsCurrentSensor(SensorReading sensor)
+    {
+        return sensor.Unit.Contains("Amps", StringComparison.OrdinalIgnoreCase) && sensor.NumericValue.HasValue;
     }
 
     private static bool IsPowerSensor(SensorReading sensor)
@@ -1060,6 +1521,9 @@ public sealed partial class MainPage : Page
         App.CurrentWindow?.ApplyLocalization();
         CurrentTargetText.Text = _settings.Host;
         NewPresetNameBox.PlaceholderText = T("Preset.NewNamePlaceholder");
+        VisualizationStateText.Text = _visualizationReady
+            ? T("Dashboard.VisualizationReady")
+            : T("Dashboard.VisualizationLoading");
         FanSummaryText.Text = F("Overview.FansCount", _settings.FanCount);
         if (Sensors.Count == 0)
         {
@@ -1075,6 +1539,7 @@ public sealed partial class MainPage : Page
         UpdatePollingStatusTexts();
         UpdateIndividualFanWarning();
         RefreshPresetRows();
+        SendVisualizationSnapshot();
 
         foreach (var fanChannel in FanChannels)
         {
@@ -1179,5 +1644,24 @@ public sealed partial class MainPage : Page
     private static string F(string key, params object[] args)
     {
         return LocalizationService.Format(key, args);
+    }
+
+    private sealed class SensorDashboardHistoryPoint
+    {
+        public string Time { get; set; } = string.Empty;
+
+        public double? MaxTemperature { get; set; }
+
+        public double? AverageFanRpm { get; set; }
+
+        public double? CpuUsage { get; set; }
+
+        public double? MemUsage { get; set; }
+
+        public double? IoUsage { get; set; }
+
+        public double? SysUsage { get; set; }
+
+        public double? PowerWatts { get; set; }
     }
 }

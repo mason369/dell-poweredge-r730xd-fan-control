@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="./echarts.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --panel-2: #f1f5f9;
+      --text: #172033;
+      --muted: #64748b;
+      --line: rgba(15, 23, 42, .12);
+      --accent: #0f766e;
+      --accent-2: #2563eb;
+      --warn: #d97706;
+      --danger: #dc2626;
+      --ok: #16a34a;
+      --shadow: 0 10px 30px rgba(15, 23, 42, .08);
+    }
+
+    body.dark {
+      --bg: #0f172a;
+      --panel: #111c2f;
+      --panel-2: #18243a;
+      --text: #e5eefb;
+      --muted: #9fb1ca;
+      --line: rgba(226, 232, 240, .14);
+      --accent: #2dd4bf;
+      --accent-2: #60a5fa;
+      --warn: #f59e0b;
+      --danger: #f87171;
+      --ok: #4ade80;
+      --shadow: 0 14px 34px rgba(0, 0, 0, .28);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+    }
+
+    .shell {
+      height: 100vh;
+      min-height: 0;
+      padding: 14px 18px 16px;
+      background:
+        linear-gradient(135deg, rgba(15, 118, 110, .12), transparent 36%),
+        linear-gradient(315deg, rgba(161, 98, 7, .12), transparent 40%),
+        var(--bg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 10px;
+      flex: 0 0 auto;
+    }
+
+    .title {
+      font-size: 21px;
+      line-height: 1.2;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      max-width: 520px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 999px;
+      min-height: 32px;
+      padding: 0 12px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      box-shadow: 0 3px 12px rgba(15, 23, 42, .04);
+    }
+
+    .chip.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 10px;
+      flex: 0 0 auto;
+    }
+
+    .metric {
+      min-height: 74px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--panel) 88%, transparent);
+      box-shadow: var(--shadow);
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .metric-value {
+      margin-top: 6px;
+      font-size: 23px;
+      font-weight: 700;
+      line-height: 1.05;
+    }
+
+    .metric-note {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr 1fr;
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .panel.wide { grid-column: span 2; }
+
+    .chart {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .mode-temperature .panel:not(.temperature),
+    .mode-fans .panel:not(.fans),
+    .mode-power .panel:not(.power),
+    .mode-status .panel:not(.status) {
+      display: none;
+    }
+
+    .mode-temperature .grid,
+    .mode-fans .grid,
+    .mode-power .grid,
+    .mode-status .grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      grid-auto-rows: minmax(0, 1fr);
+    }
+
+    .mode-temperature .panel,
+    .mode-fans .panel,
+    .mode-power .panel,
+    .mode-status .panel {
+      grid-column: span 1;
+    }
+
+    @media (max-width: 980px) {
+      body { overflow-y: auto; }
+      .shell { height: auto; min-height: 100vh; overflow: visible; }
+      .topbar { flex-direction: column; }
+      .chips { justify-content: flex-start; }
+      .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid { grid-template-columns: 1fr; grid-template-rows: repeat(6, 300px); }
+      .panel.wide { grid-column: span 1; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell" id="shell">
+    <section class="topbar">
+      <div>
+        <div class="title" id="title"></div>
+        <div class="subtitle" id="subtitle"></div>
+      </div>
+      <div class="chips" id="chips"></div>
+    </section>
+
+    <section class="metric-strip" id="metrics"></section>
+
+    <section class="grid" id="grid">
+      <article class="panel status wide"><div class="chart" id="trend"></div></article>
+      <article class="panel status"><div class="chart" id="overall"></div></article>
+      <article class="panel temperature"><div class="chart" id="temperature"></div></article>
+      <article class="panel fans"><div class="chart" id="fans"></div></article>
+      <article class="panel power"><div class="chart" id="power"></div></article>
+      <article class="panel status"><div class="chart" id="types"></div></article>
+    </section>
+  </main>
+
+  <script>
+    const chartIds = ["trend", "overall", "temperature", "fans", "power", "types"];
+    const charts = new Map();
+    let currentView = "all";
+    let lastPayload = null;
+
+    function initCharts() {
+      chartIds.forEach((id) => {
+        const element = document.getElementById(id);
+        charts.set(id, echarts.init(element, null, { renderer: "canvas" }));
+      });
+      window.addEventListener("resize", resizeCharts);
+    }
+
+    function resizeCharts() {
+      charts.forEach((chart) => chart.resize());
+    }
+
+    function text(value) {
+      return value === null || value === undefined ? "" : String(value);
+    }
+
+    function number(value, digits) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        return "--";
+      }
+      return Number(value).toFixed(digits);
+    }
+
+    function colorSet() {
+      return [
+        "#0f766e",
+        "#2563eb",
+        "#a16207",
+        "#7c3aed",
+        "#dc2626",
+        "#16a34a",
+        "#0891b2",
+        "#db2777"
+      ];
+    }
+
+    function axisColor() {
+      return getComputedStyle(document.body).getPropertyValue("--muted").trim();
+    }
+
+    function textColor() {
+      return getComputedStyle(document.body).getPropertyValue("--text").trim();
+    }
+
+    function splitColor() {
+      return getComputedStyle(document.body).getPropertyValue("--line").trim();
+    }
+
+    function render(payload) {
+      lastPayload = payload;
+      document.body.classList.toggle("dark", payload.theme === "Dark");
+      document.documentElement.lang = payload.language || "en";
+      document.getElementById("title").textContent = payload.labels.title;
+      document.getElementById("subtitle").textContent = payload.labels.subtitle;
+      renderChips(payload.labels);
+      renderMetrics(payload);
+      renderCharts(payload);
+      setView(currentView);
+      requestAnimationFrame(resizeCharts);
+    }
+
+    function renderChips(labels) {
+      const entries = [
+        ["all", labels.viewAll],
+        ["temperature", labels.viewTemperature],
+        ["fans", labels.viewFans],
+        ["power", labels.viewPower],
+        ["status", labels.viewStatus]
+      ];
+      const host = document.getElementById("chips");
+      host.innerHTML = "";
+      entries.forEach(([view, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chip" + (view === currentView ? " active" : "");
+        button.textContent = label;
+        button.addEventListener("click", () => setView(view));
+        host.appendChild(button);
+      });
+    }
+
+    function setView(view) {
+      currentView = view;
+      const shell = document.getElementById("shell");
+      shell.className = "shell" + (view === "all" ? "" : " mode-" + view);
+      document.querySelectorAll(".chip").forEach((button, index) => {
+        const views = ["all", "temperature", "fans", "power", "status"];
+        button.classList.toggle("active", views[index] === view);
+      });
+      requestAnimationFrame(resizeCharts);
+    }
+
+    function renderMetrics(payload) {
+      const s = payload.summary;
+      const labels = payload.labels;
+      const entries = [
+        [labels.maxCpuTemp, number(s.maxTemperature, 1) + " " + labels.tempUnit, labels.temperatureSensors + ": " + s.temperatureCount],
+        [labels.averageFanRpm, number(s.averageFanRpm, 0) + " RPM", labels.fanRange + ": " + number(s.minFanRpm, 0) + " - " + number(s.maxFanRpm, 0)],
+        [labels.performancePeak, number(s.maxPerformance, 1) + " %", "CPU " + number(s.cpuUsage, 0) + "% / MEM " + number(s.memUsage, 0) + "%"],
+        [labels.electricalReadings, s.electricalCount, number(s.powerWatts, 0) + " W · " + number(s.totalCurrent, 1) + " A"],
+        [labels.healthState, s.okCount + " / " + s.sensorCount, labels.warningCount + ": " + s.warningCount]
+      ];
+      const host = document.getElementById("metrics");
+      host.innerHTML = entries.map(([label, value, note]) =>
+        `<div class="metric"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(value)}</div><div class="metric-note">${escapeHtml(note)}</div></div>`
+      ).join("");
+    }
+
+    function renderCharts(payload) {
+      renderTrend(payload);
+      renderOverall(payload);
+      renderTemperature(payload);
+      renderFans(payload);
+      renderPower(payload);
+      renderTypes(payload);
+    }
+
+    function renderTrend(payload) {
+      const labels = payload.labels;
+      const history = payload.history || [];
+      const times = history.map((row) => row.time);
+      charts.get("trend").setOption({
+        color: colorSet(),
+        title: chartTitle(labels.trendTitle, labels.trendSubtitle),
+        tooltip: { trigger: "axis" },
+        legend: { top: 34, textStyle: { color: axisColor() } },
+        grid: { top: 78, right: 62, bottom: 62, left: 54, containLabel: true },
+        dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
+        xAxis: { type: "category", data: times, axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
+        yAxis: [
+          { type: "value", name: labels.tempUnit, axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+          { type: "value", name: "RPM", axisLabel: { color: axisColor() }, splitLine: { show: false } }
+        ],
+        series: [
+          smoothLine(labels.maxCpuTemp, history.map((row) => row.maxTemperature), 0),
+          smoothLine(labels.averageFanRpm, history.map((row) => row.averageFanRpm), 1),
+          smoothLine(labels.cpuUsage, history.map((row) => row.cpuUsage), 0),
+          smoothLine("MEM", history.map((row) => row.memUsage), 0),
+          smoothLine("IO", history.map((row) => row.ioUsage), 0),
+          smoothLine("SYS", history.map((row) => row.sysUsage), 0)
+        ]
+      }, true);
+    }
+
+    function renderOverall(payload) {
+      const labels = payload.labels;
+      const s = payload.summary;
+      const healthRatio = s.sensorCount > 0 ? (s.okCount / s.sensorCount) * 100 : 0;
+      const coverage = Math.min(100, (s.sensorCount || 0) / 2);
+      charts.get("overall").setOption({
+        color: ["#0f766e", "#2563eb", "#d97706", "#16a34a"],
+        title: chartTitle(labels.overallTitle, labels.overallSubtitle),
+        tooltip: {
+          formatter: () => [
+            `${labels.maxCpuTemp}: ${number(s.maxTemperature, 1)} ${labels.tempUnit}`,
+            `${labels.averageFanRpm}: ${number(s.averageFanRpm, 0)} RPM`,
+            `${labels.performancePeak}: ${number(s.maxPerformance, 1)} %`,
+            `${labels.powerTitle}: ${number(s.powerWatts, 0)} W`,
+            `${labels.typeVoltage}: ${number(s.averageVoltage, 1)} V`,
+            `${labels.typeCurrent}: ${number(s.totalCurrent, 1)} A`,
+            `${labels.healthState}: ${s.okCount} / ${s.sensorCount}`,
+            `${labels.hardwareTypes}: ${s.sensorCount}`
+          ].join("<br/>")
+        },
+        radar: {
+          center: ["50%", "58%"],
+          radius: "62%",
+          splitLine: { lineStyle: { color: splitColor() } },
+          splitArea: { areaStyle: { color: ["rgba(15,118,110,.05)", "rgba(37,99,235,.05)"] } },
+          axisName: { color: axisColor() },
+          indicator: [
+            { name: labels.maxCpuTemp, max: 100 },
+            { name: labels.averageFanRpm, max: 100 },
+            { name: labels.performancePeak, max: 100 },
+            { name: labels.typePower, max: 100 },
+            { name: labels.typeVoltage, max: 100 },
+            { name: labels.typeCurrent, max: 100 },
+            { name: labels.healthState, max: 100 },
+            { name: labels.hardwareTypes, max: 100 }
+          ]
+        },
+        series: [{
+          type: "radar",
+          areaStyle: { opacity: .22 },
+          lineStyle: { width: 3 },
+          symbolSize: 5,
+          data: [{
+            name: labels.currentSnapshot,
+            value: [
+              clamp(s.maxTemperature || 0, 0, 100),
+              normalize(s.averageFanRpm, 0, Math.max(3600, s.maxFanRpm || 0)),
+              clamp(s.maxPerformance || 0, 0, 100),
+              normalize(s.powerWatts, 0, 500),
+              normalize(s.averageVoltage, 0, 240),
+              normalize(s.totalCurrent, 0, 5),
+              healthRatio,
+              coverage
+            ]
+          }]
+        }]
+      }, true);
+    }
+
+    function renderTemperature(payload) {
+      const labels = payload.labels;
+      const rows = (payload.current.temperatures || []).slice().sort((a, b) => b.value - a.value);
+      charts.get("temperature").setOption({
+        color: ["#dc2626"],
+        title: chartTitle(labels.temperatureTitle, labels.temperatureSubtitle),
+        tooltip: valueTooltip(labels.tempUnit),
+        grid: { top: 74, right: 34, bottom: 54, left: 104, containLabel: true },
+        xAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+        yAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), formatter: shortAxisLabel } },
+        visualMap: {
+          show: false,
+          min: 20,
+          max: 90,
+          dimension: 0,
+          inRange: { color: ["#0f766e", "#d97706", "#dc2626"] }
+        },
+        series: [{
+          type: "bar",
+          realtimeSort: true,
+          data: rows.map((row) => ({ value: row.value, name: row.name, status: row.status })),
+          label: { show: true, position: "right", color: textColor(), formatter: "{c}" },
+          itemStyle: { borderRadius: [0, 6, 6, 0] }
+        }]
+      }, true);
+    }
+
+    function renderFans(payload) {
+      const labels = payload.labels;
+      const rows = (payload.current.fans || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      charts.get("fans").setOption({
+        color: ["#2563eb"],
+        title: chartTitle(labels.fanTitle, labels.fanSubtitle),
+        tooltip: valueTooltip("RPM"),
+        grid: { top: 74, right: 32, bottom: 62, left: 54, containLabel: true },
+        xAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), rotate: rows.length > 7 ? 35 : 0, interval: 0, formatter: compactFanLabel } },
+        yAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+        series: [{
+          type: "bar",
+          data: rows.map((row) => ({ value: row.value, name: row.name, status: row.status })),
+          label: { show: true, position: "top", color: textColor() },
+          itemStyle: { borderRadius: [6, 6, 0, 0] }
+        }]
+      }, true);
+    }
+
+    function renderPower(payload) {
+      const labels = payload.labels;
+      const rows = [
+        ...(payload.current.performance || []),
+        ...(payload.current.electrical || [])
+      ].filter((row) => row.value !== null);
+      charts.get("power").setOption({
+        color: ["#7c3aed", "#a16207", "#0891b2", "#db2777"],
+        title: chartTitle(labels.powerTitle, labels.powerSubtitle),
+        tooltip: {
+          trigger: "item",
+          formatter: (params) => `${escapeHtml(params.name)}<br/>${labels.value}: ${params.value} ${escapeHtml(params.data.unit || "")}<br/>${labels.hardwareTypes}: ${escapeHtml(params.data.type || "")}<br/>${labels.status}: ${escapeHtml(params.data.status || "")}`
+        },
+        grid: { top: 74, right: 64, bottom: 54, left: 142, containLabel: true },
+        xAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+        yAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), formatter: shortAxisLabel } },
+        series: [{
+          type: "bar",
+          data: rows.map((row) => ({ value: row.value, name: row.name, unit: row.unit, status: row.status, type: row.type, itemStyle: { color: colorForType(row.type, labels) } })),
+          label: { show: true, position: "right", color: textColor(), formatter: (params) => `${params.value} ${params.data.unit || ""}` },
+          itemStyle: { borderRadius: [0, 6, 6, 0] }
+        }]
+      }, true);
+    }
+
+    function renderTypes(payload) {
+      const labels = payload.labels;
+      charts.get("types").setOption({
+        color: colorSet(),
+        title: chartTitle(labels.typeTitle, labels.typeSubtitle),
+        tooltip: {
+          trigger: "item",
+          formatter: (params) => {
+            const data = params.data || {};
+            if (data.reading !== undefined) {
+              return `${escapeHtml(params.name)}<br/>${labels.value}: ${escapeHtml(data.reading)}<br/>${labels.status}: ${escapeHtml(data.status || "")}<br/>${escapeHtml(data.subtitle || "")}`;
+            }
+
+            return `${escapeHtml(params.name)}<br/>${labels.hardwareTypes}: ${params.value}`;
+          }
+        },
+        series: [
+          {
+            name: labels.hardwareTypes,
+            type: "pie",
+            radius: ["34%", "58%"],
+            center: ["30%", "58%"],
+            data: payload.typeCounts || [],
+            label: { color: textColor(), formatter: "{b}\n{c}" }
+          },
+          {
+            name: labels.sensorTree,
+            type: "treemap",
+            roam: false,
+            nodeClick: false,
+            breadcrumb: { show: false },
+            left: "56%",
+            top: 78,
+            right: 14,
+            bottom: 18,
+            data: payload.sensorTree || [],
+            label: { color: "#fff" },
+            upperLabel: { show: true, color: textColor() },
+            levels: [
+              { itemStyle: { borderColor: "transparent", borderWidth: 3, gapWidth: 4 } },
+              { itemStyle: { borderColor: "rgba(255,255,255,.5)", borderWidth: 1, gapWidth: 2 } }
+            ]
+          }
+        ]
+      }, true);
+    }
+
+    function chartTitle(title, subtitle) {
+      return {
+        text: title,
+        subtext: subtitle,
+        left: 16,
+        top: 12,
+        textStyle: { color: textColor(), fontSize: 15, fontWeight: 700 },
+        subtextStyle: { color: axisColor(), fontSize: 11 }
+      };
+    }
+
+    function smoothLine(name, data, yAxisIndex) {
+      return {
+        name,
+        type: "line",
+        yAxisIndex,
+        smooth: true,
+        showSymbol: false,
+        data,
+        lineStyle: { width: 3 },
+        areaStyle: { opacity: .08 }
+      };
+    }
+
+    function valueTooltip(unit) {
+      return {
+        trigger: "item",
+        formatter: (params) => `${escapeHtml(params.name)}<br/>${params.value} ${escapeHtml(unit)}<br/>${escapeHtml(params.data.status || "")}`
+      };
+    }
+
+    function shortAxisLabel(value) {
+      const label = text(value);
+      return label.length > 18 ? label.slice(0, 16) + "..." : label;
+    }
+
+    function compactFanLabel(value) {
+      return text(value).replace(/\s+RPM$/i, "");
+    }
+
+    function clamp(value, min, max) {
+      const n = Number(value);
+      if (Number.isNaN(n)) {
+        return min;
+      }
+
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function normalize(value, min, max) {
+      const n = Number(value);
+      if (Number.isNaN(n) || max <= min) {
+        return 0;
+      }
+
+      return clamp(((n - min) / (max - min)) * 100, 0, 100);
+    }
+
+    function colorForType(type, labels) {
+      if (type === labels.typePerformance) {
+        return "#7c3aed";
+      }
+
+      if (type === labels.typePower) {
+        return "#a16207";
+      }
+
+      if (type === labels.typeVoltage) {
+        return "#0891b2";
+      }
+
+      if (type === labels.typeCurrent) {
+        return "#db2777";
+      }
+
+      return "#64748b";
+    }
+
+    function escapeHtml(value) {
+      return text(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    initCharts();
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.addEventListener("message", (event) => render(event.data));
+      window.chrome.webview.postMessage({ type: "ready" });
+    }
+  </script>
+</body>
+</html>

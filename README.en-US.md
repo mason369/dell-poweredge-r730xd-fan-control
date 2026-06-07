@@ -22,12 +22,13 @@ Windows WinUI 3 desktop app for managing Dell PowerEdge R730xd fan speed through
 - Tray behavior: close minimizes to tray; the tray icon's Fan Control submenu groups presets, all-fan speeds, and restore manual 10%, with settings, restore window, and exit still available.
 - iDRAC web console shortcut.
 - Live dashboard cards for every BMC temperature sensor, fan RPM, power, voltage, and platform status.
+- Bundled local ECharts interactive visualization for overall trends, hardware profile, individual temperature ranking, individual fan RPM, CPU/IO/MEM/SYS performance, power, voltage, current, and a full SDR hardware type plus status treemap.
 - Explicit failures: missing bundled `ipmitool.exe`, authentication errors, iDRAC privilege errors, and unsupported firmware commands are shown directly.
 - Password can be stored locally with Windows DPAPI; it is not committed to the repository.
 
 ## Screens
 
-- Overview: temperature board, fan RPM board, power and health board, quick actions, recent logs.
+- Overview: interactive chart board, temperature board, fan RPM board, power and health board, quick actions, recent logs.
 - Fan Control: editable presets, current running mode, all-fan control, Fan 1-6 individual control, smart auto thresholds.
 - Sensors: complete `ipmitool sdr elist` table.
 - Settings: iDRAC credentials, read-only bundled `ipmitool.exe` path, tray behavior, fan count, polling interval, timeout, theme, interface language, and auto policy range.
@@ -39,6 +40,7 @@ Windows WinUI 3 desktop app for managing Dell PowerEdge R730xd fan speed through
 - Reachable Dell PowerEdge R730xd iDRAC/BMC.
 - IPMI over LAN enabled in iDRAC.
 - Bundled `BundledTools/ipmitool/ipmitool.exe`.
+- Bundled chart asset `Assets/Charts/echarts.min.js`; runtime does not depend on an online CDN.
 - iDRAC user with enough privilege to send OEM raw IPMI commands.
 
 ## Build
