@@ -18,7 +18,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar x:Name="AppTitleBar" Title="Dell R730xd iDRAC Fan Control Center / R730XD 智控风扇中心">
+        <TitleBar x:Name="AppTitleBar" Title="R730XD 智控风扇中心">
             <TitleBar.IconSource>
                 <ImageIconSource ImageSource="Assets/AppIcon.ico" />
             </TitleBar.IconSource>

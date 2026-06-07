@@ -21,6 +21,12 @@ public sealed partial class MainPage : Page
     private bool _syncingAllFanControls;
     private bool _autoPolicyTickRunning;
     private bool _sensorPollingTickRunning;
+    private bool _loadingSettings;
+    private bool _autoPolicyRunning;
+    private bool _hasDisconnected;
+    private DateTime? _lastPollTime;
+    private string _modeSummaryKey = "Mode.Idle";
+    private object[] _modeSummaryArgs = Array.Empty<object>();
 
     public MainPage()
     {
@@ -58,10 +64,12 @@ public sealed partial class MainPage : Page
     private void OnPageLoaded(object sender, RoutedEventArgs e)
     {
         _settings = _settingsStore.Load();
+        LocalizationService.SetLanguage(_settings.Language);
         LoadSettingsToControls(_settings);
-        RebuildFanChannels();
         ApplyTheme(_settings.Theme);
-        AddLog("Info", "Application loaded. Settings are ready.");
+        ApplyLocalization();
+        RebuildFanChannels();
+        AddLog(T("Log.Info"), T("Status.Loaded"));
         if (!string.IsNullOrWhiteSpace(PasswordBox.Password))
         {
             _ = ConnectAndStartPollingAsync();
@@ -87,31 +95,41 @@ public sealed partial class MainPage : Page
 
     private void LoadSettingsToControls(AppSettings settings)
     {
-        HostBox.Text = settings.Host;
-        UserNameBox.Text = settings.UserName;
-        PasswordBox.Password = settings.RememberPassword ? _settingsStore.UnprotectPassword(settings.ProtectedPassword) : string.Empty;
-        RememberPasswordSwitch.IsOn = settings.RememberPassword;
-        IpmiToolPathBox.Text = IpmiCommandService.ResolveToolPath(settings.IpmiToolPath);
-        FanCountBox.Value = settings.FanCount;
-        CommandTimeoutBox.Value = settings.CommandTimeoutSeconds;
-        SensorRefreshSecondsBox.Value = settings.SensorRefreshSeconds;
-        MinimizeToTraySwitch.IsOn = settings.MinimizeToTrayOnClose;
-        IndividualFanSwitch.IsOn = settings.EnableIndividualFanTargets;
-        TargetTempBox.Value = settings.TargetCpuTemperatureCelsius;
-        HighTempBox.Value = settings.HighCpuTemperatureCelsius;
-        EmergencyTempBox.Value = settings.EmergencyCpuTemperatureCelsius;
-        AutoMinFanBox.Value = settings.AutoMinimumFanPercent;
-        AutoMaxFanBox.Value = settings.AutoMaximumFanPercent;
-        AllFanSlider.Value = settings.DefaultAllFanPercent;
-        AllFanPercentBox.Value = settings.DefaultAllFanPercent;
-        CurrentTargetText.Text = settings.Host;
-
-        ThemeComboBox.SelectedIndex = settings.Theme switch
+        _loadingSettings = true;
+        try
         {
-            "Light" => 1,
-            "Dark" => 2,
-            _ => 0,
-        };
+            HostBox.Text = settings.Host;
+            UserNameBox.Text = settings.UserName;
+            PasswordBox.Password = settings.RememberPassword ? _settingsStore.UnprotectPassword(settings.ProtectedPassword) : string.Empty;
+            RememberPasswordSwitch.IsOn = settings.RememberPassword;
+            IpmiToolPathBox.Text = IpmiCommandService.ResolveToolPath(settings.IpmiToolPath);
+            FanCountBox.Value = settings.FanCount;
+            CommandTimeoutBox.Value = settings.CommandTimeoutSeconds;
+            SensorRefreshSecondsBox.Value = settings.SensorRefreshSeconds;
+            MinimizeToTraySwitch.IsOn = settings.MinimizeToTrayOnClose;
+            IndividualFanSwitch.IsOn = settings.EnableIndividualFanTargets;
+            TargetTempBox.Value = settings.TargetCpuTemperatureCelsius;
+            HighTempBox.Value = settings.HighCpuTemperatureCelsius;
+            EmergencyTempBox.Value = settings.EmergencyCpuTemperatureCelsius;
+            AutoMinFanBox.Value = settings.AutoMinimumFanPercent;
+            AutoMaxFanBox.Value = settings.AutoMaximumFanPercent;
+            AllFanSlider.Value = settings.DefaultAllFanPercent;
+            AllFanPercentBox.Value = settings.DefaultAllFanPercent;
+            CurrentTargetText.Text = settings.Host;
+
+            ThemeComboBox.SelectedIndex = settings.Theme switch
+            {
+                "Light" => 1,
+                "Dark" => 2,
+                _ => 0,
+            };
+
+            LanguageComboBox.SelectedIndex = settings.Language.Equals("en-US", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        }
+        finally
+        {
+            _loadingSettings = false;
+        }
     }
 
     private void CaptureSettingsFromControls()
@@ -123,31 +141,34 @@ public sealed partial class MainPage : Page
             ? _settingsStore.ProtectPassword(PasswordBox.Password)
             : string.Empty;
         _settings.IpmiToolPath = AppSettings.BundledIpmiToolRelativePath;
-        _settings.FanCount = ReadInt(FanCountBox, "Fan count");
-        _settings.CommandTimeoutSeconds = ReadInt(CommandTimeoutBox, "Command timeout");
-        _settings.SensorRefreshSeconds = Math.Max(1, ReadInt(SensorRefreshSecondsBox, "Sensor refresh seconds"));
+        _settings.Language = GetSelectedLanguage();
+        LocalizationService.SetLanguage(_settings.Language);
+        _settings.FanCount = ReadInt(FanCountBox, T("Field.FanCount"));
+        _settings.CommandTimeoutSeconds = ReadInt(CommandTimeoutBox, T("Field.CommandTimeout"));
+        _settings.SensorRefreshSeconds = Math.Max(1, ReadInt(SensorRefreshSecondsBox, T("Field.SensorRefreshSeconds")));
         _settings.MinimizeToTrayOnClose = MinimizeToTraySwitch.IsOn;
         _settings.EnableIndividualFanTargets = IndividualFanSwitch.IsOn;
-        _settings.TargetCpuTemperatureCelsius = ReadDouble(TargetTempBox, "Target temperature");
-        _settings.HighCpuTemperatureCelsius = ReadDouble(HighTempBox, "High temperature");
-        _settings.EmergencyCpuTemperatureCelsius = ReadDouble(EmergencyTempBox, "Emergency temperature");
-        _settings.AutoMinimumFanPercent = ReadInt(AutoMinFanBox, "Auto minimum fan percent");
-        _settings.AutoMaximumFanPercent = ReadInt(AutoMaxFanBox, "Auto maximum fan percent");
+        _settings.TargetCpuTemperatureCelsius = ReadDouble(TargetTempBox, T("Field.TargetTemperature"));
+        _settings.HighCpuTemperatureCelsius = ReadDouble(HighTempBox, T("Field.HighTemperature"));
+        _settings.EmergencyCpuTemperatureCelsius = ReadDouble(EmergencyTempBox, T("Field.EmergencyTemperature"));
+        _settings.AutoMinimumFanPercent = ReadInt(AutoMinFanBox, T("Field.AutoMinimumFanPercent"));
+        _settings.AutoMaximumFanPercent = ReadInt(AutoMaxFanBox, T("Field.AutoMaximumFanPercent"));
         _settings.Theme = GetSelectedTheme();
 
         if (_settings.AutoMinimumFanPercent > _settings.AutoMaximumFanPercent)
         {
-            throw new InvalidOperationException("Auto minimum fan percent must be less than or equal to auto maximum fan percent.");
+            throw new InvalidOperationException(T("Validation.AutoFanRange"));
         }
 
         if (_settings.TargetCpuTemperatureCelsius >= _settings.HighCpuTemperatureCelsius ||
             _settings.HighCpuTemperatureCelsius >= _settings.EmergencyCpuTemperatureCelsius)
         {
-            throw new InvalidOperationException("Temperature thresholds must be ordered as Target < High < Emergency.");
+            throw new InvalidOperationException(T("Validation.TemperatureOrder"));
         }
 
         CurrentTargetText.Text = _settings.Host;
         ApplyTheme(_settings.Theme);
+        ApplyLocalization();
         IpmiToolPathBox.Text = IpmiCommandService.ResolveToolPath(_settings.IpmiToolPath);
     }
 
@@ -190,22 +211,22 @@ public sealed partial class MainPage : Page
 
     private async Task RefreshSensorsAsync()
     {
-        await RunUiCommandAsync("Refreshing sensors", async token =>
+        await RunUiCommandAsync(T("Status.RefreshingSensors"), async token =>
         {
             await RefreshSensorsCoreAsync(ReadProfile(), token);
-            ShowStatus("传感器已刷新 / Sensors refreshed", InfoBarSeverity.Success);
+            ShowStatus(T("Status.SensorsRefreshed"), InfoBarSeverity.Success);
         });
     }
 
     private async Task ConnectAndStartPollingAsync()
     {
-        await RunUiCommandAsync("Connecting to iDRAC and starting polling", async token =>
+        await RunUiCommandAsync(T("Status.Connecting"), async token =>
         {
             var profile = ReadProfile();
             await _ipmi.TestConnectionAsync(profile, token);
             StartSensorPolling();
             await RefreshSensorsCoreAsync(profile, token);
-            ShowStatus("已连接并开始自动轮询 / Connected and polling", InfoBarSeverity.Success);
+            ShowStatus(T("Status.ConnectedPolling"), InfoBarSeverity.Success);
         });
     }
 
@@ -214,15 +235,17 @@ public sealed partial class MainPage : Page
         var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
         _sensorPollingTimer.Interval = TimeSpan.FromSeconds(intervalSeconds);
         _sensorPollingTimer.Start();
-        ConnectionStateText.Text = $"已连接，{intervalSeconds}s 轮询 / Connected";
-        AddLog("Info", $"Sensor polling started at {intervalSeconds}s interval.");
+        _hasDisconnected = false;
+        UpdatePollingStatusTexts();
+        AddLog(T("Log.Info"), F("Status.PollingStarted", intervalSeconds));
     }
 
     private void StopSensorPolling(string reason)
     {
         _sensorPollingTimer.Stop();
-        ConnectionStateText.Text = "已断开 / Disconnected";
-        AddLog("Warn", $"Sensor polling stopped: {reason}");
+        _hasDisconnected = true;
+        UpdatePollingStatusTexts();
+        AddLog(T("Log.Warn"), F("Status.PollingStopped", reason));
     }
 
     private async void OnSensorPollingTimerTick(object? sender, object e)
@@ -260,22 +283,22 @@ public sealed partial class MainPage : Page
         var readings = await _ipmi.ReadSensorsAsync(profile, token);
         ReplaceSensors(readings);
         UpdateMetricSummaries();
-        LastPollText.Text = $"最后轮询 / Last poll {DateTime.Now:HH:mm:ss}";
-        ConnectionStateText.Text = $"已连接，{Math.Max(1, _settings.SensorRefreshSeconds)}s 轮询 · {DateTime.Now:HH:mm:ss}";
+        _lastPollTime = DateTime.Now;
+        UpdatePollingStatusTexts();
     }
 
     private async void OnSetAllFansClick(object sender, RoutedEventArgs e)
     {
-        await ApplyAllFansAsync(ReadInt(AllFanPercentBox, "All fan percent"));
+        await ApplyAllFansAsync(ReadInt(AllFanPercentBox, T("Field.AllFanPercent")));
     }
 
     private async Task ApplyAllFansAsync(int percent)
     {
-        await RunUiCommandAsync($"Setting all fans to {percent}%", async token =>
+        await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
         {
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
-            ModeSummaryText.Text = "Manual";
-            ShowStatus($"全部风扇已设置为 {percent}% / All fans set to {percent}%", InfoBarSeverity.Success);
+            SetModeSummary("Mode.Manual");
+            ShowStatus(F("Status.AllFansSet", percent), InfoBarSeverity.Success);
         });
     }
 
@@ -283,24 +306,24 @@ public sealed partial class MainPage : Page
     {
         if (!_settings.EnableIndividualFanTargets)
         {
-            ShowStatus("单风扇 raw target 未启用，请先在设置中开启。", InfoBarSeverity.Warning);
+            ShowStatus(T("Status.SingleFanDisabled"), InfoBarSeverity.Warning);
             return;
         }
 
         if (sender is not Button button || button.Tag is not int fanIndex)
         {
-            ShowStatus("无法识别风扇编号。", InfoBarSeverity.Error);
+            ShowStatus(T("Status.UnknownFan"), InfoBarSeverity.Error);
             return;
         }
 
         var channel = FanChannels.First(fan => fan.Index == fanIndex);
-        var percent = CheckedPercent(channel.Percent, $"Fan {fanIndex} percent");
+        var percent = CheckedPercent(channel.Percent, F("Field.SingleFanPercent", fanIndex));
 
-        await RunUiCommandAsync($"Setting Fan {fanIndex} to {percent}%", async token =>
+        await RunUiCommandAsync(F("Status.FanSet", fanIndex, percent), async token =>
         {
             await _ipmi.SetSingleFanManualSpeedAsync(ReadProfile(), fanIndex, percent, token);
-            ModeSummaryText.Text = "Manual";
-            ShowStatus($"Fan {fanIndex} 已设置为 {percent}%", InfoBarSeverity.Success);
+            SetModeSummary("Mode.Manual");
+            ShowStatus(F("Status.FanSet", fanIndex, percent), InfoBarSeverity.Success);
         });
     }
 
@@ -324,25 +347,25 @@ public sealed partial class MainPage : Page
 
     private async Task RestoreDefaultManualAsync()
     {
-        await RunUiCommandAsync($"Restoring manual {AppSettings.LocalDefaultManualFanPercent}% default", async token =>
+        await RunUiCommandAsync(F("Status.RestoringDefault", AppSettings.LocalDefaultManualFanPercent), async token =>
         {
             PersistSettingsFromControls();
             var percent = AppSettings.LocalDefaultManualFanPercent;
             AllFanSlider.Value = percent;
             AllFanPercentBox.Value = percent;
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
-            ModeSummaryText.Text = $"Manual {percent}%";
-            ShowStatus($"已还原为手动 {percent}% / Restored manual {percent}%", InfoBarSeverity.Success);
+            SetModeSummary("Mode.ManualPercent", percent);
+            ShowStatus(F("Status.RestoredDefault", percent), InfoBarSeverity.Success);
         });
     }
 
     private async Task ResetDellAutomaticModeAsync()
     {
-        await RunUiCommandAsync("Resetting Dell automatic fan mode", async token =>
+        await RunUiCommandAsync(T("Status.ResettingDellAuto"), async token =>
         {
             await _ipmi.SetDellAutomaticModeAsync(ReadProfile(), token);
-            ModeSummaryText.Text = "Dell Auto";
-            ShowStatus("已切回 Dell 自动风扇模式 / Dell automatic mode restored", InfoBarSeverity.Success);
+            SetModeSummary("Mode.DellAuto");
+            ShowStatus(T("Status.DellAutoRestored"), InfoBarSeverity.Success);
         });
     }
 
@@ -355,9 +378,9 @@ public sealed partial class MainPage : Page
             _autoPolicyTimer.Start();
             StartAutoButton.IsEnabled = false;
             StopAutoButton.IsEnabled = true;
-            AutoPolicySummaryText.Text = "软件自动策略运行中";
-            ModeSummaryText.Text = "Smart Auto";
-            AddLog("Info", "Smart auto policy started.");
+            SetAutoPolicySummary(true);
+            SetModeSummary("Mode.SmartAuto");
+            AddLog(T("Log.Info"), T("Status.AutoStarted"));
             await RunAutoPolicyOnceAsync(CancellationToken.None);
         }
         catch (Exception ex)
@@ -371,15 +394,15 @@ public sealed partial class MainPage : Page
         _autoPolicyTimer.Stop();
         StartAutoButton.IsEnabled = true;
         StopAutoButton.IsEnabled = false;
-        AutoPolicySummaryText.Text = "软件自动策略未运行";
-        AddLog("Info", "Smart auto policy stopped.");
+        SetAutoPolicySummary(false);
+        AddLog(T("Log.Info"), T("Status.AutoStopped"));
     }
 
     private async void OnAutoPolicyTimerTick(object? sender, object e)
     {
         if (_autoPolicyTickRunning)
         {
-            AddLog("Warn", "Skipped auto policy tick because the previous tick is still running.");
+            AddLog(T("Log.Warn"), T("Status.AutoTickSkipped"));
             return;
         }
 
@@ -411,14 +434,14 @@ public sealed partial class MainPage : Page
         if (cpuTemp >= _settings.EmergencyCpuTemperatureCelsius)
         {
             await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);
-            AddLog("Warn", $"CPU {cpuTemp:0.0} °C reached emergency threshold; Dell auto mode restored.");
-            ModeSummaryText.Text = "Dell Auto";
+            AddLog(T("Log.Warn"), F("Status.EmergencyAuto", cpuTemp));
+            SetModeSummary("Mode.DellAuto");
             return;
         }
 
         await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);
-        ModeSummaryText.Text = $"Smart {percent}%";
-        AddLog("Info", $"CPU {cpuTemp:0.0} °C -> all fans {percent}%.");
+        SetModeSummary("Mode.SmartPercent", percent);
+        AddLog(T("Log.Info"), F("Status.SmartFanApplied", cpuTemp, percent));
     }
 
     private int CalculateAutoFanPercent(double cpuTemp)
@@ -446,7 +469,7 @@ public sealed partial class MainPage : Page
             PersistSettingsFromControls();
             var url = $"https://{_settings.Host}/";
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            AddLog("Info", $"Opened iDRAC web console: {url}");
+            AddLog(T("Log.Info"), F("Status.OpenedIdrac", url));
         }
         catch (Exception ex)
         {
@@ -462,8 +485,9 @@ public sealed partial class MainPage : Page
         {
             PersistSettingsFromControls();
             RebuildFanChannels();
-            ShowStatus("设置已保存 / Settings saved", InfoBarSeverity.Success);
-            AddLog("Info", "Settings saved.");
+            ApplyLocalization();
+            ShowStatus(T("Status.SettingsSaved"), InfoBarSeverity.Success);
+            AddLog(T("Log.Info"), T("Status.SettingsSaved"));
 
             if (!string.IsNullOrWhiteSpace(PasswordBox.Password))
             {
@@ -505,6 +529,28 @@ public sealed partial class MainPage : Page
         if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
         {
             SelectView(tag);
+        }
+    }
+
+    private void OnLanguageSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingSettings)
+        {
+            return;
+        }
+
+        try
+        {
+            var language = GetSelectedLanguage();
+            LocalizationService.SetLanguage(language);
+            _settings.Language = language;
+            _settingsStore.Save(_settings);
+            ApplyLocalization();
+            AddLog(T("Log.Info"), F("Status.LanguageChanged", GetSelectedLanguageDisplayName(language)));
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
         }
     }
 
@@ -580,9 +626,9 @@ public sealed partial class MainPage : Page
                              sensor.NumericValue.HasValue)
             .ToList();
 
-        FanSummaryText.Text = $"{fanReadings.Count} fans";
+        FanSummaryText.Text = F("Overview.FansCount", fanReadings.Count);
         FanRpmSummaryText.Text = fanReadings.Count == 0
-            ? "未读取到风扇 RPM"
+            ? T("Overview.NoFanRpm")
             : $"{fanReadings.Min(f => f.NumericValue):0} - {fanReadings.Max(f => f.NumericValue):0} RPM";
         ReplaceTiles(
             FanTiles,
@@ -667,8 +713,8 @@ public sealed partial class MainPage : Page
     private void RebuildFanChannels()
     {
         FanChannels.Clear();
-        var fanCount = ReadInt(FanCountBox, "Fan count");
-        var defaultPercent = ReadInt(AllFanPercentBox, "Default all fan percent");
+        var fanCount = ReadInt(FanCountBox, T("Field.FanCount"));
+        var defaultPercent = ReadInt(AllFanPercentBox, T("Field.DefaultAllFanPercent"));
         for (var fan = 1; fan <= fanCount; fan++)
         {
             FanChannels.Add(new FanChannelViewModel(fan, defaultPercent));
@@ -677,7 +723,7 @@ public sealed partial class MainPage : Page
 
     private void OnCommandCompleted(object? sender, CommandTraceEventArgs e)
     {
-        var level = e.Succeeded ? "OK" : "Fail";
+        var level = e.Succeeded ? T("Log.Ok") : T("Log.Fail");
         DispatcherQueue.TryEnqueue(() => AddLog(level, $"{e.CommandLine} [{e.ExitCode}] {e.Elapsed.TotalSeconds:0.0}s"));
     }
 
@@ -690,7 +736,7 @@ public sealed partial class MainPage : Page
 
     private void ShowFailure(Exception ex)
     {
-        AddLog("Error", ex.Message);
+        AddLog(T("Log.Error"), ex.Message);
         ShowStatus(ex.Message, InfoBarSeverity.Error);
     }
 
@@ -703,38 +749,38 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private static int ReadInt(NumberBox numberBox, string fieldName)
+    private int ReadInt(NumberBox numberBox, string fieldName)
     {
         if (double.IsNaN(numberBox.Value))
         {
-            throw new InvalidOperationException($"{fieldName} is empty.");
+            throw new InvalidOperationException(F("Validation.Empty", fieldName));
         }
 
         return CheckedPercentLikeInteger(numberBox.Value, fieldName);
     }
 
-    private static int CheckedPercent(double value, string fieldName)
+    private int CheckedPercent(double value, string fieldName)
     {
         var percent = CheckedPercentLikeInteger(value, fieldName);
         AppSettings.ValidatePercent(percent, fieldName);
         return percent;
     }
 
-    private static int CheckedPercentLikeInteger(double value, string fieldName)
+    private int CheckedPercentLikeInteger(double value, string fieldName)
     {
         if (double.IsNaN(value))
         {
-            throw new InvalidOperationException($"{fieldName} is empty.");
+            throw new InvalidOperationException(F("Validation.Empty", fieldName));
         }
 
         return (int)Math.Round(value, MidpointRounding.AwayFromZero);
     }
 
-    private static double ReadDouble(NumberBox numberBox, string fieldName)
+    private double ReadDouble(NumberBox numberBox, string fieldName)
     {
         if (double.IsNaN(numberBox.Value))
         {
-            throw new InvalidOperationException($"{fieldName} is empty.");
+            throw new InvalidOperationException(F("Validation.Empty", fieldName));
         }
 
         return numberBox.Value;
@@ -745,6 +791,18 @@ public sealed partial class MainPage : Page
         return ThemeComboBox.SelectedItem is ComboBoxItem item && item.Tag is string tag ? tag : "Default";
     }
 
+    private string GetSelectedLanguage()
+    {
+        return LanguageComboBox.SelectedItem is ComboBoxItem item && item.Tag is string tag
+            ? tag
+            : LocalizationService.DefaultLanguage;
+    }
+
+    private static string GetSelectedLanguageDisplayName(string language)
+    {
+        return LocalizationService.SupportedLanguages.First(option => option.Code == language).DisplayName;
+    }
+
     private void ApplyTheme(string theme)
     {
         RequestedTheme = theme switch
@@ -753,5 +811,76 @@ public sealed partial class MainPage : Page
             "Dark" => ElementTheme.Dark,
             _ => ElementTheme.Default,
         };
+    }
+
+    private void ApplyLocalization()
+    {
+        Localization.Apply(this);
+        App.CurrentWindow?.ApplyLocalization();
+        CurrentTargetText.Text = _settings.Host;
+        FanSummaryText.Text = F("Overview.FansCount", _settings.FanCount);
+        if (Sensors.Count == 0)
+        {
+            FanRpmSummaryText.Text = T("State.WaitingRefresh");
+        }
+        else
+        {
+            UpdateMetricSummaries();
+        }
+
+        SetModeSummary(_modeSummaryKey, _modeSummaryArgs);
+        SetAutoPolicySummary(_autoPolicyRunning);
+        UpdatePollingStatusTexts();
+
+        foreach (var fanChannel in FanChannels)
+        {
+            fanChannel.RefreshLocalization();
+        }
+    }
+
+    private void SetModeSummary(string key, params object[] args)
+    {
+        _modeSummaryKey = key;
+        _modeSummaryArgs = args;
+        ModeSummaryText.Text = args.Length == 0 ? T(key) : F(key, args);
+    }
+
+    private void SetAutoPolicySummary(bool running)
+    {
+        _autoPolicyRunning = running;
+        AutoPolicySummaryText.Text = T(running ? "Status.AutoStarted" : "Status.AutoStopped");
+    }
+
+    private void UpdatePollingStatusTexts()
+    {
+        if (_lastPollTime.HasValue)
+        {
+            LastPollText.Text = F("Overview.LastPoll", _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
+        }
+        else
+        {
+            LastPollText.Text = T("Overview.WaitingPoll");
+        }
+
+        if (_sensorPollingTimer.IsEnabled)
+        {
+            var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
+            ConnectionStateText.Text = _lastPollTime.HasValue
+                ? F("State.ConnectedPollingTime", intervalSeconds, _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
+                : F("State.ConnectedPolling", intervalSeconds);
+            return;
+        }
+
+        ConnectionStateText.Text = _hasDisconnected ? T("State.Disconnected") : T("State.NotConnected");
+    }
+
+    private static string T(string key)
+    {
+        return LocalizationService.T(key);
+    }
+
+    private static string F(string key, params object[] args)
+    {
+        return LocalizationService.Format(key, args);
     }
 }

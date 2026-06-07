@@ -85,6 +85,12 @@ public sealed class TrayIconManager : IDisposable
         ShellNotifyIcon(NimModify, ref data);
     }
 
+    public void UpdateTip()
+    {
+        var data = CreateNotifyIconData(NifTip);
+        ShellNotifyIcon(NimModify, ref data);
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -109,7 +115,7 @@ public sealed class TrayIconManager : IDisposable
             Flags = flags,
             CallbackMessage = TrayCallbackMessage,
             IconHandle = _iconHandle,
-            Tip = "R730XD Fan Control Center",
+            Tip = LocalizationService.T("App.TrayTip"),
         };
     }
 
@@ -155,15 +161,15 @@ public sealed class TrayIconManager : IDisposable
 
         try
         {
-            AppendMenu(menu, MfString, RestoreCommand, "打开主窗口 / Restore");
+            AppendMenu(menu, MfString, RestoreCommand, LocalizationService.T("Tray.Restore"));
             AppendMenu(menu, MfSeparator, 0, string.Empty);
-            AppendMenu(menu, MfString, Fans20Command, "全部风扇 20% / All fans 20%");
-            AppendMenu(menu, MfString, Fans35Command, "全部风扇 35% / All fans 35%");
-            AppendMenu(menu, MfString, Fans50Command, "全部风扇 50% / All fans 50%");
-            AppendMenu(menu, MfString, RestoreDefaultCommand, "还原手动 10% / Restore 10%");
+            AppendMenu(menu, MfString, Fans20Command, LocalizationService.T("Tray.AllFans20"));
+            AppendMenu(menu, MfString, Fans35Command, LocalizationService.T("Tray.AllFans35"));
+            AppendMenu(menu, MfString, Fans50Command, LocalizationService.T("Tray.AllFans50"));
+            AppendMenu(menu, MfString, RestoreDefaultCommand, LocalizationService.T("Tray.RestoreDefault"));
             AppendMenu(menu, MfSeparator, 0, string.Empty);
-            AppendMenu(menu, MfString, SettingsCommand, "设置 / Settings");
-            AppendMenu(menu, MfString, ExitCommand, "退出 / Exit");
+            AppendMenu(menu, MfString, SettingsCommand, LocalizationService.T("Tray.Settings"));
+            AppendMenu(menu, MfString, ExitCommand, LocalizationService.T("Tray.Exit"));
 
             SetForegroundWindow(_windowHandle);
             var command = TrackPopupMenuEx(menu, TpmReturNcmd | TpmRightButton, point.X, point.Y, _windowHandle, IntPtr.Zero);

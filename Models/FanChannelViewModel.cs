@@ -17,9 +17,11 @@ public sealed class FanChannelViewModel : INotifyPropertyChanged
 
     public int Index { get; }
 
-    public string DisplayName => $"Fan {Index}";
+    public string DisplayName => LocalizationService.Format("Control.FanDisplayName", Index);
 
-    public string ChineseName => $"{Index} 号风扇";
+    public string ChineseName => LocalizationService.Format("Control.FanSubtitle", Index);
+
+    public string SetButtonLabel => LocalizationService.T("Control.Set");
 
     public double Percent
     {
@@ -39,5 +41,12 @@ public sealed class FanChannelViewModel : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    public void RefreshLocalization()
+    {
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(ChineseName));
+        OnPropertyChanged(nameof(SetButtonLabel));
     }
 }

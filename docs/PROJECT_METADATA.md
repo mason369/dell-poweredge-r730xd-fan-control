@@ -1,6 +1,8 @@
-# Project Metadata / 项目元数据
+# 项目元数据
 
-## English Name
+语言：中文 | [English](PROJECT_METADATA.en-US.md)
+
+## 英文名称
 
 Dell R730xd iDRAC Fan Control Center
 
@@ -8,19 +10,15 @@ Dell R730xd iDRAC Fan Control Center
 
 R730XD 智控风扇中心
 
-## GitHub Repository
+## GitHub 仓库
 
 `r730xd-idrac-fan-control-center`
 
-## Short Description
+## 项目简介
 
-WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, sensor monitoring, smart temperature automation, and tray quick actions.
+面向 Dell PowerEdge R730xd 的 WinUI 3 桌面风扇控制工具，支持 iDRAC/IPMI 调速、传感器监控、温度自动策略、界面 i18n 与托盘快捷操作。
 
-## 中文简介
-
-面向 Dell PowerEdge R730xd 的 WinUI 3 桌面风扇控制工具，支持 iDRAC/IPMI 调速、传感器监控、温度自动策略与托盘快捷操作。
-
-## Topics / 标签
+## 标签
 
 - dell
 - poweredge
@@ -35,8 +33,6 @@ WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, sensor mon
 - windows
 - dotnet
 
-## Logo Concept / Logo 设计
+## Logo 设计
 
-The logo combines a rack server front panel, a turbine fan, and an amber status line. The search-facing product name keeps the important keywords: Dell, R730xd, iDRAC, Fan Control.
-
-Logo 由服务器前面板、涡轮风扇和黄色状态线组成。英文名称保留 Dell、R730xd、iDRAC、Fan Control 等搜索关键词。
+Logo 由服务器前面板、涡轮风扇和黄色状态线组成。英文名称保留 Dell、R730xd、iDRAC、Fan Control 等搜索关键词，中文名称突出 R730XD 与“智控风扇中心”。

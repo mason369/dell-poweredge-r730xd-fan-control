@@ -31,12 +31,12 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
-        AppWindow.Title = "Dell R730xd iDRAC Fan Control Center";
         AppWindow.Closing += OnAppWindowClosing;
         Closed += OnWindowClosed;
 
         _windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         _trayIcon = CreateTrayIcon();
+        ApplyLocalization();
 
         // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
@@ -75,7 +75,15 @@ public sealed partial class MainWindow : Window
     private void HideToTray()
     {
         ShowWindow(_windowHandle, SwHide);
-        _trayIcon.ShowBalloon("R730XD 智控风扇中心", "软件仍在后台运行，可右击托盘图标快速控制风扇。");
+        _trayIcon.ShowBalloon(LocalizationService.T("Tray.BalloonTitle"), LocalizationService.T("Tray.BalloonMessage"));
+    }
+
+    public void ApplyLocalization()
+    {
+        var title = LocalizationService.T("App.Title");
+        AppWindow.Title = title;
+        AppTitleBar.Title = title;
+        _trayIcon.UpdateTip();
     }
 
     private void RestoreFromTray()

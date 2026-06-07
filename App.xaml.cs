@@ -13,6 +13,8 @@ public partial class App : Application
 {
     private Window? _window;
 
+    public static MainWindow? CurrentWindow { get; private set; }
+
     /// <summary>
     /// Initializes the singleton application object.
     /// </summary>
@@ -38,7 +40,8 @@ public partial class App : Application
     {
         try
         {
-            _window = new MainWindow();
+            CurrentWindow = new MainWindow();
+            _window = CurrentWindow;
             _window.Activate();
         }
         catch (Exception ex)

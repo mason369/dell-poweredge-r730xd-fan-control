@@ -48,6 +48,11 @@ public sealed class SettingsStore
         {
             settings.SensorRefreshSeconds = 1;
         }
+
+        if (string.IsNullOrWhiteSpace(settings.Language) || !LocalizationService.IsSupportedLanguage(settings.Language))
+        {
+            settings.Language = LocalizationService.DefaultLanguage;
+        }
     }
 
     public string ProtectPassword(string password)

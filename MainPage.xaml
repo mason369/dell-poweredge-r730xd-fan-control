@@ -37,22 +37,35 @@
         PaneDisplayMode="LeftCompact"
         SelectionChanged="OnNavigationSelectionChanged">
         <NavigationView.MenuItems>
-            <NavigationViewItem Content="总览 Overview" IsSelected="True" Tag="Overview">
+            <NavigationViewItem
+                local:Localization.Key="Nav.Overview"
+                Content="总览"
+                IsSelected="True"
+                Tag="Overview">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE80F;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="风扇 Fan Control" Tag="Control">
+            <NavigationViewItem
+                local:Localization.Key="Nav.Control"
+                Content="风扇控制"
+                Tag="Control">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE9CA;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="传感器 Sensors" Tag="Sensors">
+            <NavigationViewItem
+                local:Localization.Key="Nav.Sensors"
+                Content="传感器"
+                Tag="Sensors">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE7B5;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem Content="设置 Settings" Tag="Settings">
+            <NavigationViewItem
+                local:Localization.Key="Nav.Settings"
+                Content="设置"
+                Tag="Settings">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE713;" />
                 </NavigationViewItem.Icon>
@@ -95,15 +108,18 @@
                                     Foreground="White"
                                     FontSize="13"
                                     FontWeight="SemiBold"
-                                    Text="Dell R730xd iDRAC Fan Control Center" />
+                                    local:Localization.Key="Hero.AppName"
+                                    Text="Dell R730xd iDRAC 风扇控制中心" />
                                 <TextBlock
                                     Foreground="White"
                                     FontSize="32"
                                     FontWeight="SemiBold"
+                                    local:Localization.Key="Hero.Title"
                                     Text="R730XD 智控风扇中心" />
                                 <TextBlock
                                     MaxWidth="780"
                                     Foreground="#DDEFFF"
+                                    local:Localization.Key="Hero.Subtitle"
                                     Text="监控 BMC 传感器，控制全部或单个风扇，支持 Dell 自动模式与软件恒温策略。" />
                             </StackPanel>
                             <StackPanel
@@ -114,7 +130,8 @@
                                 Spacing="8">
                                 <TextBlock
                                     Foreground="#DDEFFF"
-                                    Text="当前目标 / Current target" />
+                                    local:Localization.Key="Hero.Target"
+                                    Text="当前目标" />
                                 <TextBlock
                                     x:Name="CurrentTargetText"
                                     Foreground="White"
@@ -124,7 +141,7 @@
                                 <TextBlock
                                     x:Name="ConnectionStateText"
                                     Foreground="#DDEFFF"
-                                    Text="未连接 / Not connected" />
+                                    Text="未连接" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -145,22 +162,34 @@
 
                         <Border Grid.Column="0" Margin="0,0,12,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="8">
-                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="最高 CPU 温度 / Max CPU temp" />
+                                <TextBlock
+                                    local:Localization.Key="Overview.MaxCpuTemp"
+                                    Style="{StaticResource MutedTextStyle}"
+                                    Text="最高 CPU 温度" />
                                 <TextBlock x:Name="CpuTemperatureText" Style="{StaticResource MetricValueStyle}" Text="-- °C" />
-                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="来自 SDR 温度传感器" />
+                                <TextBlock
+                                    local:Localization.Key="Overview.FromSdrTemp"
+                                    Style="{StaticResource MutedTextStyle}"
+                                    Text="来自 SDR 温度传感器" />
                             </StackPanel>
                         </Border>
                         <Border Grid.Column="1" Margin="6,0,6,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="8">
-                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="风扇状态 / Fan status" />
-                                <TextBlock x:Name="FanSummaryText" Style="{StaticResource MetricValueStyle}" Text="6 fans" />
-                                <TextBlock x:Name="FanRpmSummaryText" Style="{StaticResource MutedTextStyle}" Text="等待刷新 / Waiting refresh" />
+                                <TextBlock
+                                    local:Localization.Key="Overview.FanStatus"
+                                    Style="{StaticResource MutedTextStyle}"
+                                    Text="风扇状态" />
+                                <TextBlock x:Name="FanSummaryText" Style="{StaticResource MetricValueStyle}" Text="6 个风扇" />
+                                <TextBlock x:Name="FanRpmSummaryText" Style="{StaticResource MutedTextStyle}" Text="等待刷新" />
                             </StackPanel>
                         </Border>
                         <Border Grid.Column="2" Margin="12,0,0,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="8">
-                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="控制模式 / Mode" />
-                                <TextBlock x:Name="ModeSummaryText" Style="{StaticResource MetricValueStyle}" Text="Idle" />
+                                <TextBlock
+                                    local:Localization.Key="Overview.Mode"
+                                    Style="{StaticResource MutedTextStyle}"
+                                    Text="控制模式" />
+                                <TextBlock x:Name="ModeSummaryText" Style="{StaticResource MetricValueStyle}" Text="待机" />
                                 <TextBlock x:Name="AutoPolicySummaryText" Style="{StaticResource MutedTextStyle}" Text="软件自动策略未运行" />
                             </StackPanel>
                         </Border>
@@ -173,15 +202,21 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="温度大看板 / Temperature Board" />
-                                        <TextBlock Style="{StaticResource MutedTextStyle}" Text="逐项显示 BMC SDR 中的每一个温度传感器。" />
+                                        <TextBlock
+                                            local:Localization.Key="Overview.TempBoard"
+                                            Style="{StaticResource SectionTitleStyle}"
+                                            Text="温度大看板" />
+                                        <TextBlock
+                                            local:Localization.Key="Overview.TempBoardHelp"
+                                            Style="{StaticResource MutedTextStyle}"
+                                            Text="逐项显示 BMC SDR 中的每一个温度传感器。" />
                                     </StackPanel>
                                     <TextBlock
                                         x:Name="LastPollText"
                                         Grid.Column="1"
                                         VerticalAlignment="Center"
                                         Style="{StaticResource MutedTextStyle}"
-                                        Text="等待轮询 / Waiting" />
+                                        Text="等待轮询" />
                                 </Grid>
                                 <GridView
                                     MaxHeight="300"
@@ -227,7 +262,10 @@
                             </Grid.ColumnDefinitions>
                             <Border Style="{StaticResource CardBorderStyle}">
                                 <StackPanel Spacing="12">
-                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="风扇 RPM 看板 / Fan RPM Board" />
+                                    <TextBlock
+                                        local:Localization.Key="Overview.FanBoard"
+                                        Style="{StaticResource SectionTitleStyle}"
+                                        Text="风扇 RPM 看板" />
                                     <GridView
                                         MaxHeight="260"
                                         IsItemClickEnabled="False"
@@ -265,7 +303,10 @@
                             </Border>
                             <Border Grid.Column="1" Style="{StaticResource CardBorderStyle}">
                                 <StackPanel Spacing="12">
-                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="功耗与状态 / Power &amp; Health" />
+                                    <TextBlock
+                                        local:Localization.Key="Overview.PowerHealth"
+                                        Style="{StaticResource SectionTitleStyle}"
+                                        Text="功耗与状态" />
                                     <ListView
                                         MaxHeight="260"
                                         ItemsSource="{x:Bind PowerTiles, Mode=OneWay}"
@@ -300,28 +341,38 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Spacing="14">
-                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="快速操作 / Quick Actions" />
+                                    <TextBlock
+                                        local:Localization.Key="Overview.QuickActions"
+                                        Style="{StaticResource SectionTitleStyle}"
+                                        Text="快速操作" />
                                     <CommandBar DefaultLabelPosition="Right" IsOpen="False">
                                         <AppBarButton
                                             Click="OnTestConnectionClick"
                                             Icon="Contact"
+                                            local:Localization.Key="Action.Connect"
                                             Label="连接" />
                                         <AppBarButton
                                             Click="OnRefreshSensorsClick"
                                             Icon="Refresh"
+                                            local:Localization.Key="Action.RefreshSensors"
                                             Label="刷新传感器" />
                                         <AppBarButton
                                             Click="OnRestoreDefaultClick"
                                             Icon="Sync"
+                                            local:Localization.Key="Action.Restore10"
                                             Label="还原 10%" />
                                         <AppBarButton
                                             Click="OnVisitIdracClick"
                                             Icon="World"
+                                            local:Localization.Key="Action.OpenIdrac"
                                             Label="打开 iDRAC" />
                                     </CommandBar>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Spacing="8">
-                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="全部风扇 / All Fans" />
+                                    <TextBlock
+                                        local:Localization.Key="Overview.AllFans"
+                                        Style="{StaticResource SectionTitleStyle}"
+                                        Text="全部风扇" />
                                     <Slider
                                         x:Name="AllFanSlider"
                                         Maximum="100"
@@ -345,7 +396,7 @@
                                         <Button Grid.Column="2" Click="OnSetAllFansClick">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <FontIcon FontSize="14" Glyph="&#xE74E;" />
-                                                <TextBlock Text="应用 / Apply" />
+                                                <TextBlock local:Localization.Key="Action.Apply" Text="应用" />
                                             </StackPanel>
                                         </Button>
                                     </Grid>
@@ -360,8 +411,14 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Spacing="10">
-                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="软件恒温策略 / Smart Auto Policy" />
-                                    <TextBlock Style="{StaticResource MutedTextStyle}" Text="按 CPU 温度线性调整全部风扇；达到紧急温度时切回 Dell 自动模式。" />
+                                    <TextBlock
+                                        local:Localization.Key="Control.SmartAutoPolicy"
+                                        Style="{StaticResource SectionTitleStyle}"
+                                        Text="软件恒温策略" />
+                                    <TextBlock
+                                        local:Localization.Key="Control.SmartAutoHelp"
+                                        Style="{StaticResource MutedTextStyle}"
+                                        Text="按 CPU 温度线性调整全部风扇；达到紧急温度时切回 Dell 自动模式。" />
                                     <Grid ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
@@ -370,7 +427,7 @@
                                         <Button x:Name="StartAutoButton" Click="OnStartAutoPolicyClick">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <FontIcon FontSize="14" Glyph="&#xE768;" />
-                                                <TextBlock Text="启动自动 / Start" />
+                                                <TextBlock local:Localization.Key="Action.StartAuto" Text="启动自动" />
                                             </StackPanel>
                                         </Button>
                                         <Button
@@ -380,13 +437,16 @@
                                             IsEnabled="False">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <FontIcon FontSize="14" Glyph="&#xE71A;" />
-                                                <TextBlock Text="停止 / Stop" />
+                                                <TextBlock local:Localization.Key="Action.Stop" Text="停止" />
                                             </StackPanel>
                                         </Button>
                                     </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Spacing="8">
-                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="最新日志 / Recent Log" />
+                                    <TextBlock
+                                        local:Localization.Key="Overview.RecentLog"
+                                        Style="{StaticResource SectionTitleStyle}"
+                                        Text="最新日志" />
                                     <ListView
                                         MaxHeight="220"
                                         ItemsSource="{x:Bind Logs, Mode=OneWay}"
@@ -420,7 +480,10 @@
 
                         <Border Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="16">
-                                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="预设模式 / Presets" />
+                                <TextBlock
+                                    local:Localization.Key="Control.Presets"
+                                    Style="{StaticResource SectionTitleStyle}"
+                                    Text="预设模式" />
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -431,31 +494,49 @@
                                     </Grid.ColumnDefinitions>
                                     <Button Click="OnRestoreDefaultClick">
                                         <StackPanel Spacing="4">
-                                            <TextBlock FontWeight="SemiBold" Text="默认 Restore" />
-                                            <TextBlock Style="{StaticResource MutedTextStyle}" Text="手动 10%" />
+                                            <TextBlock
+                                                local:Localization.Key="Control.Default"
+                                                FontWeight="SemiBold"
+                                                Text="默认" />
+                                            <TextBlock
+                                                local:Localization.Key="Control.Manual10"
+                                                Style="{StaticResource MutedTextStyle}"
+                                                Text="手动 10%" />
                                         </StackPanel>
                                     </Button>
                                     <Button Grid.Column="1" Click="OnPresetClick" Tag="20">
                                         <StackPanel Spacing="4">
-                                            <TextBlock FontWeight="SemiBold" Text="均衡 Balanced" />
+                                            <TextBlock
+                                                local:Localization.Key="Control.Balanced"
+                                                FontWeight="SemiBold"
+                                                Text="均衡" />
                                             <TextBlock Style="{StaticResource MutedTextStyle}" Text="20%" />
                                         </StackPanel>
                                     </Button>
                                     <Button Grid.Column="2" Click="OnPresetClick" Tag="35">
                                         <StackPanel Spacing="4">
-                                            <TextBlock FontWeight="SemiBold" Text="散热 Cooling" />
+                                            <TextBlock
+                                                local:Localization.Key="Control.Cooling"
+                                                FontWeight="SemiBold"
+                                                Text="散热" />
                                             <TextBlock Style="{StaticResource MutedTextStyle}" Text="35%" />
                                         </StackPanel>
                                     </Button>
                                     <Button Grid.Column="3" Click="OnPresetClick" Tag="50">
                                         <StackPanel Spacing="4">
-                                            <TextBlock FontWeight="SemiBold" Text="性能 Performance" />
+                                            <TextBlock
+                                                local:Localization.Key="Control.Performance"
+                                                FontWeight="SemiBold"
+                                                Text="性能" />
                                             <TextBlock Style="{StaticResource MutedTextStyle}" Text="50%" />
                                         </StackPanel>
                                     </Button>
                                     <Button Grid.Column="4" Click="OnResetAutoClick">
                                         <StackPanel Spacing="4">
-                                            <TextBlock FontWeight="SemiBold" Text="Dell 自动 Auto" />
+                                            <TextBlock
+                                                local:Localization.Key="Control.DellAuto"
+                                                FontWeight="SemiBold"
+                                                Text="Dell 自动" />
                                             <TextBlock Style="{StaticResource MutedTextStyle}" Text="BMC" />
                                         </StackPanel>
                                     </Button>
@@ -465,12 +546,19 @@
 
                         <Border Grid.Row="1" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="14">
-                                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="单风扇控制 / Individual Fans" />
+                                <TextBlock
+                                    local:Localization.Key="Control.IndividualFans"
+                                    Style="{StaticResource SectionTitleStyle}"
+                                    Text="单风扇控制" />
                                 <InfoBar
+                                    local:Localization.Key="Control.IndividualWarning"
                                     IsOpen="True"
                                     Severity="Warning"
                                     Message="单风扇 raw target 默认关闭。本机 R730XD/iDRAC 2.82 实测 0x00 target 会让全部风扇高转，启用前请确认你的固件映射。" />
-                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="启用后会发送 Dell OEM raw target byte：Fan 1-6 映射为 0x00-0x05。若行为不符合预期，请立即恢复 Dell 自动模式。" />
+                                <TextBlock
+                                    local:Localization.Key="Control.IndividualHelp"
+                                    Style="{StaticResource MutedTextStyle}"
+                                    Text="启用后会发送 Dell OEM raw target byte：Fan 1-6 映射为 0x00-0x05。若行为不符合预期，请立即恢复 Dell 自动模式。" />
                                 <ListView ItemsSource="{x:Bind FanChannels, Mode=OneWay}" SelectionMode="None">
                                     <ListView.ItemTemplate>
                                         <DataTemplate>
@@ -504,7 +592,7 @@
                                                     Tag="{Binding Index}">
                                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                                         <FontIcon FontSize="14" Glyph="&#xE74E;" />
-                                                        <TextBlock Text="设置 / Set" />
+                                                        <TextBlock Text="{Binding SetButtonLabel}" />
                                                     </StackPanel>
                                                 </Button>
                                             </Grid>
@@ -523,19 +611,19 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Spacing="6">
-                                    <TextBlock Text="目标温度 / Target" />
+                                    <TextBlock local:Localization.Key="Control.TargetTemp" Text="目标温度" />
                                     <NumberBox x:Name="TargetTempBox" Maximum="95" Minimum="30" SpinButtonPlacementMode="Inline" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Spacing="6">
-                                    <TextBlock Text="高温 / High" />
+                                    <TextBlock local:Localization.Key="Control.HighTemp" Text="高温" />
                                     <NumberBox x:Name="HighTempBox" Maximum="100" Minimum="40" SpinButtonPlacementMode="Inline" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="2" Spacing="6">
-                                    <TextBlock Text="紧急自动 / Emergency" />
+                                    <TextBlock local:Localization.Key="Control.EmergencyAuto" Text="紧急自动" />
                                     <NumberBox x:Name="EmergencyTempBox" Maximum="105" Minimum="45" SpinButtonPlacementMode="Inline" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="3" Spacing="6">
-                                    <TextBlock Text="轮询秒数 / Poll seconds" />
+                                    <TextBlock local:Localization.Key="Control.PollSeconds" Text="轮询秒数" />
                                     <NumberBox x:Name="SensorRefreshSecondsBox" Maximum="300" Minimum="1" SpinButtonPlacementMode="Inline" />
                                 </StackPanel>
                             </Grid>
@@ -550,11 +638,14 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="BMC 传感器 / BMC Sensors" />
+                                    <TextBlock
+                                        local:Localization.Key="Sensors.Title"
+                                        Style="{StaticResource SectionTitleStyle}"
+                                        Text="BMC 传感器" />
                                     <Button Grid.Column="1" Click="OnRefreshSensorsClick">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE72C;" />
-                                            <TextBlock Text="刷新 / Refresh" />
+                                            <TextBlock local:Localization.Key="Action.Refresh" Text="刷新" />
                                         </StackPanel>
                                     </Button>
                                 </Grid>
@@ -572,12 +663,31 @@
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock FontWeight="SemiBold" Text="Key / 传感器" />
+                                            <TextBlock
+                                                local:Localization.Key="Sensors.Key"
+                                                FontWeight="SemiBold"
+                                                Text="传感器" />
                                             <TextBlock Grid.Column="1" FontWeight="SemiBold" Text="ID" />
-                                            <TextBlock Grid.Column="2" FontWeight="SemiBold" Text="Entity" />
-                                            <TextBlock Grid.Column="3" FontWeight="SemiBold" Text="Value / 读数" />
-                                            <TextBlock Grid.Column="4" FontWeight="SemiBold" Text="Unit / 单位" />
-                                            <TextBlock Grid.Column="5" FontWeight="SemiBold" Text="Status / 状态" />
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                local:Localization.Key="Sensors.Entity"
+                                                FontWeight="SemiBold"
+                                                Text="实体" />
+                                            <TextBlock
+                                                Grid.Column="3"
+                                                local:Localization.Key="Sensors.Value"
+                                                FontWeight="SemiBold"
+                                                Text="读数" />
+                                            <TextBlock
+                                                Grid.Column="4"
+                                                local:Localization.Key="Sensors.Unit"
+                                                FontWeight="SemiBold"
+                                                Text="单位" />
+                                            <TextBlock
+                                                Grid.Column="5"
+                                                local:Localization.Key="Sensors.Status"
+                                                FontWeight="SemiBold"
+                                                Text="状态" />
                                         </Grid>
                                     </ListView.Header>
                                     <ListView.ItemTemplate>
@@ -612,17 +722,28 @@
                         </Grid.ColumnDefinitions>
                         <Border Margin="0,0,9,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
-                                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="iDRAC 连接 / Connection" />
+                                <TextBlock
+                                    local:Localization.Key="Settings.Connection"
+                                    Style="{StaticResource SectionTitleStyle}"
+                                    Text="iDRAC 连接" />
                                 <TextBox x:Name="HostBox" Header="BMC/iDRAC IP" />
-                                <TextBox x:Name="UserNameBox" Header="用户名 / Username" />
+                                <TextBox
+                                    x:Name="UserNameBox"
+                                    local:Localization.Key="Settings.UserName"
+                                    Header="用户名" />
                                 <PasswordBox
                                     x:Name="PasswordBox"
-                                    Header="密码 / Password"
+                                    local:Localization.Key="Settings.Password"
+                                    Header="密码"
                                     PasswordRevealMode="Peek" />
-                                <ToggleSwitch x:Name="RememberPasswordSwitch" Header="使用 DPAPI 保存密码 / Remember password with DPAPI" />
+                                <ToggleSwitch
+                                    x:Name="RememberPasswordSwitch"
+                                    local:Localization.Key="Settings.RememberPassword"
+                                    Header="使用 DPAPI 保存密码" />
                                 <TextBox
                                     x:Name="IpmiToolPathBox"
-                                    Header="内置 ipmitool 路径 / Bundled ipmitool path"
+                                    local:Localization.Key="Settings.BundledIpmiPath"
+                                    Header="内置 ipmitool 路径"
                                     IsReadOnly="True" />
                                 <Grid ColumnSpacing="10">
                                     <Grid.ColumnDefinitions>
@@ -632,13 +753,13 @@
                                     <Button Click="OnSaveSettingsClick">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE74E;" />
-                                            <TextBlock Text="保存设置 / Save" />
+                                            <TextBlock local:Localization.Key="Action.Save" Text="保存设置" />
                                         </StackPanel>
                                     </Button>
                                     <Button Grid.Column="1" Click="OnTestConnectionClick">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                             <FontIcon FontSize="14" Glyph="&#xE8FB;" />
-                                            <TextBlock Text="连接 / Connect" />
+                                            <TextBlock local:Localization.Key="Action.Connect" Text="连接" />
                                         </StackPanel>
                                     </Button>
                                 </Grid>
@@ -646,17 +767,70 @@
                         </Border>
                         <Border Grid.Column="1" Margin="9,0,0,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
-                                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="应用设置 / Application" />
-                                <ToggleSwitch x:Name="MinimizeToTraySwitch" Header="点击关闭时最小化到托盘 / Minimize to tray on close" />
-                                <ToggleSwitch x:Name="IndividualFanSwitch" Header="启用单风扇 raw target / Enable individual fan targets" />
-                                <NumberBox x:Name="FanCountBox" Header="风扇数量 / Fan count" Maximum="6" Minimum="1" SpinButtonPlacementMode="Inline" />
-                                <NumberBox x:Name="CommandTimeoutBox" Header="命令超时秒数 / Command timeout seconds" Maximum="180" Minimum="5" SpinButtonPlacementMode="Inline" />
-                                <NumberBox x:Name="AutoMinFanBox" Header="自动策略最小风扇百分比 / Auto min fan %" Maximum="100" Minimum="0" SpinButtonPlacementMode="Inline" />
-                                <NumberBox x:Name="AutoMaxFanBox" Header="自动策略最大风扇百分比 / Auto max fan %" Maximum="100" Minimum="0" SpinButtonPlacementMode="Inline" />
-                                <ComboBox x:Name="ThemeComboBox" Header="主题 / Theme">
-                                    <ComboBoxItem Content="跟随系统 / System" Tag="Default" />
-                                    <ComboBoxItem Content="浅色 / Light" Tag="Light" />
-                                    <ComboBoxItem Content="深色 / Dark" Tag="Dark" />
+                                <TextBlock
+                                    local:Localization.Key="Settings.Application"
+                                    Style="{StaticResource SectionTitleStyle}"
+                                    Text="应用设置" />
+                                <ToggleSwitch
+                                    x:Name="MinimizeToTraySwitch"
+                                    local:Localization.Key="Settings.MinimizeToTray"
+                                    Header="点击关闭时最小化到托盘" />
+                                <ToggleSwitch
+                                    x:Name="IndividualFanSwitch"
+                                    local:Localization.Key="Settings.EnableIndividualFanTargets"
+                                    Header="启用单风扇 raw target" />
+                                <NumberBox
+                                    x:Name="FanCountBox"
+                                    local:Localization.Key="Settings.FanCount"
+                                    Header="风扇数量"
+                                    Maximum="6"
+                                    Minimum="1"
+                                    SpinButtonPlacementMode="Inline" />
+                                <NumberBox
+                                    x:Name="CommandTimeoutBox"
+                                    local:Localization.Key="Settings.CommandTimeout"
+                                    Header="命令超时秒数"
+                                    Maximum="180"
+                                    Minimum="5"
+                                    SpinButtonPlacementMode="Inline" />
+                                <NumberBox
+                                    x:Name="AutoMinFanBox"
+                                    local:Localization.Key="Settings.AutoMinFan"
+                                    Header="自动策略最小风扇百分比"
+                                    Maximum="100"
+                                    Minimum="0"
+                                    SpinButtonPlacementMode="Inline" />
+                                <NumberBox
+                                    x:Name="AutoMaxFanBox"
+                                    local:Localization.Key="Settings.AutoMaxFan"
+                                    Header="自动策略最大风扇百分比"
+                                    Maximum="100"
+                                    Minimum="0"
+                                    SpinButtonPlacementMode="Inline" />
+                                <ComboBox
+                                    x:Name="ThemeComboBox"
+                                    local:Localization.Key="Settings.Theme"
+                                    Header="主题">
+                                    <ComboBoxItem
+                                        local:Localization.Key="Theme.System"
+                                        Content="跟随系统"
+                                        Tag="Default" />
+                                    <ComboBoxItem
+                                        local:Localization.Key="Theme.Light"
+                                        Content="浅色"
+                                        Tag="Light" />
+                                    <ComboBoxItem
+                                        local:Localization.Key="Theme.Dark"
+                                        Content="深色"
+                                        Tag="Dark" />
+                                </ComboBox>
+                                <ComboBox
+                                    x:Name="LanguageComboBox"
+                                    local:Localization.Key="Settings.Language"
+                                    Header="界面语言"
+                                    SelectionChanged="OnLanguageSelectionChanged">
+                                    <ComboBoxItem Content="简体中文" Tag="zh-CN" />
+                                    <ComboBoxItem Content="English" Tag="en-US" />
                                 </ComboBox>
                             </StackPanel>
                         </Border>

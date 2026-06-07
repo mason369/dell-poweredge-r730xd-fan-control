@@ -42,6 +42,8 @@ public sealed class AppSettings
 
     public string Theme { get; set; } = "Default";
 
+    public string Language { get; set; } = "zh-CN";
+
     public static void ValidatePercent(int percent, string fieldName)
     {
         if (percent is < 0 or > 100)
