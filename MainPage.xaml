@@ -620,12 +620,15 @@
                                                                 Foreground="White"
                                                                 Glyph="{Binding IconGlyph}" />
                                                         </Border>
-                                                        <StackPanel Grid.Column="1" Spacing="2">
-                                                            <TextBlock
+                                                        <StackPanel Grid.Column="1" Spacing="4">
+                                                            <TextBox
+                                                                MinWidth="150"
+                                                                Padding="8,4"
                                                                 FontSize="16"
                                                                 FontWeight="SemiBold"
-                                                                Text="{Binding DisplayName}"
-                                                                TextTrimming="CharacterEllipsis" />
+                                                                Header="预设名称"
+                                                                local:Localization.Key="Preset.Name"
+                                                                Text="{Binding EditableName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                                             <TextBlock
                                                                 Style="{StaticResource MutedTextStyle}"
                                                                 Text="{Binding ModeBadge}"
@@ -660,12 +663,16 @@
                                                             Grid.Row="1"
                                                             Style="{StaticResource MutedTextStyle}"
                                                             Text="{Binding Subtitle}" />
-                                                        <TextBlock
+                                                        <TextBox
                                                             Grid.Row="2"
-                                                            MaxLines="2"
-                                                            Style="{StaticResource MutedTextStyle}"
-                                                            Text="{Binding Detail}"
-                                                            TextWrapping="WrapWholeWords" />
+                                                            AcceptsReturn="True"
+                                                            Header="预设说明"
+                                                            local:Localization.Key="Preset.Description"
+                                                            MaxLength="180"
+                                                            MaxHeight="76"
+                                                            MinHeight="64"
+                                                            Text="{Binding EditableDetail, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                            TextWrapping="Wrap" />
                                                     </Grid>
 
                                                     <NumberBox
@@ -676,7 +683,7 @@
                                                         Minimum="0"
                                                         SmallChange="1"
                                                         SpinButtonPlacementMode="Compact"
-                                                        Value="{Binding Percent, Mode=TwoWay}" />
+                                                        Value="{Binding Percent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                                                     <Grid Grid.Row="3" ColumnSpacing="8">
                                                         <Grid.ColumnDefinitions>
@@ -697,7 +704,7 @@
                                                         <Button
                                                             Grid.Column="1"
                                                             Click="OnSavePresetClick"
-                                                            IsEnabled="{Binding CanEditPercent}"
+                                                            IsEnabled="{Binding CanSave}"
                                                             Tag="{Binding Id}"
                                                             ToolTipService.ToolTip="{Binding SaveButtonLabel}">
                                                             <FontIcon FontSize="14" Glyph="&#xE74E;" />

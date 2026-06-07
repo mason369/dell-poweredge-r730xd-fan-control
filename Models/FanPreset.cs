@@ -18,6 +18,12 @@ public sealed class FanPreset
 
     public string NameKey { get; set; } = string.Empty;
 
+    public string Description { get; set; } = string.Empty;
+
+    public string DescriptionKey { get; set; } = string.Empty;
+
+    public bool HasCustomDescription { get; set; }
+
     public double Percent { get; set; } = AppSettings.LocalDefaultManualFanPercent;
 
     public bool IsBuiltIn { get; set; }
@@ -26,16 +32,68 @@ public sealed class FanPreset
     public bool IsManual => string.Equals(Kind, ManualKind, StringComparison.OrdinalIgnoreCase);
 
     [JsonIgnore]
-    public bool CanEditPercent => IsManual;
+    public bool IsPercentPreset =>
+        IsManual || string.Equals(Kind, RestoreManualKind, StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool CanEditPercent => IsPercentPreset;
 
     [JsonIgnore]
     public bool CanDelete => !IsBuiltIn;
 
     [JsonIgnore]
+    public bool CanSave => true;
+
+    [JsonIgnore]
     public bool IsActive { get; private set; }
 
     [JsonIgnore]
-    public string DisplayName => string.IsNullOrWhiteSpace(NameKey) ? Name : LocalizationService.T(NameKey);
+    public string DisplayName => string.IsNullOrWhiteSpace(NameKey) ? Name ?? string.Empty : LocalizationService.T(NameKey);
+
+    [JsonIgnore]
+    public string EditableName
+    {
+        get => DisplayName;
+        set
+        {
+            Name = (value ?? string.Empty).Trim();
+            NameKey = string.Empty;
+        }
+    }
+
+    [JsonIgnore]
+    public string EditableDetail
+    {
+        get => DisplayDetail;
+        set
+        {
+            Description = (value ?? string.Empty).Trim();
+            DescriptionKey = string.Empty;
+            HasCustomDescription = true;
+        }
+    }
+
+    [JsonIgnore]
+    public string DisplayDetail
+    {
+        get
+        {
+            if (HasCustomDescription)
+            {
+                return Description ?? string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(DescriptionKey))
+            {
+                return LocalizationService.T(DescriptionKey);
+            }
+
+            var defaultKey = DefaultDescriptionKey;
+            return string.IsNullOrWhiteSpace(defaultKey)
+                ? LocalizationService.T("Preset.CustomDetail")
+                : LocalizationService.T(defaultKey);
+        }
+    }
 
     [JsonIgnore]
     public string Subtitle
@@ -83,38 +141,16 @@ public sealed class FanPreset
     };
 
     [JsonIgnore]
-    public string Detail
+    public string DefaultDescriptionKey => Id switch
     {
-        get
-        {
-            if (string.Equals(Id, "restore-manual", StringComparison.OrdinalIgnoreCase))
-            {
-                return LocalizationService.T("Preset.RestoreManualDetail");
-            }
-
-            if (string.Equals(Id, "balanced", StringComparison.OrdinalIgnoreCase))
-            {
-                return LocalizationService.T("Preset.BalancedDetail");
-            }
-
-            if (string.Equals(Id, "cooling", StringComparison.OrdinalIgnoreCase))
-            {
-                return LocalizationService.T("Preset.CoolingDetail");
-            }
-
-            if (string.Equals(Id, "performance", StringComparison.OrdinalIgnoreCase))
-            {
-                return LocalizationService.T("Preset.PerformanceDetail");
-            }
-
-            if (string.Equals(Kind, DellAutoKind, StringComparison.OrdinalIgnoreCase))
-            {
-                return LocalizationService.T("Preset.DellAutoDetail");
-            }
-
-            return LocalizationService.T("Preset.CustomDetail");
-        }
-    }
+        "restore-manual" => "Preset.RestoreManualDetail",
+        "balanced" => "Preset.BalancedDetail",
+        "cooling" => "Preset.CoolingDetail",
+        "performance" => "Preset.PerformanceDetail",
+        "dell-auto" => "Preset.DellAutoDetail",
+        _ when string.Equals(Kind, DellAutoKind, StringComparison.OrdinalIgnoreCase) => "Preset.DellAutoDetail",
+        _ => "Preset.CustomDetail",
+    };
 
     [JsonIgnore]
     public string ModeBadge
@@ -153,6 +189,9 @@ public sealed class FanPreset
             Kind = Kind,
             Name = Name,
             NameKey = NameKey,
+            Description = Description,
+            DescriptionKey = DescriptionKey,
+            HasCustomDescription = HasCustomDescription,
             Percent = Percent,
             IsBuiltIn = IsBuiltIn,
         };
@@ -167,6 +206,7 @@ public sealed class FanPreset
                 Id = "restore-manual",
                 Kind = RestoreManualKind,
                 NameKey = "Control.Default",
+                DescriptionKey = "Preset.RestoreManualDetail",
                 Percent = AppSettings.LocalDefaultManualFanPercent,
                 IsBuiltIn = true,
             },
@@ -175,6 +215,7 @@ public sealed class FanPreset
                 Id = "balanced",
                 Kind = ManualKind,
                 NameKey = "Control.Balanced",
+                DescriptionKey = "Preset.BalancedDetail",
                 Percent = 20,
                 IsBuiltIn = true,
             },
@@ -183,6 +224,7 @@ public sealed class FanPreset
                 Id = "cooling",
                 Kind = ManualKind,
                 NameKey = "Control.Cooling",
+                DescriptionKey = "Preset.CoolingDetail",
                 Percent = 35,
                 IsBuiltIn = true,
             },
@@ -191,6 +233,7 @@ public sealed class FanPreset
                 Id = "performance",
                 Kind = ManualKind,
                 NameKey = "Control.Performance",
+                DescriptionKey = "Preset.PerformanceDetail",
                 Percent = 50,
                 IsBuiltIn = true,
             },
@@ -199,6 +242,7 @@ public sealed class FanPreset
                 Id = "dell-auto",
                 Kind = DellAutoKind,
                 NameKey = "Control.DellAuto",
+                DescriptionKey = "Preset.DellAutoDetail",
                 Percent = 0,
                 IsBuiltIn = true,
             },

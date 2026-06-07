@@ -542,7 +542,7 @@ public sealed partial class MainPage : Page
 
         if (string.Equals(preset.Kind, FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
         {
-            return RestoreDefaultManualAsync(preset.Id);
+            return RestoreDefaultManualAsync(preset.Id, CheckedPercent(preset.Percent, T("Field.AllFanPercent")));
         }
 
         if (string.Equals(preset.Kind, FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
@@ -567,12 +567,12 @@ public sealed partial class MainPage : Page
         });
     }
 
-    private async Task RestoreDefaultManualAsync(string? activePresetId = "restore-manual")
+    private async Task RestoreDefaultManualAsync(string? activePresetId = "restore-manual", int? percentOverride = null)
     {
-        await RunUiCommandAsync(F("Status.RestoringDefault", AppSettings.LocalDefaultManualFanPercent), async token =>
+        var percent = percentOverride ?? AppSettings.LocalDefaultManualFanPercent;
+        await RunUiCommandAsync(F("Status.RestoringDefault", percent), async token =>
         {
             PersistSettingsFromControls();
-            var percent = AppSettings.LocalDefaultManualFanPercent;
             AllFanSlider.Value = percent;
             AllFanPercentBox.Value = percent;
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
@@ -1499,7 +1499,7 @@ public sealed partial class MainPage : Page
         else if (clone.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
         {
             clone.Kind = FanPreset.RestoreManualKind;
-            clone.Percent = AppSettings.LocalDefaultManualFanPercent;
+            clone.Percent = CheckedPercent(clone.Percent, T("Field.AllFanPercent"));
         }
         else if (clone.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
         {
@@ -1516,7 +1516,8 @@ public sealed partial class MainPage : Page
             throw new InvalidOperationException(T("Validation.PresetNameRequired"));
         }
 
-        clone.Name = clone.Name.Trim();
+        clone.Name = (clone.Name ?? string.Empty).Trim();
+        clone.Description = (clone.Description ?? string.Empty).Trim();
         return clone;
     }
 

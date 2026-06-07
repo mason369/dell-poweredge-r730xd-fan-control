@@ -14,8 +14,22 @@ public sealed class SettingsStore
         WriteIndented = true,
     };
 
-    public string SettingsDirectory { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DellR730xdFanControlCenter");
+    public SettingsStore()
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DellR730xdFanControlCenter"))
+    {
+    }
+
+    public SettingsStore(string settingsDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(settingsDirectory))
+        {
+            throw new ArgumentException("Settings directory cannot be empty.", nameof(settingsDirectory));
+        }
+
+        SettingsDirectory = settingsDirectory;
+    }
+
+    public string SettingsDirectory { get; }
 
     public string SettingsPath => Path.Combine(SettingsDirectory, "settings.json");
 
@@ -70,64 +84,79 @@ public sealed class SettingsStore
 
         foreach (var preset in presets)
         {
-            if (string.IsNullOrWhiteSpace(preset.Id))
+            var clone = preset.Clone();
+            if (string.IsNullOrWhiteSpace(clone.Id))
             {
-                preset.Id = Guid.NewGuid().ToString("N");
+                clone.Id = Guid.NewGuid().ToString("N");
             }
 
-            if (string.IsNullOrWhiteSpace(preset.Kind))
-            {
-                throw new InvalidOperationException("Fan preset kind is empty.");
-            }
-
-            if (!preset.Kind.Equals(FanPreset.ManualKind, StringComparison.OrdinalIgnoreCase) &&
-                !preset.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase) &&
-                !preset.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException($"Unsupported fan preset kind: {preset.Kind}");
-            }
-
-            if (preset.IsManual)
-            {
-                preset.Kind = FanPreset.ManualKind;
-                AppSettings.ValidatePercent((int)Math.Round(preset.Percent, MidpointRounding.AwayFromZero), nameof(preset.Percent));
-            }
-            else if (preset.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
-            {
-                preset.Kind = FanPreset.RestoreManualKind;
-                preset.Percent = AppSettings.LocalDefaultManualFanPercent;
-            }
-            else if (preset.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
-            {
-                preset.Kind = FanPreset.DellAutoKind;
-                preset.Percent = 0;
-            }
-
-            if (string.IsNullOrWhiteSpace(preset.NameKey) && string.IsNullOrWhiteSpace(preset.Name))
-            {
-                throw new InvalidOperationException("Fan preset name is required.");
-            }
-
-            preset.Name = preset.Name.Trim();
-
-            var existing = normalized.FindIndex(item => item.Id.Equals(preset.Id, StringComparison.OrdinalIgnoreCase));
+            var existing = normalized.FindIndex(item => item.Id.Equals(clone.Id, StringComparison.OrdinalIgnoreCase));
             if (existing >= 0)
             {
-                var replacement = preset.Clone();
-                replacement.IsBuiltIn = normalized[existing].IsBuiltIn;
-                replacement.NameKey = string.IsNullOrWhiteSpace(normalized[existing].NameKey)
-                    ? replacement.NameKey
-                    : normalized[existing].NameKey;
-                replacement.Kind = normalized[existing].Kind;
-                normalized[existing] = replacement;
+                var builtInDefault = normalized[existing];
+                clone.IsBuiltIn = builtInDefault.IsBuiltIn;
+                clone.Kind = builtInDefault.Kind;
+
+                if (string.IsNullOrWhiteSpace(clone.Name) && string.IsNullOrWhiteSpace(clone.NameKey))
+                {
+                    clone.NameKey = builtInDefault.NameKey;
+                }
+
+                if (!clone.HasCustomDescription && string.IsNullOrWhiteSpace(clone.DescriptionKey))
+                {
+                    clone.DescriptionKey = builtInDefault.DescriptionKey;
+                }
+            }
+
+            NormalizePreset(clone);
+
+            if (existing >= 0)
+            {
+                normalized[existing] = clone;
             }
             else
             {
-                normalized.Add(preset.Clone());
+                normalized.Add(clone);
             }
         }
 
         return normalized;
+    }
+
+    private static void NormalizePreset(FanPreset preset)
+    {
+        if (string.IsNullOrWhiteSpace(preset.Kind))
+        {
+            throw new InvalidOperationException("Fan preset kind is empty.");
+        }
+
+        if (preset.Kind.Equals(FanPreset.ManualKind, StringComparison.OrdinalIgnoreCase))
+        {
+            preset.Kind = FanPreset.ManualKind;
+            AppSettings.ValidatePercent((int)Math.Round(preset.Percent, MidpointRounding.AwayFromZero), nameof(preset.Percent));
+        }
+        else if (preset.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
+        {
+            preset.Kind = FanPreset.RestoreManualKind;
+            AppSettings.ValidatePercent((int)Math.Round(preset.Percent, MidpointRounding.AwayFromZero), nameof(preset.Percent));
+        }
+        else if (preset.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
+        {
+            preset.Kind = FanPreset.DellAutoKind;
+            preset.Percent = 0;
+        }
+        else
+        {
+            throw new InvalidOperationException($"Unsupported fan preset kind: {preset.Kind}");
+        }
+
+        if (string.IsNullOrWhiteSpace(preset.NameKey) && string.IsNullOrWhiteSpace(preset.Name))
+        {
+            throw new InvalidOperationException("Fan preset name is required.");
+        }
+
+        preset.Name = (preset.Name ?? string.Empty).Trim();
+        preset.Description = (preset.Description ?? string.Empty).Trim();
     }
 
     public string ProtectPassword(string password)

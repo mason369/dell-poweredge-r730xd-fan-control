@@ -25,8 +25,8 @@ Different iDRAC firmware versions, backplanes, fan layouts, and sensor layouts c
 - Modern WinUI 3 interface with light, dark, and system theme support.
 - All-fan percentage control from 0-100%; the app enters manual fan mode before setting a percentage.
 - Local default restore action: manual mode plus all fans at 10%.
-- Built-in presets: Default 10%, Balanced 20%, Cooling 35%, Performance 50%, and Dell Auto.
-- Add, save, and delete custom manual percentage presets; built-in presets cannot be deleted.
+- Starter presets: Default 10%, Balanced 20%, Cooling 35%, Performance 50%, and Dell Auto.
+- Edit preset names, descriptions, and available percentages; add, save, and delete custom manual percentage presets. Starter presets cannot be deleted.
 - Dell automatic fan mode remains available as both a separate action and a preset entry.
 - Individual target-byte control for fans 1-6 is implemented but disabled by default.
 - Smart auto policy reads BMC CPU temperature and linearly adjusts all fans.
@@ -60,9 +60,10 @@ The Overview page is for observing hardware state and running common actions:
 
 The Fan Control page manages presets and advanced control:
 
-- The preset area shows the current mode, built-in presets, custom presets, and detailed descriptions.
+- The preset area shows the current mode, starter presets, custom presets, and editable descriptions.
 - Manual presets send Dell OEM raw commands for all-fan percentage control.
-- The Dell Auto preset restores the BMC firmware fan policy.
+- Default/restore and manual presets can edit their percentage; the quick restore action still keeps the local manual 10% baseline.
+- The Dell Auto preset restores the BMC firmware fan policy and does not expose a percentage field.
 - Adding a manual preset requires a name and validates the percentage from 0-100.
 - Saving a preset writes it to local settings, and the tray menu reads those saved presets.
 - Individual fan controls are disabled by default and must be enabled and saved in Settings.

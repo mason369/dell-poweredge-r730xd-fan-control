@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
+    <SelfContained>true</SelfContained>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\Models\AppSettings.cs" Link="Models\AppSettings.cs" />
+    <Compile Include="..\..\Models\FanPreset.cs" Link="Models\FanPreset.cs" />
+    <Compile Include="..\..\Models\LanguageOption.cs" Link="Models\LanguageOption.cs" />
+    <Compile Include="..\..\Services\LocalizationService.cs" Link="Services\LocalizationService.cs" />
+    <Compile Include="..\..\Services\SettingsStore.cs" Link="Services\SettingsStore.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+</Project>
