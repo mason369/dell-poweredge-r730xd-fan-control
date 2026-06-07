@@ -85,17 +85,27 @@
                 IsOpen="False"
                 Severity="Informational" />
 
-            <ScrollViewer Grid.Row="1">
-                <StackPanel Padding="24" Spacing="18">
+            <ScrollViewer
+                x:Name="ContentScrollViewer"
+                Grid.Row="1"
+                HorizontalAlignment="Stretch"
+                HorizontalScrollBarVisibility="Disabled"
+                HorizontalScrollMode="Disabled">
+                <StackPanel
+                    Width="{Binding ViewportWidth, ElementName=ContentScrollViewer}"
+                    HorizontalAlignment="Left"
+                    Padding="24"
+                    Spacing="18">
                     <Border
                         MinHeight="156"
                         Padding="24"
                         CornerRadius="8">
                         <Border.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#213448" Offset="0" />
-                                <GradientStop Color="#0E766E" Offset="0.55" />
-                                <GradientStop Color="#A16207" Offset="1" />
+                                <GradientStop Color="#0B1020" Offset="0" />
+                                <GradientStop Color="#104E64" Offset="0.42" />
+                                <GradientStop Color="#0EA5A4" Offset="0.72" />
+                                <GradientStop Color="#2F80ED" Offset="1" />
                             </LinearGradientBrush>
                         </Border.Background>
                         <Grid>
@@ -103,6 +113,26 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
+                            <Border
+                                Grid.ColumnSpan="2"
+                                Height="1"
+                                Margin="0,0,0,4"
+                                VerticalAlignment="Bottom"
+                                Background="#35FFFFFF" />
+                            <Border
+                                Grid.ColumnSpan="2"
+                                Width="520"
+                                Height="156"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Opacity="0.28">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="#00FFFFFF" Offset="0" />
+                                        <GradientStop Color="#60FFFFFF" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
                             <StackPanel Spacing="8">
                                 <TextBlock
                                     Foreground="White"
@@ -122,27 +152,33 @@
                                     local:Localization.Key="Hero.Subtitle"
                                     Text="监控 BMC 传感器，控制全部或单个风扇，支持 Dell 自动模式与软件恒温策略。" />
                             </StackPanel>
-                            <StackPanel
+                            <Border
                                 Grid.Column="1"
                                 MinWidth="230"
+                                Padding="18,14"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
-                                Spacing="8">
-                                <TextBlock
-                                    Foreground="#DDEFFF"
-                                    local:Localization.Key="Hero.Target"
-                                    Text="当前目标" />
-                                <TextBlock
-                                    x:Name="CurrentTargetText"
-                                    Foreground="White"
-                                    FontSize="20"
-                                    FontWeight="SemiBold"
-                                    Text="192.168.1.73" />
-                                <TextBlock
-                                    x:Name="ConnectionStateText"
-                                    Foreground="#DDEFFF"
-                                    Text="未连接" />
-                            </StackPanel>
+                                Background="#1FFFFFFF"
+                                BorderBrush="#38FFFFFF"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <StackPanel Spacing="8">
+                                    <TextBlock
+                                        Foreground="#D8F7FF"
+                                        local:Localization.Key="Hero.Target"
+                                        Text="当前目标" />
+                                    <TextBlock
+                                        x:Name="CurrentTargetText"
+                                        Foreground="White"
+                                        FontSize="20"
+                                        FontWeight="SemiBold"
+                                        Text="192.168.1.73" />
+                                    <TextBlock
+                                        x:Name="ConnectionStateText"
+                                        Foreground="#CFFAFE"
+                                        Text="未连接" />
+                                </StackPanel>
+                            </Border>
                         </Grid>
                     </Border>
 
