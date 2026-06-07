@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -846,7 +847,7 @@ public sealed partial class MainPage : Page
             TemperatureTiles,
             temperatureReadings.Select(sensor => new DashboardTileViewModel
             {
-                Title = BuildSensorTitle(sensor),
+                Title = BuildVisualizationSensorName(sensor),
                 Value = sensor.NumericValue!.Value.ToString("0.#", CultureInfo.InvariantCulture),
                 Unit = "°C",
                 Subtitle = BuildSensorSubtitle(sensor),
@@ -866,7 +867,7 @@ public sealed partial class MainPage : Page
             FanTiles,
             fanReadings.Select(sensor => new DashboardTileViewModel
             {
-                Title = sensor.Key,
+                Title = BuildVisualizationSensorName(sensor),
                 Value = sensor.NumericValue!.Value.ToString("0", CultureInfo.InvariantCulture),
                 Unit = "RPM",
                 Subtitle = BuildSensorSubtitle(sensor),
@@ -878,7 +879,7 @@ public sealed partial class MainPage : Page
             .Take(14)
             .Select(sensor => new DashboardTileViewModel
             {
-                Title = BuildSensorTitle(sensor),
+                Title = BuildVisualizationSensorName(sensor),
                 Value = string.IsNullOrWhiteSpace(sensor.Value) ? "--" : sensor.Value,
                 Unit = sensor.Unit,
                 Subtitle = BuildSensorSubtitle(sensor),
@@ -1027,6 +1028,9 @@ public sealed partial class MainPage : Page
             TrendSubtitle = T("Dashboard.TrendSubtitle"),
             TempUnit = "°C",
             CpuUsage = T("Dashboard.CpuUsage"),
+            MemoryUsage = T("Dashboard.MemoryUsage"),
+            IoUsage = T("Dashboard.IoUsage"),
+            SystemUsage = T("Dashboard.SystemUsage"),
             CurrentSnapshot = T("Dashboard.CurrentSnapshot"),
             OverallTitle = T("Dashboard.OverallTitle"),
             OverallSubtitle = T("Dashboard.OverallSubtitle"),
@@ -1110,7 +1114,7 @@ public sealed partial class MainPage : Page
         return new
         {
             Id = BuildSensorStableId(sensor),
-            Name = BuildSensorTitle(sensor),
+            Name = BuildVisualizationSensorName(sensor),
             Type = type,
             Value = sensor.NumericValue.HasValue ? Math.Round(sensor.NumericValue.Value, 1) : (double?)null,
             Unit = NormalizeVisualizationUnit(sensor),
@@ -1140,10 +1144,10 @@ public sealed partial class MainPage : Page
                 Value = group.Count(),
                 Children = group
                     .OrderBy(sensor => IsOkStatus(sensor) ? 0 : 1)
-                    .ThenBy(sensor => BuildSensorTitle(sensor), StringComparer.CurrentCultureIgnoreCase)
+                    .ThenBy(BuildVisualizationSensorName, StringComparer.CurrentCultureIgnoreCase)
                     .Select(sensor => new
                     {
-                        Name = BuildSensorTitle(sensor),
+                        Name = BuildVisualizationSensorName(sensor),
                         Value = 1,
                         Status = sensor.Status,
                         Reading = string.IsNullOrWhiteSpace(sensor.Value) ? sensor.Status : sensor.Value,
@@ -1257,6 +1261,88 @@ public sealed partial class MainPage : Page
     private static string BuildSensorStableId(SensorReading sensor)
     {
         return $"{sensor.SensorId}|{sensor.Key}|{sensor.Entity}";
+    }
+
+    private string BuildVisualizationSensorName(SensorReading sensor)
+    {
+        var key = BuildSensorTitle(sensor).Trim();
+
+        if (key.Equals("CPU Usage", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.CpuUsage");
+        }
+
+        if (key.Equals("MEM Usage", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.MemoryUsage");
+        }
+
+        if (key.Equals("IO Usage", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.IoUsage");
+        }
+
+        if (key.Equals("SYS Usage", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.SystemUsage");
+        }
+
+        if (key.Equals("Pwr Consumption", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("Power Consumption", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.PowerConsumption");
+        }
+
+        if (key.Equals("Inlet Temp", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.InletTemperature");
+        }
+
+        if (key.Equals("Exhaust Temp", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.ExhaustTemperature");
+        }
+
+        if (key.Equals("Intrusion", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.Intrusion");
+        }
+
+        if (key.Equals("Fan Redundancy", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.FanRedundancy");
+        }
+
+        if (key.Equals("Power Optimized", StringComparison.OrdinalIgnoreCase))
+        {
+            return T("SensorDisplay.PowerOptimized");
+        }
+
+        var fanMatch = Regex.Match(key, @"^Fan\s*([0-9]+)\s*RPM$", RegexOptions.IgnoreCase);
+        if (fanMatch.Success)
+        {
+            return F("SensorDisplay.FanRpmIndexed", fanMatch.Groups[1].Value);
+        }
+
+        var voltageMatch = Regex.Match(key, @"^Voltage\s*([0-9]+)$", RegexOptions.IgnoreCase);
+        if (voltageMatch.Success)
+        {
+            return F("SensorDisplay.VoltageIndexed", voltageMatch.Groups[1].Value);
+        }
+
+        var currentMatch = Regex.Match(key, @"^Current\s*([0-9]+)$", RegexOptions.IgnoreCase);
+        if (currentMatch.Success)
+        {
+            return F("SensorDisplay.CurrentIndexed", currentMatch.Groups[1].Value);
+        }
+
+        var tempMatch = Regex.Match(key, @"^Temp\s*([0-9.]+)$", RegexOptions.IgnoreCase);
+        if (tempMatch.Success)
+        {
+            return F("SensorDisplay.TemperatureIndexed", tempMatch.Groups[1].Value);
+        }
+
+        return key;
     }
 
     private static void ReplaceTiles(

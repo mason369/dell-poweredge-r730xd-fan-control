@@ -334,7 +334,7 @@
       const entries = [
         [labels.maxCpuTemp, number(s.maxTemperature, 1) + " " + labels.tempUnit, labels.temperatureSensors + ": " + s.temperatureCount],
         [labels.averageFanRpm, number(s.averageFanRpm, 0) + " RPM", labels.fanRange + ": " + number(s.minFanRpm, 0) + " - " + number(s.maxFanRpm, 0)],
-        [labels.performancePeak, number(s.maxPerformance, 1) + " %", "CPU " + number(s.cpuUsage, 0) + "% / MEM " + number(s.memUsage, 0) + "%"],
+        [labels.performancePeak, number(s.maxPerformance, 1) + " %", labels.cpuUsage + " " + number(s.cpuUsage, 0) + "% / " + labels.memoryUsage + " " + number(s.memUsage, 0) + "%"],
         [labels.electricalReadings, s.electricalCount, number(s.powerWatts, 0) + " W · " + number(s.totalCurrent, 1) + " A"],
         [labels.healthState, s.okCount + " / " + s.sensorCount, labels.warningCount + ": " + s.warningCount]
       ];
@@ -373,9 +373,9 @@
           smoothLine(labels.maxCpuTemp, history.map((row) => row.maxTemperature), 0),
           smoothLine(labels.averageFanRpm, history.map((row) => row.averageFanRpm), 1),
           smoothLine(labels.cpuUsage, history.map((row) => row.cpuUsage), 0),
-          smoothLine("MEM", history.map((row) => row.memUsage), 0),
-          smoothLine("IO", history.map((row) => row.ioUsage), 0),
-          smoothLine("SYS", history.map((row) => row.sysUsage), 0)
+          smoothLine(labels.memoryUsage, history.map((row) => row.memUsage), 0),
+          smoothLine(labels.ioUsage, history.map((row) => row.ioUsage), 0),
+          smoothLine(labels.systemUsage, history.map((row) => row.sysUsage), 0)
         ]
       }, true);
     }
