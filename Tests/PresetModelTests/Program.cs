@@ -1,7 +1,9 @@
 using DellR730xdFanControlCenter;
+using System.Text.Json;
 
 var defaults = FanPreset.CreateDefaultPresets();
 Require(defaults.Count >= 5, "Default preset list should include restore, balanced, cooling, performance, and Dell automatic presets.");
+Require(new AppSettings().SensorRefreshSeconds == 15, "Default SDR polling interval should be 15 seconds to avoid hammering iDRAC with back-to-back RMCP+ sessions.");
 
 var restore = defaults.Single(preset => preset.Id == "restore-manual");
 Require(restore.CanEditPercent, "Restore-manual preset percent should be editable.");
@@ -26,6 +28,18 @@ var tempSettingsDirectory = Path.Combine(Path.GetTempPath(), "R730xdPresetModelT
 try
 {
     var settingsStore = new SettingsStore(tempSettingsDirectory);
+    RequireThrows<InvalidOperationException>(
+        () => settingsStore.Save(new AppSettings { SensorRefreshSeconds = 1 }),
+        "Saving a 1-second SDR polling interval should fail instead of silently keeping an unsafe cadence.");
+
+    Directory.CreateDirectory(tempSettingsDirectory);
+    File.WriteAllText(
+        settingsStore.SettingsPath,
+        JsonSerializer.Serialize(new AppSettings { SensorRefreshSeconds = 1 }));
+    Require(
+        settingsStore.Load().SensorRefreshSeconds == 1,
+        "Legacy unsafe SDR polling settings should stay visible on load so startup can stop and explain the configuration problem.");
+
     settingsStore.Save(new AppSettings { Presets = defaults });
     var loaded = settingsStore.Load();
     var loadedBalanced = loaded.Presets.Single(preset => preset.Id == "balanced");
@@ -49,4 +63,19 @@ static void Require(bool condition, string message)
     {
         throw new InvalidOperationException(message);
     }
+}
+
+static void RequireThrows<TException>(Action action, string message)
+    where TException : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException(message);
 }

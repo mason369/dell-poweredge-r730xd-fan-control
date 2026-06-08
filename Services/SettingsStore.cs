@@ -45,25 +45,25 @@ public sealed class SettingsStore
         var json = File.ReadAllText(SettingsPath, Encoding.UTF8);
         var settings = JsonSerializer.Deserialize<AppSettings>(json, _jsonOptions)
             ?? throw new InvalidOperationException($"Settings file is empty or invalid: {SettingsPath}");
-        Normalize(settings);
+        Normalize(settings, validatePollingInterval: false);
         return settings;
     }
 
     public void Save(AppSettings settings)
     {
-        Normalize(settings);
+        Normalize(settings, validatePollingInterval: true);
         Directory.CreateDirectory(SettingsDirectory);
         var json = JsonSerializer.Serialize(settings, _jsonOptions);
         File.WriteAllText(SettingsPath, json, Encoding.UTF8);
     }
 
-    private static void Normalize(AppSettings settings)
+    private static void Normalize(AppSettings settings, bool validatePollingInterval)
     {
         settings.IpmiToolPath = AppSettings.BundledIpmiToolRelativePath;
 
-        if (settings.SensorRefreshSeconds < 1)
+        if (validatePollingInterval)
         {
-            settings.SensorRefreshSeconds = 1;
+            AppSettings.ValidateSensorRefreshSeconds(settings.SensorRefreshSeconds);
         }
 
         if (string.IsNullOrWhiteSpace(settings.Language) || !LocalizationService.IsSupportedLanguage(settings.Language))

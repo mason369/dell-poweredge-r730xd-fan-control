@@ -838,7 +838,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="3" Spacing="6">
                                     <TextBlock local:Localization.Key="Control.PollSeconds" Text="轮询秒数" />
-                                    <NumberBox x:Name="SensorRefreshSecondsBox" Maximum="300" Minimum="1" SpinButtonPlacementMode="Inline" />
+                                    <NumberBox x:Name="SensorRefreshSecondsBox" Maximum="300" Minimum="15" SpinButtonPlacementMode="Inline" />
                                 </StackPanel>
                             </Grid>
                         </Border>

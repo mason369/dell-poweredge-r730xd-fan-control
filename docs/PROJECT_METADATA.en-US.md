@@ -82,7 +82,7 @@ Does not include:
 | UserName | `root` |
 | FanCount | `6` |
 | Default restore fan percent | `10%` |
-| Sensor polling interval | `1s` |
+| Sensor polling interval | `15s` |
 | Command timeout | `35s` |
 | Target CPU temperature | `68 °C` |
 | High temperature threshold | `78 °C` |

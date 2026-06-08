@@ -95,7 +95,15 @@ public sealed partial class MainPage : Page
         ApplyLocalization();
         AddLog(T("Log.Info"), T("Status.Loaded"));
         shouldShowSettingsOnStart = shouldShowSettingsOnStart || string.IsNullOrWhiteSpace(PasswordBox.Password);
-        if (shouldShowSettingsOnStart)
+        var hasUnsafePollingInterval = _settings.SensorRefreshSeconds < AppSettings.MinimumSensorRefreshSeconds;
+        if (hasUnsafePollingInterval)
+        {
+            SelectView("Settings");
+            ShowStatus(
+                F("Status.SensorRefreshSecondsTooLow", _settings.SensorRefreshSeconds, AppSettings.MinimumSensorRefreshSeconds),
+                InfoBarSeverity.Warning);
+        }
+        else if (shouldShowSettingsOnStart)
         {
             SelectView("Settings");
             ShowStatus(T("Status.FirstRunSettingsRequired"), InfoBarSeverity.Informational);
@@ -227,7 +235,7 @@ public sealed partial class MainPage : Page
         LocalizationService.SetLanguage(_settings.Language);
         _settings.FanCount = ReadInt(FanCountBox, T("Field.FanCount"));
         _settings.CommandTimeoutSeconds = ReadInt(CommandTimeoutBox, T("Field.CommandTimeout"));
-        _settings.SensorRefreshSeconds = Math.Max(1, ReadInt(SensorRefreshSecondsBox, T("Field.SensorRefreshSeconds")));
+        _settings.SensorRefreshSeconds = ReadSensorRefreshSeconds();
         _settings.MinimizeToTrayOnClose = MinimizeToTraySwitch.IsOn;
         _settings.EnableIndividualFanTargets = IndividualFanSwitch.IsOn;
         _settings.TargetCpuTemperatureCelsius = ReadDouble(TargetTempBox, T("Field.TargetTemperature"));
@@ -322,7 +330,7 @@ public sealed partial class MainPage : Page
 
     private void StartSensorPolling()
     {
-        var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
+        var intervalSeconds = _settings.SensorRefreshSeconds;
         _sensorPollingTimer.Interval = TimeSpan.FromSeconds(intervalSeconds);
         _sensorPollingTimer.Start();
         _isConnecting = false;
@@ -344,7 +352,7 @@ public sealed partial class MainPage : Page
 
     private async void OnSensorPollingTimerTick(object? sender, object e)
     {
-        var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
+        var intervalSeconds = _settings.SensorRefreshSeconds;
         if (_sensorPollingTickRunning)
         {
             ReportPollingWarning(BuildPollingSkippedWarning("Status.PollingSkippedPreviousRunning", "Status.PollingSkippedPreviousRunningNoSample", intervalSeconds));
@@ -1576,6 +1584,17 @@ public sealed partial class MainPage : Page
         return (int)Math.Round(value, MidpointRounding.AwayFromZero);
     }
 
+    private int ReadSensorRefreshSeconds()
+    {
+        var seconds = ReadInt(SensorRefreshSecondsBox, T("Field.SensorRefreshSeconds"));
+        if (seconds < AppSettings.MinimumSensorRefreshSeconds)
+        {
+            throw new InvalidOperationException(F("Validation.SensorRefreshSecondsMinimum", AppSettings.MinimumSensorRefreshSeconds));
+        }
+
+        return seconds;
+    }
+
     private double ReadDouble(NumberBox numberBox, string fieldName)
     {
         if (double.IsNaN(numberBox.Value))
@@ -1682,7 +1701,7 @@ public sealed partial class MainPage : Page
 
         if (_sensorPollingTimer.IsEnabled)
         {
-            var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
+            var intervalSeconds = _settings.SensorRefreshSeconds;
             ConnectionStateText.Text = _lastPollTime.HasValue
                 ? F("State.ConnectedPollingTime", intervalSeconds, _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
                 : F("State.ConnectedPolling", intervalSeconds);
@@ -1702,7 +1721,7 @@ public sealed partial class MainPage : Page
 
     private void CheckSensorPollingLatency(TimeSpan elapsed)
     {
-        var interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
+        var interval = TimeSpan.FromSeconds(_settings.SensorRefreshSeconds);
         if (elapsed > interval)
         {
             var recommendedSeconds = GetRecommendedPollingSeconds(elapsed);
@@ -1739,7 +1758,7 @@ public sealed partial class MainPage : Page
     {
         _pollingWasDegraded = true;
         var now = DateTimeOffset.Now;
-        var throttleSeconds = Math.Max(5, Math.Max(1, _settings.SensorRefreshSeconds) * 2);
+        var throttleSeconds = Math.Max(5, _settings.SensorRefreshSeconds * 2);
         if ((now - _lastPollingWarningAt).TotalSeconds < throttleSeconds)
         {
             return;

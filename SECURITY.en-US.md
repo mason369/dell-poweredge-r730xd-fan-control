@@ -110,6 +110,8 @@ This policy is not a firmware-level real-time control loop. It is affected by:
 - Polling interval setting.
 - Sensor naming and firmware output format.
 
+The default and minimum saved polling interval is 15 seconds. Older settings below 15 seconds pause automatic connection, and saving a new value below 15 seconds fails with a visible reason. Too-low polling keeps opening IPMI v2/RMCP+ sessions and may cause iDRAC to reject new sessions with `Unable to establish IPMI v2 / RMCP+ session`.
+
 At the emergency temperature threshold, the app sends the Dell automatic mode command so the BMC can take over. That action still depends on successful IPMI command execution.
 
 ## Supply Chain And Bundled Assets

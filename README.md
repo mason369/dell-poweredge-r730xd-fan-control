@@ -31,7 +31,7 @@ R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows WinUI
 - 1-6 号风扇单独目标字节控制已实现，但默认关闭。
 - 软件恒温策略会读取 BMC 传感器中的 CPU 温度，并在线性区间内调整全部风扇。
 - 达到紧急温度阈值时，软件恒温策略会切回 Dell 自动模式。
-- 连接或保存设置成功后启动持续 SDR 轮询，最短轮询间隔为 1 秒。
+- 连接或保存设置成功后启动持续 SDR 轮询，默认和最短可保存间隔为 15 秒；旧设置文件中低于 15 秒的轮询值会暂停自动连接并要求用户显式修改。
 - 内置 `ipmitool.exe` 与所需 Cygwin DLL，路径为 `BundledTools/ipmitool`。
 - 内置本地 ECharts 仪表板资产，路径为 `Assets/Charts/dashboard.html` 与 `Assets/Charts/echarts.min.js`，运行时不依赖在线 CDN。
 - 托盘图标支持最小化后台运行、恢复窗口、快捷预设、全部风扇 20/35/50%、还原手动 10%、打开设置和退出。
@@ -95,7 +95,7 @@ R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows WinUI
 - 是否启用单风扇 raw target。
 - 风扇数量，默认 6。
 - 命令超时秒数，默认 35，代码要求至少 5。
-- SDR 轮询秒数，默认 1，保存时低于 1 会归一化为 1。
+- SDR 轮询秒数，默认 15，保存时低于 15 会直接失败并显示原因，不会自动改成其他值或继续连接。
 - 软件恒温策略最小/最大风扇百分比。
 - 界面主题和语言。
 
@@ -114,7 +114,7 @@ R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows WinUI
 | FanCount | `6` | R730xd 常见 Fan 1-6 布局。 |
 | DefaultAllFanPercent | `10` | 本机默认还原速度。 |
 | EnableIndividualFanTargets | `false` | 单风扇 raw target 默认关闭。 |
-| SensorRefreshSeconds | `1` | 最短轮询间隔。实际 SDR 返回速度取决于 iDRAC。 |
+| SensorRefreshSeconds | `15` | 最短可保存轮询间隔。实际 SDR 返回速度取决于 iDRAC；本机 R730xd/iDRAC 2.82 观察到完整 SDR 读取约 11-13 秒。 |
 | CommandTimeoutSeconds | `35` | 单条 `ipmitool` 命令超时。 |
 | TargetCpuTemperatureCelsius | `68` | 软件恒温策略目标温度。 |
 | HighCpuTemperatureCelsius | `78` | 达到后使用自动策略最大风扇百分比。 |
@@ -216,6 +216,7 @@ CPU 温度选择逻辑优先使用名称包含 `CPU` 的温度传感器；如果
 - 如果其他 IPMI 命令正在执行，轮询 tick 也会跳过，避免同时向 BMC 发起多条命令。
 - 如果单次 SDR 读取耗时超过当前轮询间隔，应用会给出推荐间隔。
 - 轮询失败会停止轮询、更新连接状态并显示失败原因。
+- 旧版本保存过 `SensorRefreshSeconds = 1` 时，新版本启动会停在设置页并提示把轮询秒数调到 15 秒或更高；保存低于 15 秒的值会失败。这样做是为了避免连续建立 IPMI v2/RMCP+ 会话压垮 iDRAC，而不是在失败后自动重试或伪装成功。
 
 ## 单风扇控制风险
 
@@ -273,9 +274,9 @@ $env:IPMI_PASSWORD = "<your-password>"
 .\BundledTools\ipmitool\ipmitool.exe -I lanplus -H <host> -U <user> -E sdr elist
 ```
 
-### 轮询提示耗时过长
+### 轮询提示耗时过长或 RMCP+ 会话失败
 
-1 秒是请求发起间隔，不代表 BMC 能 1 秒返回完整 SDR。若 SDR 读取耗时超过间隔，按界面推荐值提高轮询秒数。
+完整 `sdr elist` 读取可能需要数秒到十几秒；本机 R730xd/iDRAC 2.82 观察到约 11-13 秒。过低轮询会让软件持续建立 IPMI v2/RMCP+ 会话，可能出现 `Unable to establish IPMI v2 / RMCP+ session`。默认和最短可保存轮询间隔现在是 15 秒；如果界面仍提示单次读取超过当前间隔，请按推荐值继续提高轮询秒数。
 
 ### 图表加载失败
 

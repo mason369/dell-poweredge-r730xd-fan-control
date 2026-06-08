@@ -152,15 +152,16 @@ Individual targets are implemented but disabled by default in the UI. On the loc
 
 ## Polling Behavior
 
-After connection succeeds, the app starts persistent sensor polling. The minimum supported interval is 1 second. Important details:
+After connection succeeds, the app starts persistent sensor polling. The default and minimum saved interval is 15 seconds. Important details:
 
-- 1 second is the minimum request cadence, not a guarantee that the BMC can return complete SDR data in 1 second.
+- 15 seconds is the current safety floor, not a guarantee that every BMC returns complete SDR data within 15 seconds; use the Overview page and runtime log for actual timing.
 - If the previous SDR read is still running, the current tick is skipped with a visible warning.
 - If another IPMI command is running, the current tick is skipped to avoid overlapping commands.
 - If one read takes longer than the configured polling interval, the app recommends a higher interval.
 - If polling fails, the app stops polling, marks the state as disconnected, and shows the failure reason.
+- Older settings files with values below 15 seconds do not auto-connect. Saving below 15 seconds fails visibly instead of silently changing the value.
 
-A good polling interval is slightly higher than the observed SDR read duration. For example, if a full SDR read takes 3.2 seconds, use 5 seconds or higher.
+A good polling interval is slightly higher than the observed SDR read duration. The locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds for a full SDR read, so the default is 15 seconds; if your environment is slower, raise the interval to the UI recommendation.
 
 ## SDR Parsing Rules
 
@@ -234,9 +235,9 @@ Check host, username, password, iDRAC user state, and network reachability.
 
 Common causes include insufficient account privileges, disabled iDRAC capability, unsupported OEM command, or a target machine that is not a compatible R730xd environment.
 
-### SDR polling is slow
+### SDR polling is slow or RMCP+ sessions fail
 
-iDRAC may take several seconds to return full SDR data. Increase the polling interval to avoid repeated skipped ticks.
+iDRAC may take several to more than ten seconds to return full SDR data. Too-low polling keeps opening IPMI v2/RMCP+ sessions and can lead to `Unable to establish IPMI v2 / RMCP+ session`. Raise polling seconds to the UI recommendation or higher; the app does not retry automatically or pretend the failed poll succeeded.
 
 ### Sensor classification is unexpected
 

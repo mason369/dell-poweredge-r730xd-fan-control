@@ -31,7 +31,7 @@ Different iDRAC firmware versions, backplanes, fan layouts, and sensor layouts c
 - Individual target-byte control for fans 1-6 is implemented but disabled by default.
 - Smart auto policy reads BMC CPU temperature and linearly adjusts all fans.
 - At the emergency temperature threshold, the smart auto policy restores Dell automatic mode.
-- Persistent SDR polling starts after a successful connection or settings save, with a minimum interval of 1 second.
+- Persistent SDR polling starts after a successful connection or settings save, with a default and minimum saved interval of 15 seconds; older settings files with lower polling values pause automatic connection until the user explicitly changes the setting.
 - Bundled `ipmitool.exe` and required Cygwin DLLs under `BundledTools/ipmitool`.
 - Bundled local ECharts dashboard assets under `Assets/Charts/dashboard.html` and `Assets/Charts/echarts.min.js`; runtime does not depend on an online CDN.
 - Tray icon supports background operation, window restore, quick presets, all-fan 20/35/50%, restore manual 10%, settings, and exit.
@@ -95,7 +95,7 @@ The Settings page controls connection, persistence, and runtime behavior:
 - Whether individual fan raw targets are enabled.
 - Fan count, default 6.
 - Command timeout seconds, default 35, minimum enforced by code is 5.
-- SDR polling seconds, default 1, normalized to at least 1 on save.
+- SDR polling seconds, default 15. Saving a value below 15 fails with a visible reason instead of silently changing it or continuing to connect.
 - Smart auto minimum and maximum fan percentages.
 - UI theme and language.
 
@@ -114,7 +114,7 @@ Settings are stored at:
 | FanCount | `6` | Common R730xd Fan 1-6 layout. |
 | DefaultAllFanPercent | `10` | Local default restore speed. |
 | EnableIndividualFanTargets | `false` | Individual raw targets are disabled by default. |
-| SensorRefreshSeconds | `1` | Minimum polling interval. Actual SDR response speed depends on iDRAC. |
+| SensorRefreshSeconds | `15` | Minimum saved polling interval. Actual SDR response speed depends on iDRAC; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds for a full SDR read. |
 | CommandTimeoutSeconds | `35` | Timeout for one `ipmitool` command. |
 | TargetCpuTemperatureCelsius | `68` | Smart auto target temperature. |
 | HighCpuTemperatureCelsius | `78` | Smart auto maximum fan percent is used at or above this threshold. |
@@ -216,6 +216,7 @@ CPU temperature detection prefers temperature rows whose key contains `CPU`. If 
 - If another IPMI command is running, the polling tick is also skipped to avoid overlapping commands against the BMC.
 - If one SDR read takes longer than the configured polling interval, the app shows a recommended interval.
 - A polling failure stops polling, updates connection state, and shows the failure reason.
+- If an older version saved `SensorRefreshSeconds = 1`, the new version opens Settings and asks for 15 seconds or higher instead of auto-connecting. Saving below 15 seconds fails. This prevents continuous IPMI v2/RMCP+ session creation against iDRAC; the app does not retry automatically or pretend the failed poll succeeded.
 
 ## Individual Fan Risk
 
@@ -273,9 +274,9 @@ $env:IPMI_PASSWORD = "<your-password>"
 .\BundledTools\ipmitool\ipmitool.exe -I lanplus -H <host> -U <user> -E sdr elist
 ```
 
-### Polling takes too long
+### Polling takes too long or RMCP+ sessions fail
 
-1 second is the request cadence, not a guarantee that the BMC returns full SDR data in 1 second. If reads exceed the interval, raise the polling seconds to the value recommended in the UI.
+A full `sdr elist` read can take several to more than ten seconds; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds. Too-low polling can keep opening IPMI v2/RMCP+ sessions and eventually produce `Unable to establish IPMI v2 / RMCP+ session`. The default and minimum saved polling interval is now 15 seconds; if the UI still reports reads longer than the current interval, raise polling seconds to the recommended value.
 
 ### Charts fail to load
 
