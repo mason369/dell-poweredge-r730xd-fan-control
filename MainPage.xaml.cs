@@ -36,6 +36,7 @@ public sealed partial class MainPage : Page
     private readonly DispatcherTimer _autoPolicyTimer = new();
     private readonly DispatcherTimer _sensorPollingTimer = new();
     private readonly SemaphoreSlim _ipmiOperationLock = new(1, 1);
+    private readonly PollingSkipLogGate _pollingSkipLogGate = new();
     private readonly List<SensorDashboardHistoryPoint> _sensorHistory = [];
     private AppSettings _settings = new();
     private bool _syncingAllFanControls;
@@ -116,15 +117,7 @@ public sealed partial class MainPage : Page
         AddLog(T("Log.Info"), T("Status.Loaded"));
         AddLog(T("Log.Info"), F("Status.LogFileReady", _appLog.CurrentLogPath), "Application", "LogFileReady");
         shouldShowSettingsOnStart = shouldShowSettingsOnStart || string.IsNullOrWhiteSpace(PasswordBox.Password);
-        var hasUnsafePollingInterval = _settings.SensorRefreshSeconds < AppSettings.MinimumSensorRefreshSeconds;
-        if (hasUnsafePollingInterval)
-        {
-            SelectView("Settings");
-            ShowStatus(
-                F("Status.SensorRefreshSecondsTooLow", _settings.SensorRefreshSeconds, AppSettings.MinimumSensorRefreshSeconds),
-                InfoBarSeverity.Warning);
-        }
-        else if (shouldShowSettingsOnStart)
+        if (shouldShowSettingsOnStart)
         {
             SelectView("Settings");
             ShowStatus(T("Status.FirstRunSettingsRequired"), InfoBarSeverity.Informational);
@@ -284,7 +277,7 @@ public sealed partial class MainPage : Page
         LocalizationService.SetLanguage(_settings.Language);
         _settings.FanCount = ReadInt(FanCountBox, T("Field.FanCount"));
         _settings.CommandTimeoutSeconds = ReadInt(CommandTimeoutBox, T("Field.CommandTimeout"));
-        _settings.SensorRefreshSeconds = ReadSensorRefreshSeconds();
+        _settings.SensorRefreshSeconds = Math.Max(1, ReadInt(SensorRefreshSecondsBox, T("Field.SensorRefreshSeconds")));
         _settings.MinimizeToTrayOnClose = MinimizeToTraySwitch.IsOn;
         _settings.EnableIndividualFanTargets = IndividualFanSwitch.IsOn;
         _settings.TargetCpuTemperatureCelsius = ReadDouble(TargetTempBox, T("Field.TargetTemperature"));
@@ -379,13 +372,14 @@ public sealed partial class MainPage : Page
 
     private void StartSensorPolling()
     {
-        var intervalSeconds = _settings.SensorRefreshSeconds;
+        var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
         _sensorPollingTimer.Interval = TimeSpan.FromSeconds(intervalSeconds);
         _sensorPollingTimer.Start();
         _isConnecting = false;
         _hasDisconnected = false;
         _pollingWasDegraded = false;
         _lastPollingWarningAt = DateTimeOffset.MinValue;
+        _pollingSkipLogGate.ResetAll();
         UpdatePollingStatusTexts();
         AddLog(T("Log.Info"), F("Status.PollingStarted", intervalSeconds));
     }
@@ -401,21 +395,27 @@ public sealed partial class MainPage : Page
 
     private async void OnSensorPollingTimerTick(object? sender, object e)
     {
-        var intervalSeconds = _settings.SensorRefreshSeconds;
+        var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
         if (_sensorPollingTickRunning)
         {
-            ReportPollingWarning(BuildPollingSkippedWarning("Status.PollingSkippedPreviousRunning", "Status.PollingSkippedPreviousRunningNoSample", intervalSeconds));
+            LogPollingSkip(
+                PollingSkipKind.PreviousPollRunning,
+                BuildPollingSkippedWarning("Status.PollingSkippedPreviousRunning", "Status.PollingSkippedPreviousRunningNoSample", intervalSeconds));
             return;
         }
 
         _sensorPollingTickRunning = true;
+        _pollingSkipLogGate.Reset(PollingSkipKind.PreviousPollRunning);
         if (!await _ipmiOperationLock.WaitAsync(0))
         {
             _sensorPollingTickRunning = false;
-            ReportPollingWarning(BuildPollingSkippedWarning("Status.PollingSkippedIpmiBusy", "Status.PollingSkippedIpmiBusyNoSample", intervalSeconds));
+            LogPollingSkip(
+                PollingSkipKind.IpmiCommandBusy,
+                BuildPollingSkippedWarning("Status.PollingSkippedIpmiBusy", "Status.PollingSkippedIpmiBusyNoSample", intervalSeconds));
             return;
         }
 
+        _pollingSkipLogGate.Reset(PollingSkipKind.IpmiCommandBusy);
         try
         {
             var elapsed = await RefreshSensorsCoreAsync(BuildProfileFromSettings(), CancellationToken.None);
@@ -872,7 +872,7 @@ public sealed partial class MainPage : Page
         {
             PersistSettingsFromControls();
             _activeCurvePreset = curvePreset;
-            _autoPolicyTimer.Interval = TimeSpan.FromSeconds(_settings.SensorRefreshSeconds);
+            _autoPolicyTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
             _autoPolicyTimer.Start();
             StartAutoButton.IsEnabled = false;
             StopAutoButton.IsEnabled = true;
@@ -904,7 +904,7 @@ public sealed partial class MainPage : Page
         {
             PersistSettingsFromControls();
             _activeCurvePreset = null;
-            _autoPolicyTimer.Interval = TimeSpan.FromSeconds(_settings.SensorRefreshSeconds);
+            _autoPolicyTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
             _autoPolicyTimer.Start();
             StartAutoButton.IsEnabled = false;
             StopAutoButton.IsEnabled = true;
@@ -2881,17 +2881,6 @@ public sealed partial class MainPage : Page
         return (int)Math.Round(value, MidpointRounding.AwayFromZero);
     }
 
-    private int ReadSensorRefreshSeconds()
-    {
-        var seconds = ReadInt(SensorRefreshSecondsBox, T("Field.SensorRefreshSeconds"));
-        if (seconds < AppSettings.MinimumSensorRefreshSeconds)
-        {
-            throw new InvalidOperationException(F("Validation.SensorRefreshSecondsMinimum", AppSettings.MinimumSensorRefreshSeconds));
-        }
-
-        return seconds;
-    }
-
     private double ReadDouble(NumberBox numberBox, string fieldName)
     {
         if (double.IsNaN(numberBox.Value))
@@ -3011,7 +3000,7 @@ public sealed partial class MainPage : Page
 
         if (_sensorPollingTimer.IsEnabled)
         {
-            var intervalSeconds = _settings.SensorRefreshSeconds;
+            var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
             ConnectionStateText.Text = _lastPollTime.HasValue
                 ? F("State.ConnectedPollingTime", intervalSeconds, _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
                 : F("State.ConnectedPolling", intervalSeconds);
@@ -3031,7 +3020,7 @@ public sealed partial class MainPage : Page
 
     private void CheckSensorPollingLatency(TimeSpan elapsed)
     {
-        var interval = TimeSpan.FromSeconds(_settings.SensorRefreshSeconds);
+        var interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
         if (elapsed > interval)
         {
             var recommendedSeconds = GetRecommendedPollingSeconds(elapsed);
@@ -3064,11 +3053,26 @@ public sealed partial class MainPage : Page
         return Math.Max(1, (int)Math.Ceiling(observedDuration.TotalSeconds + 1));
     }
 
+    private void LogPollingSkip(PollingSkipKind kind, string message)
+    {
+        if (!_pollingSkipLogGate.ShouldLog(kind))
+        {
+            return;
+        }
+
+        if (PollingSkipLogGate.OpenTopStatusForSkippedTick)
+        {
+            ShowStatus(message, InfoBarSeverity.Warning);
+        }
+
+        AddLog(T("Log.Warn"), message);
+    }
+
     private void ReportPollingWarning(string message)
     {
         _pollingWasDegraded = true;
         var now = DateTimeOffset.Now;
-        var throttleSeconds = Math.Max(5, _settings.SensorRefreshSeconds * 2);
+        var throttleSeconds = Math.Max(5, Math.Max(1, _settings.SensorRefreshSeconds) * 2);
         if ((now - _lastPollingWarningAt).TotalSeconds < throttleSeconds)
         {
             return;

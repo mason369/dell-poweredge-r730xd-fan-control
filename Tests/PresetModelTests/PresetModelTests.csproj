@@ -15,6 +15,7 @@
     <Compile Include="..\..\Models\HeroRealtimeMetrics.cs" Link="Models\HeroRealtimeMetrics.cs" />
     <Compile Include="..\..\Models\LanguageOption.cs" Link="Models\LanguageOption.cs" />
     <Compile Include="..\..\Models\LogLevelStyle.cs" Link="Models\LogLevelStyle.cs" />
+    <Compile Include="..\..\Models\PollingSkipLogGate.cs" Link="Models\PollingSkipLogGate.cs" />
     <Compile Include="..\..\Models\HeroMetricSeverityStyle.cs" Link="Models\HeroMetricSeverityStyle.cs" />
     <Compile Include="..\..\Models\SensorReading.cs" Link="Models\SensorReading.cs" />
     <Compile Include="..\..\Services\AppLogOperation.cs" Link="Services\AppLogOperation.cs" />

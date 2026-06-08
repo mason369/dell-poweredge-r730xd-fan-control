@@ -32,7 +32,7 @@ R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows WinUI
 - 1-6 号风扇单独目标字节控制已实现，但默认关闭。
 - 软件恒温策略会读取 BMC 传感器中的 CPU 温度，并可按全局目标/高温阈值或当前曲线预设调整全部风扇。
 - 达到紧急温度阈值时，软件恒温策略会切回 Dell 自动模式。
-- 连接或保存设置成功后启动持续 SDR 轮询，默认和最短可保存间隔为 15 秒；旧设置文件中低于 15 秒的轮询值会暂停自动连接并要求用户显式修改。
+- 连接或保存设置成功后启动持续 SDR 轮询，默认间隔为 1 秒；同一时刻只允许一个 IPMI 操作，上一轮未完成时会跳过本次 tick，且不会启动新的 `ipmitool` 进程或 RMCP+ 会话。
 - 内置 `ipmitool.exe` 与所需 Cygwin DLL，路径为 `BundledTools/ipmitool`。
 - 内置本地 ECharts 仪表板资产，路径为 `Assets/Charts/dashboard.html` 与 `Assets/Charts/echarts.min.js`，运行时不依赖在线 CDN。
 - 托盘图标支持最小化后台运行、恢复窗口、快捷预设、曲线预设标识、全部风扇 20/35/50%、还原戴尔出厂设置转速、打开设置和退出；托盘还原会发送 Dell 自动模式命令，不会改成手动 10%。
@@ -125,7 +125,7 @@ R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows WinUI
 | FanCount | `6` | R730xd 常见 Fan 1-6 布局。 |
 | DefaultAllFanPercent | `10` | 内置“默认/恢复手动”预设的本机手动基线；总览/托盘“还原戴尔出厂设置转速”不使用该值，而是恢复 Dell 自动模式。 |
 | EnableIndividualFanTargets | `false` | 单风扇目标编号控制默认关闭；`0x00` 是目标编号，不是 `0%` 转速。 |
-| SensorRefreshSeconds | `15` | 最短可保存轮询间隔。实际 SDR 返回速度取决于 iDRAC；本机 R730xd/iDRAC 2.82 观察到完整 SDR 读取约 11-13 秒。 |
+| SensorRefreshSeconds | `1` | 轮询 tick 的默认发起间隔。实际 SDR 返回速度取决于 iDRAC；本机 R730xd/iDRAC 2.82 观察到完整 SDR 读取约 11-13 秒。上一轮未完成时后续 tick 会跳过，不会启动新的 `ipmitool` 进程或 RMCP+ 会话。 |
 | CommandTimeoutSeconds | `35` | 单条 `ipmitool` 命令超时。 |
 | TargetCpuTemperatureCelsius | `68` | 软件恒温策略目标温度。 |
 | HighCpuTemperatureCelsius | `78` | 达到后使用自动策略最大风扇百分比。 |
@@ -258,11 +258,11 @@ CPU 温度选择逻辑优先使用名称包含 `CPU` 的温度传感器；如果
 
 - 连接成功后自动启动传感器轮询。
 - 每次轮询读取 `sdr elist` 并刷新表格、看板和图表数据。
-- 如果上一轮 SDR 读取尚未完成，下一次 tick 会跳过并记录可见警告。
-- 如果其他 IPMI 命令正在执行，轮询 tick 也会跳过，避免同时向 BMC 发起多条命令。
-- 如果单次 SDR 读取耗时超过当前轮询间隔，应用会给出推荐间隔。
-- 轮询失败会停止轮询、更新连接状态并显示失败原因。
-- 旧版本保存过 `SensorRefreshSeconds = 1` 时，新版本启动会停在设置页并提示把轮询秒数调到 15 秒或更高；保存低于 15 秒的值会失败。这样做是为了避免连续建立 IPMI v2/RMCP+ 会话压垮 iDRAC，而不是在失败后自动重试或伪装成功。
+- 如果上一轮 SDR 读取尚未完成，下一次 tick 会跳过；跳过记录只写入页面日志和运行 JSONL 日志，不会打开或覆盖顶部 InfoBar。
+- 如果其他 IPMI 命令正在执行，轮询 tick 也会跳过，避免同时向 BMC 发起多条命令；同一段忙碌期间只记录第一条跳过日志。
+- 跳过 tick 是调度事实，不是一次成功的 IPMI 请求；日志会明确写出未启动新的 `ipmitool` 进程，也未建立新的 RMCP+ 会话。
+- 如果单次 SDR 读取耗时超过当前轮询间隔，应用会在顶部提示推荐间隔，因为这是一轮真实命令耗时超过配置值。
+- 轮询命令失败会停止轮询、更新连接状态并显示失败原因；应用不会自动重试、静默降级或把失败当成功。
 
 ## 单风扇控制风险
 
@@ -322,7 +322,7 @@ $env:IPMI_PASSWORD = "<your-password>"
 
 ### 轮询提示耗时过长或 RMCP+ 会话失败
 
-完整 `sdr elist` 读取可能需要数秒到十几秒；本机 R730xd/iDRAC 2.82 观察到约 11-13 秒。过低轮询会让软件持续建立 IPMI v2/RMCP+ 会话，可能出现 `Unable to establish IPMI v2 / RMCP+ session`。默认和最短可保存轮询间隔现在是 15 秒；如果界面仍提示单次读取超过当前间隔，请按推荐值继续提高轮询秒数。
+完整 `sdr elist` 读取可能需要数秒到十几秒；本机 R730xd/iDRAC 2.82 观察到约 11-13 秒。`SensorRefreshSeconds = 1` 只表示每秒触发一次轮询 tick，不代表 iDRAC 能每秒返回一次完整 SDR。应用会串行化 IPMI 操作：上一轮仍在执行或其他 IPMI 命令占用锁时，tick 会跳过，且不会启动新的 `ipmitool` 进程或 RMCP+ 会话。如果实际 `ipmitool` 命令返回 `Unable to establish IPMI v2 / RMCP+ session`，应用会停止轮询并显示失败原因，不会重试或伪装成功。若顶部提示单次读取超过当前间隔，可按界面推荐值手动调整轮询秒数；应用不会强制改写你的设置。
 
 ### 图表加载失败
 

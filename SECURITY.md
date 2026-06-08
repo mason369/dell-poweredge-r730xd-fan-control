@@ -127,7 +127,7 @@ IPMI over LAN 应只暴露在可信管理网络中。不要把 iDRAC/IPMI 直接
 - 轮询间隔设置。
 - 传感器命名和固件输出格式。
 
-默认和最短可保存轮询间隔为 15 秒。低于 15 秒的旧设置会暂停自动连接，保存低于 15 秒的新值会失败并显示原因。过低轮询会持续建立 IPMI v2/RMCP+ 会话，可能让 iDRAC 拒绝新会话并返回 `Unable to establish IPMI v2 / RMCP+ session`。
+默认轮询间隔为 1 秒，保存时允许 1 秒及以上的值。该值只是触发轮询 tick 的频率，不保证 iDRAC 能以相同频率返回完整 SDR。应用同一时刻只允许一个 IPMI 操作；上一轮 SDR 读取或其他 IPMI 命令仍在执行时，本次 tick 会跳过，不会启动新的 `ipmitool` 进程或建立新的 RMCP+ 会话。实际命令若返回 `Unable to establish IPMI v2 / RMCP+ session`，应用会停止轮询并显示失败原因，不会自动重试、静默降级或伪装成功。
 
 达到紧急温度阈值时，应用会发送 Dell 自动模式命令，让 BMC 接管风扇。该动作本身仍依赖 IPMI 命令能成功执行。
 

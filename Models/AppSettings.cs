@@ -7,8 +7,6 @@ public sealed class AppSettings
 {
     public const int LocalDefaultManualFanPercent = 10;
 
-    public const int MinimumSensorRefreshSeconds = 15;
-
     public const string BundledIpmiToolRelativePath = @"BundledTools\ipmitool\ipmitool.exe";
 
     public string Host { get; set; } = "192.168.1.73";
@@ -29,7 +27,7 @@ public sealed class AppSettings
 
     public bool EnableIndividualFanTargets { get; set; }
 
-    public int SensorRefreshSeconds { get; set; } = MinimumSensorRefreshSeconds;
+    public int SensorRefreshSeconds { get; set; } = 1;
 
     public int CommandTimeoutSeconds { get; set; } = 35;
 
@@ -57,12 +55,4 @@ public sealed class AppSettings
         }
     }
 
-    public static void ValidateSensorRefreshSeconds(int seconds)
-    {
-        if (seconds < MinimumSensorRefreshSeconds)
-        {
-            throw new InvalidOperationException(
-                $"SDR polling interval must be at least {MinimumSensorRefreshSeconds} seconds.");
-        }
-    }
 }

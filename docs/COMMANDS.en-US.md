@@ -180,16 +180,16 @@ Individual target-selector control is implemented but disabled by default in the
 
 ## Polling Behavior
 
-After connection succeeds, the app starts persistent sensor polling. The default and minimum saved interval is 15 seconds. Important details:
+After connection succeeds, the app starts persistent sensor polling. The default interval is 1 second, and saved values of 1 second or higher are allowed. Important details:
 
-- 15 seconds is the current safety floor, not a guarantee that every BMC returns complete SDR data within 15 seconds; use the Overview page and runtime log for actual timing.
-- If the previous SDR read is still running, the current tick is skipped with a visible warning.
-- If another IPMI command is running, the current tick is skipped to avoid overlapping commands.
-- If one read takes longer than the configured polling interval, the app recommends a higher interval.
-- If polling fails, the app stops polling, marks the state as disconnected, and shows the failure reason.
-- Older settings files with values below 15 seconds do not auto-connect. Saving below 15 seconds fails visibly instead of silently changing the value.
+- 1 second is the polling tick cadence, not real-time streaming of SDR data; use the Overview page and runtime log for actual timing.
+- If the previous SDR read is still running, the current tick is skipped; skipped tick records are written to the in-page log and runtime JSONL log, but they do not open or overwrite the top InfoBar.
+- If another IPMI command is running, the current tick is skipped to avoid overlapping commands; only the first skipped tick in the same busy period is logged.
+- A skipped tick does not start a new `ipmitool` process or establish a new RMCP+ session. It is not a successful request and does not update the request state to success.
+- If one read takes longer than the configured polling interval, the app shows a top warning with a recommended polling interval based on the actual duration.
+- If polling fails, the app stops polling, marks the state as disconnected, and shows the failure reason without retrying automatically, silently degrading, or pretending success.
 
-A good polling interval is slightly higher than the observed SDR read duration. The locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds for a full SDR read, so the default is 15 seconds; if your environment is slower, raise the interval to the UI recommendation.
+The locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds for a full SDR read. If your environment shows a top warning that one read exceeded the current interval, you can manually set the interval slightly above the observed SDR read duration; the app does not force-rewrite that setting.
 
 ## SDR Parsing Rules
 

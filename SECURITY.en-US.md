@@ -127,7 +127,7 @@ This policy is not a firmware-level real-time control loop. It is affected by:
 - Polling interval setting.
 - Sensor naming and firmware output format.
 
-The default and minimum saved polling interval is 15 seconds. Older settings below 15 seconds pause automatic connection, and saving a new value below 15 seconds fails with a visible reason. Too-low polling keeps opening IPMI v2/RMCP+ sessions and may cause iDRAC to reject new sessions with `Unable to establish IPMI v2 / RMCP+ session`.
+The default polling interval is 1 second, and saved values of 1 second or higher are allowed. This value is only the polling tick cadence; it does not guarantee that iDRAC can return a complete SDR read at the same frequency. The app allows only one IPMI operation at a time; when the previous SDR read or another IPMI command is still running, the current tick is skipped and no new `ipmitool` process or RMCP+ session is started. If a real command returns `Unable to establish IPMI v2 / RMCP+ session`, the app stops polling and shows the failure reason without retrying automatically, silently degrading, or pretending success.
 
 At the emergency temperature threshold, the app sends the Dell automatic mode command so the BMC can take over. That action still depends on successful IPMI command execution.
 

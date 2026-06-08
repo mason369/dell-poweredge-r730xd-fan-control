@@ -3,7 +3,7 @@ using System.Text.Json;
 
 var defaults = FanPreset.CreateDefaultPresets();
 Require(defaults.Count >= 5, "Default preset list should include restore, balanced, cooling, performance, and Dell automatic presets.");
-Require(new AppSettings().SensorRefreshSeconds == 15, "Default SDR polling interval should be 15 seconds to avoid hammering iDRAC with back-to-back RMCP+ sessions.");
+Require(new AppSettings().SensorRefreshSeconds == 1, "Default SDR polling interval should remain the original 1 second setting.");
 
 var restore = defaults.Single(preset => preset.Id == "restore-manual");
 Require(restore.CanEditPercent, "Restore-manual preset percent should be editable.");
@@ -87,7 +87,7 @@ Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.RequestRunning"))
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.RequestSucceeded")), "Hero completed request format should have a Chinese translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.SensorRefreshSucceeded")), "Hero sensor refresh result format should have a Chinese translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LastUpdateValue")), "Hero last update format should have a Chinese translation.");
-Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Status.SensorRefreshSecondsTooLow")), "Unsafe polling startup status should have a Chinese translation.");
+Require(LocalizationService.T("Status.PollingSkippedPreviousRunning").Contains("未启动新的 ipmitool", StringComparison.Ordinal), "Chinese skipped polling log should state that no new ipmitool process is started.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveTemperature")), "Hero live temperature label should have a Chinese translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveFanRpm")), "Hero live fan RPM label should have a Chinese translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LivePower")), "Hero live power label should have a Chinese translation.");
@@ -108,7 +108,6 @@ Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Control.NewCurveEditor
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Control.SaveCurvePreset")), "Chinese save curve preset label should be translated.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Field.CurveTemperature")), "Chinese curve temperature field should be translated.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Field.CurveFanPercent")), "Chinese curve fan percent field should be translated.");
-Require(LocalizationService.T("Validation.SensorRefreshSecondsMinimum").Contains("轮询", StringComparison.Ordinal), "Chinese polling minimum validation should explain the polling setting.");
 
 LocalizationService.SetLanguage("en-US");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.ConnectionStatus")), "Hero connection label should have an English translation.");
@@ -118,7 +117,7 @@ Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.RequestRunning"))
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.RequestSucceeded")), "Hero completed request format should have an English translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.SensorRefreshSucceeded")), "Hero sensor refresh result format should have an English translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LastUpdateValue")), "Hero last update format should have an English translation.");
-Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Status.SensorRefreshSecondsTooLow")), "Unsafe polling startup status should have an English translation.");
+Require(LocalizationService.T("Status.PollingSkippedPreviousRunning").Contains("No new ipmitool", StringComparison.Ordinal), "English skipped polling log should state that no new ipmitool process is started.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveTemperature")), "Hero live temperature label should have an English translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveFanRpm")), "Hero live fan RPM label should have an English translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LivePower")), "Hero live power label should have an English translation.");
@@ -139,7 +138,6 @@ Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Control.NewCurveEditor
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Control.SaveCurvePreset")), "English save curve preset label should be translated.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Field.CurveTemperature")), "English curve temperature field should be translated.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Field.CurveFanPercent")), "English curve fan percent field should be translated.");
-Require(LocalizationService.T("Validation.SensorRefreshSecondsMinimum").Contains("Sensor refresh seconds", StringComparison.Ordinal), "English polling minimum validation should explain the polling setting.");
 LocalizationService.SetLanguage("zh-CN");
 
 var tempSettingsDirectory = Path.Combine(Path.GetTempPath(), "R730xdPresetModelTests", Guid.NewGuid().ToString("N"));
@@ -147,17 +145,14 @@ try
 {
     var settingsStore = new SettingsStore(tempSettingsDirectory);
     var savedPresets = defaults.Concat([curve]).ToList();
-    RequireThrows<InvalidOperationException>(
-        () => settingsStore.Save(new AppSettings { SensorRefreshSeconds = 1 }),
-        "Saving a 1-second SDR polling interval should fail instead of silently keeping an unsafe cadence.");
+    Require(
+        new AppSettings { SensorRefreshSeconds = 1 }.SensorRefreshSeconds == 1,
+        "The 1-second SDR polling setting should stay expressible in app settings.");
 
-    Directory.CreateDirectory(tempSettingsDirectory);
-    File.WriteAllText(
-        settingsStore.SettingsPath,
-        JsonSerializer.Serialize(new AppSettings { SensorRefreshSeconds = 1 }));
+    settingsStore.Save(new AppSettings { SensorRefreshSeconds = 1 });
     Require(
         settingsStore.Load().SensorRefreshSeconds == 1,
-        "Legacy unsafe SDR polling settings should stay visible on load so startup can stop and explain the configuration problem.");
+        "Saving a 1-second SDR polling interval should remain supported.");
 
     settingsStore.Save(new AppSettings { Presets = savedPresets });
     var loaded = settingsStore.Load();
@@ -183,6 +178,7 @@ finally
 RunAppLogServiceChecks();
 RunLogLevelStyleChecks();
 RunHeroMetricSeverityStyleChecks();
+RunPollingSkipLogGateChecks();
 
 Console.WriteLine("Preset model checks passed.");
 
@@ -214,6 +210,22 @@ static void RunHeroMetricSeverityStyleChecks()
     Require(HeroMetricSeverityStyle.ForCurrentAmps(9).SemanticName == "Critical", "9 A should be critical for the hero current metric.");
 
     Require(HeroMetricSeverityStyle.ForTemperature(null).SemanticName == "Unknown", "Missing hero values should use the unknown metric color.");
+}
+
+static void RunPollingSkipLogGateChecks()
+{
+    var gate = new PollingSkipLogGate();
+    Require(gate.ShouldLog(PollingSkipKind.PreviousPollRunning), "The first previous-poll skip in a busy period should be logged.");
+    Require(!gate.ShouldLog(PollingSkipKind.PreviousPollRunning), "Repeated previous-poll skips in the same busy period should not spam logs.");
+    gate.Reset(PollingSkipKind.PreviousPollRunning);
+    Require(gate.ShouldLog(PollingSkipKind.PreviousPollRunning), "Previous-poll skip logging should resume after the next real poll starts.");
+
+    Require(gate.ShouldLog(PollingSkipKind.IpmiCommandBusy), "The first IPMI-busy skip in a busy period should be logged.");
+    Require(!gate.ShouldLog(PollingSkipKind.IpmiCommandBusy), "Repeated IPMI-busy skips in the same busy period should not spam logs.");
+    gate.Reset(PollingSkipKind.IpmiCommandBusy);
+    Require(gate.ShouldLog(PollingSkipKind.IpmiCommandBusy), "IPMI-busy skip logging should resume after polling acquires the IPMI lock again.");
+
+    Require(!PollingSkipLogGate.OpenTopStatusForSkippedTick, "Skipped polling ticks should not open or overwrite the top InfoBar.");
 }
 
 static void RunLogLevelStyleChecks()
@@ -326,21 +338,6 @@ static void Require(bool condition, string message)
     {
         throw new InvalidOperationException(message);
     }
-}
-
-static void RequireThrows<TException>(Action action, string message)
-    where TException : Exception
-{
-    try
-    {
-        action();
-    }
-    catch (TException)
-    {
-        return;
-    }
-
-    throw new InvalidOperationException(message);
 }
 
 internal sealed class TempDirectory : IDisposable

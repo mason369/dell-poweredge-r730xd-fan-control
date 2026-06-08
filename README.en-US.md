@@ -32,7 +32,7 @@ Different iDRAC firmware versions, backplanes, fan layouts, and sensor layouts c
 - Individual target-byte control for fans 1-6 is implemented but disabled by default.
 - Smart auto policy reads BMC CPU temperature and adjusts all fans from either the global target/high-temperature thresholds or the active curve preset.
 - At the emergency temperature threshold, the smart auto policy restores Dell automatic mode.
-- Persistent SDR polling starts after a successful connection or settings save, with a default and minimum saved interval of 15 seconds; older settings files with lower polling values pause automatic connection until the user explicitly changes the setting.
+- Persistent SDR polling starts after a successful connection or settings save, with a 1-second default interval; only one IPMI operation is allowed at a time, so a tick is skipped when the previous poll is still running, and no new `ipmitool` process or RMCP+ session is started for that skipped tick.
 - Bundled `ipmitool.exe` and required Cygwin DLLs under `BundledTools/ipmitool`.
 - Bundled local ECharts dashboard assets under `Assets/Charts/dashboard.html` and `Assets/Charts/echarts.min.js`; runtime does not depend on an online CDN.
 - Tray icon supports background operation, window restore, quick presets, curve preset labels, all-fan 20/35/50%, Restore Dell factory fan speed, settings, and exit. The tray restore action sends Dell automatic mode and does not switch to manual 10%.
@@ -125,7 +125,7 @@ Settings are stored at:
 | FanCount | `6` | Common R730xd Fan 1-6 layout. |
 | DefaultAllFanPercent | `10` | Local manual baseline used by the built-in Default/Restore Manual preset. Overview/tray "Restore Dell factory fan speed" does not use this value; it restores Dell automatic mode. |
 | EnableIndividualFanTargets | `false` | Individual fan target-selector control is disabled by default; `0x00` is a target selector, not `0%` fan speed. |
-| SensorRefreshSeconds | `15` | Minimum saved polling interval. Actual SDR response speed depends on iDRAC; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds for a full SDR read. |
+| SensorRefreshSeconds | `1` | Default polling tick cadence. Actual SDR response speed depends on iDRAC; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds for a full SDR read. If the previous read has not finished, later ticks are skipped and do not start a new `ipmitool` process or RMCP+ session. |
 | CommandTimeoutSeconds | `35` | Timeout for one `ipmitool` command. |
 | TargetCpuTemperatureCelsius | `68` | Smart auto target temperature. |
 | HighCpuTemperatureCelsius | `78` | Smart auto maximum fan percent is used at or above this threshold. |
@@ -258,11 +258,11 @@ Curve presets use the same tick and emergency protection, but they compute the f
 
 - Sensor polling starts after a successful connection.
 - Each poll reads `sdr elist` and refreshes the table, dashboard cards, and chart data.
-- If the previous SDR read is still running, the next tick is skipped with a visible warning.
-- If another IPMI command is running, the polling tick is also skipped to avoid overlapping commands against the BMC.
-- If one SDR read takes longer than the configured polling interval, the app shows a recommended interval.
-- A polling failure stops polling, updates connection state, and shows the failure reason.
-- If an older version saved `SensorRefreshSeconds = 1`, the new version opens Settings and asks for 15 seconds or higher instead of auto-connecting. Saving below 15 seconds fails. This prevents continuous IPMI v2/RMCP+ session creation against iDRAC; the app does not retry automatically or pretend the failed poll succeeded.
+- If the previous SDR read is still running, the next tick is skipped; skipped tick records are written to the in-page log and runtime JSONL log, but they do not open or overwrite the top InfoBar.
+- If another IPMI command is running, the polling tick is also skipped to avoid overlapping commands against the BMC; only the first skipped tick in the same busy period is logged.
+- A skipped tick is a scheduling fact, not a successful IPMI request; the log explicitly states that no new `ipmitool` process or RMCP+ session was started.
+- If one SDR read takes longer than the configured polling interval, the app shows a top warning with a recommended interval because a real command exceeded the configured cadence.
+- A polling command failure stops polling, updates connection state, and shows the failure reason; the app does not retry automatically, silently degrade, or pretend the failed poll succeeded.
 
 ## Individual Fan Risk
 
@@ -322,7 +322,7 @@ $env:IPMI_PASSWORD = "<your-password>"
 
 ### Polling takes too long or RMCP+ sessions fail
 
-A full `sdr elist` read can take several to more than ten seconds; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds. Too-low polling can keep opening IPMI v2/RMCP+ sessions and eventually produce `Unable to establish IPMI v2 / RMCP+ session`. The default and minimum saved polling interval is now 15 seconds; if the UI still reports reads longer than the current interval, raise polling seconds to the recommended value.
+A full `sdr elist` read can take several to more than ten seconds; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds. `SensorRefreshSeconds = 1` only means the app triggers a polling tick every second; it does not mean iDRAC can return a complete SDR read every second. The app serializes IPMI operations: when the previous poll is still running or another IPMI command holds the lock, the tick is skipped and no new `ipmitool` process or RMCP+ session is started. If a real `ipmitool` command returns `Unable to establish IPMI v2 / RMCP+ session`, the app stops polling and shows the failure reason without retrying or pretending success. If the top warning says one read exceeded the configured interval, adjust polling seconds manually to the UI recommendation; the app does not force-rewrite your setting.
 
 ### Charts fail to load
 
