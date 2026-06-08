@@ -26,7 +26,24 @@ Details:
 - `-E`: reads the password from the `IPMI_PASSWORD` environment variable.
 - `<ipmi-arguments>`: `mc info`, `sdr elist`, or Dell OEM raw commands passed by the app.
 
-Command logs show the tool path, arguments, exit code, and elapsed time. They do not show the password.
+Command logs show the tool path, arguments, exit code, and elapsed time. They do not show the password. The Overview Recent Log displays info, warning, success, and error/failure as different colored status badges, with red reserved for error and failure only; the local JSONL runtime log does not store color values and instead writes structured fields such as `level`, `displayLevel`, `succeeded`, and `exitCode`. Runtime logs also write start/finish duration records for user commands, sensor refreshes, and smart auto ticks.
+
+## Command Logs And Duration Records
+
+Runtime logs are written to:
+
+```text
+%LocalAppData%\DellR730xdFanControlCenter\logs\runtime-YYYYMMDD.jsonl
+```
+
+Each log entry is a single-line JSON object for line-oriented parsing and auditing. Command-related records include:
+
+- `Operation/UiCommand`: Settings connection, refresh sensors, set fans, Overview/tray "Restore Dell factory fan speed", Dell Auto preset, manual 10% preset, and similar button actions. Each operation writes `Started` plus either `Succeeded` or `Failed`, with `operationId`, `startedAt`, `finishedAt`, and `durationMilliseconds`.
+- `Operation/SensorRefresh`: each `sdr elist` refresh. Records host, polling seconds, sensor count, and duration.
+- `Operation/SmartAutoPolicyTick`: each smart auto policy tick. Records temperature thresholds, CPU temperature, computed fan percent, or the Dell Auto action after the emergency threshold is reached.
+- `IpmiCommand/CommandCompleted`: each actual completed `ipmitool` child command. Records full command line, exit code, success state, and duration.
+
+If the runtime log cannot be written, the app does not show a button-triggered user command as successful; the status bar and Recent Log show "Runtime log write failed". There is currently no automatic cleanup policy, so persistent polling grows the daily JSONL file.
 
 ## Required iDRAC Settings
 
@@ -42,10 +59,10 @@ Command logs show the tool path, arguments, exit code, and elapsed time. They do
 | --- | --- | --- | --- |
 | Test connection | `mc info` | Settings "Connect", automatic connection after saving settings | Confirms host, user, password, network, and basic `ipmitool` availability. |
 | Read sensors | `sdr elist` | Overview/Sensors refresh, connection polling, smart auto policy | Returns full SDR rows; the app parses temperature, fans, power, voltage, current, and state. |
-| Enter manual fan mode | `raw 0x30 0x30 0x01 0x00` | All-fan control, manual presets, restore 10%, smart auto policy | Sent before setting a manual percentage. |
+| Enter manual fan mode | `raw 0x30 0x30 0x01 0x00` | All-fan control, manual presets, built-in Default/Restore Manual 10% preset, smart auto policy | Sent before setting a manual percentage. Overview/tray "Restore Dell factory fan speed" does not send this command. |
 | Set all-fan percentage | `raw 0x30 0x30 0x02 0xff <percent-hex>` | All-fan control, manual presets, tray all-fan menu | `0xff` targets all fans. |
-| Set individual fan percentage | `raw 0x30 0x30 0x02 <fan-target-byte> <percent-hex>` | Individual fan controls | Disabled by default; verify firmware mapping before enabling. |
-| Restore Dell automatic mode | `raw 0x30 0x30 0x01 0x01` | Dell Auto button/preset, emergency temperature, tray preset | Hands fan control back to iDRAC/BMC firmware policy. |
+| Set individual fan percentage | `raw 0x30 0x30 0x02 <fan-target-selector> <percent-hex>` | Individual fan controls | Disabled by default. `<fan-target-selector>` selects the fan and is not a speed; verify firmware mapping before enabling. |
+| Restore Dell automatic mode | `raw 0x30 0x30 0x01 0x01` | Overview/tray "Restore Dell factory fan speed", Dell Auto preset, emergency temperature protection | Hands fan control back to iDRAC/BMC firmware policy. |
 
 ## Percent To Hex
 
@@ -91,9 +108,9 @@ raw 0x30 0x30 0x02 0xff 0x14
 
 The first command enters manual mode. The second command sets the all-fan target.
 
-### Local Default Restore
+### Built-In Restore Manual Preset
 
-The local default restore action is manual mode plus all fans at 10%:
+The built-in `restore-manual` preset is manual mode plus all fans at 10%. It runs only when the user switches to that preset; it is no longer the behavior of Overview/tray "Restore Dell factory fan speed":
 
 ```text
 raw 0x30 0x30 0x01 0x00
@@ -106,7 +123,7 @@ raw 0x30 0x30 0x02 0xff 0x0a
 raw 0x30 0x30 0x01 0x01
 ```
 
-This command lets the iDRAC/BMC firmware policy take over fan control.
+This command lets the iDRAC/BMC firmware policy take over fan control. Overview Quick Actions and the tray menu item "Restore Dell factory fan speed" execute this command. On success, the UI shows Dell automatic mode; on failure, the real IPMI error is shown and the app does not pretend restoration succeeded.
 
 ### Smart Auto Policy Tick
 
@@ -123,6 +140,15 @@ The app then parses CPU temperature:
 - Between the two thresholds: linearly interpolate.
 - At or above emergency auto threshold: send Dell automatic mode command.
 
+When a curve preset is active, the tick still starts with the same `sdr elist` read, but the percentage comes from the saved temperature-fan curve instead of the global target/high thresholds:
+
+- Curve points are stored in `%LocalAppData%\DellR730xdFanControlCenter\settings.json` under `Presets[].CurvePoints`.
+- The Fan Control page maintains points with a graphical editor: clicking the curve chart creates a temperature/fan-percent point from that position, the right-side point list can fine-tune values with numeric controls, and existing curve presets can be loaded into the same editor from their preset card.
+- Save or switch requires at least 2 points, temperatures from `-40` to `125` C, fan percentages from `0` to `100`, and no duplicate temperatures.
+- Below the first point, the first point percent is used. Above the last point, the last point percent is used. Between two points, the app linearly interpolates and rounds to an integer percent by default.
+- If the preset enables `SmoothCurve`, the points and endpoints stay the same, but the middle percentage uses a smooth transition before rounding. The command still sends one final `<calculated-percent-hex>` all-fan percentage.
+- At or above the emergency auto threshold, the curve result is not sent; the app sends Dell automatic mode first.
+
 If the emergency threshold is not reached, the app sends:
 
 ```text
@@ -136,9 +162,11 @@ If the emergency threshold is reached, the app sends:
 raw 0x30 0x30 0x01 0x01
 ```
 
-## Target Bytes
+## Individual Fan Target Selectors
 
-| Target | Target byte |
+The `0x00-0x05` values below are fan target selectors after the raw command prefix. They choose Fan 1-6 and are not speed percentages. The speed percentage is the final `<percent-hex>` argument; for example, `0% = 0x00` in the percentage table applies only to `<percent-hex>` and does not mean Fan 1 target selector `0x00` stops the fan.
+
+| Target | Target selector |
 | --- | --- |
 | All fans | `0xff` |
 | Fan 1 | `0x00` |
@@ -148,7 +176,7 @@ raw 0x30 0x30 0x01 0x01
 | Fan 5 | `0x04` |
 | Fan 6 | `0x05` |
 
-Individual targets are implemented but disabled by default in the UI. On the locally tested R730xd/iDRAC 2.82, `0x00` did not isolate Fan 1 and instead caused all fans to ramp high. Treat individual targets as firmware-dependent.
+Individual target-selector control is implemented but disabled by default in the UI. On the locally tested R730xd/iDRAC 2.82, target selector `0x00` was not `0%` fan speed and did not isolate Fan 1; it caused all fans to ramp high. Treat individual target selectors as firmware-dependent.
 
 ## Polling Behavior
 
@@ -204,7 +232,7 @@ CPU temperature lookup:
 - Sensors observed: Fan1-Fan6 RPM, Inlet Temp, Exhaust Temp, CPU-related Temp rows, power, voltage, redundancy, drive and cable presence.
 - All-fan 20% command: succeeded.
 - Dell automatic mode reset: succeeded.
-- Individual Fan 1 target byte `0x00`: command accepted, but behavior was not individual; all fans ramped high.
+- Individual Fan 1 target selector `0x00`: command accepted, but it was not `0%` fan speed and behavior was not individual; all fans ramped high.
 
 The password is not stored in this repository.
 

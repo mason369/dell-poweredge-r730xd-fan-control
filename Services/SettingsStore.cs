@@ -134,16 +134,26 @@ public sealed class SettingsStore
         {
             preset.Kind = FanPreset.ManualKind;
             AppSettings.ValidatePercent((int)Math.Round(preset.Percent, MidpointRounding.AwayFromZero), nameof(preset.Percent));
+            preset.CurvePoints.Clear();
         }
         else if (preset.Kind.Equals(FanPreset.RestoreManualKind, StringComparison.OrdinalIgnoreCase))
         {
             preset.Kind = FanPreset.RestoreManualKind;
             AppSettings.ValidatePercent((int)Math.Round(preset.Percent, MidpointRounding.AwayFromZero), nameof(preset.Percent));
+            preset.CurvePoints.Clear();
         }
         else if (preset.Kind.Equals(FanPreset.DellAutoKind, StringComparison.OrdinalIgnoreCase))
         {
             preset.Kind = FanPreset.DellAutoKind;
             preset.Percent = 0;
+            preset.CurvePoints.Clear();
+        }
+        else if (preset.Kind.Equals(FanPreset.CurveKind, StringComparison.OrdinalIgnoreCase))
+        {
+            preset.Kind = FanPreset.CurveKind;
+            preset.Percent = 0;
+            preset.ApplyCurvePointsText();
+            preset.ValidateCurvePoints();
         }
         else
         {

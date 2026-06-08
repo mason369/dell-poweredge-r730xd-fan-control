@@ -50,7 +50,7 @@
     .shell {
       height: 100vh;
       min-height: 0;
-      padding: 14px 18px 16px;
+      padding: 10px 10px 12px;
       background:
         linear-gradient(135deg, rgba(15, 118, 110, .12), transparent 36%),
         linear-gradient(315deg, rgba(161, 98, 7, .12), transparent 40%),
@@ -64,8 +64,8 @@
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 10px;
+      gap: 12px;
+      margin-bottom: 8px;
       flex: 0 0 auto;
     }
 
@@ -122,14 +122,14 @@
     .metric-strip {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 8px;
+      margin-bottom: 8px;
       flex: 0 0 auto;
     }
 
     .metric {
-      min-height: 74px;
-      padding: 10px 14px;
+      min-height: 68px;
+      padding: 8px 12px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: color-mix(in srgb, var(--panel) 88%, transparent);
@@ -159,9 +159,9 @@
 
     .grid {
       display: grid;
-      grid-template-columns: 1.25fr 1fr 1fr;
+      grid-template-columns: 1.15fr 1fr 1.25fr;
       grid-template-rows: repeat(2, minmax(0, 1fr));
-      gap: 12px;
+      gap: 8px;
       min-height: 0;
       flex: 1 1 auto;
     }
@@ -343,9 +343,9 @@
       const labels = payload.labels;
       const entries = [
         [labels.maxCpuTemp, number(s.maxTemperature, 1) + " " + labels.tempUnit, labels.temperatureSensors + ": " + s.temperatureCount],
-        [labels.averageFanRpm, number(s.averageFanRpm, 0) + " RPM", labels.fanRange + ": " + number(s.minFanRpm, 0) + " - " + number(s.maxFanRpm, 0)],
+        [labels.averageFanRpm, number(s.averageFanRpm, 0) + " " + labels.fanUnit, labels.fanRange + ": " + number(s.minFanRpm, 0) + " - " + number(s.maxFanRpm, 0)],
         [labels.performancePeak, number(s.maxPerformance, 1) + " %", labels.cpuUsage + " " + number(s.cpuUsage, 0) + "% / " + labels.memoryUsage + " " + number(s.memUsage, 0) + "%"],
-        [labels.electricalReadings, s.electricalCount, number(s.powerWatts, 0) + " W · " + number(s.totalCurrent, 1) + " A"],
+        [labels.electricalReadings, s.electricalCount, number(s.powerWatts, 0) + " " + labels.powerUnit + " · " + number(s.totalCurrent, 1) + " " + labels.currentUnit],
         [labels.healthState, s.okCount + " / " + s.sensorCount, labels.warningCount + ": " + s.warningCount]
       ];
       const host = document.getElementById("metrics");
@@ -377,7 +377,7 @@
         xAxis: { type: "category", data: times, axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
         yAxis: [
           { type: "value", name: labels.tempUnit, axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
-          { type: "value", name: "RPM", axisLabel: { color: axisColor() }, splitLine: { show: false } }
+          { type: "value", name: labels.fanUnit, axisLabel: { color: axisColor() }, splitLine: { show: false } }
         ],
         series: [
           smoothLine(labels.maxCpuTemp, history.map((row) => row.maxTemperature), 0),
@@ -401,11 +401,11 @@
         tooltip: dashboardTooltip({
           formatter: () => [
             `${labels.maxCpuTemp}: ${number(s.maxTemperature, 1)} ${labels.tempUnit}`,
-            `${labels.averageFanRpm}: ${number(s.averageFanRpm, 0)} RPM`,
+            `${labels.averageFanRpm}: ${number(s.averageFanRpm, 0)} ${labels.fanUnit}`,
             `${labels.performancePeak}: ${number(s.maxPerformance, 1)} %`,
-            `${labels.powerTitle}: ${number(s.powerWatts, 0)} W`,
-            `${labels.typeVoltage}: ${number(s.averageVoltage, 1)} V`,
-            `${labels.typeCurrent}: ${number(s.totalCurrent, 1)} A`,
+            `${labels.powerTitle}: ${number(s.powerWatts, 0)} ${labels.powerUnit}`,
+            `${labels.typeVoltage}: ${number(s.averageVoltage, 1)} ${labels.voltageUnit}`,
+            `${labels.typeCurrent}: ${number(s.totalCurrent, 1)} ${labels.currentUnit}`,
             `${labels.healthState}: ${s.okCount} / ${s.sensorCount}`,
             `${labels.hardwareTypes}: ${s.sensorCount}`
           ].join("<br/>")
@@ -482,7 +482,7 @@
       charts.get("fans").setOption({
         color: ["#2563eb"],
         title: chartTitle(labels.fanTitle, labels.fanSubtitle),
-        tooltip: valueTooltip("RPM"),
+        tooltip: valueTooltip(labels.fanUnit),
         grid: { top: 74, right: 32, bottom: 62, left: 54, containLabel: true },
         xAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), rotate: rows.length > 7 ? 35 : 0, interval: 0, formatter: compactFanLabel } },
         yAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
@@ -508,13 +508,15 @@
           trigger: "item",
           formatter: (params) => `${escapeHtml(params.name)}<br/>${labels.value}: ${params.value} ${escapeHtml(params.data.unit || "")}<br/>${labels.hardwareTypes}: ${escapeHtml(params.data.type || "")}<br/>${labels.status}: ${escapeHtml(params.data.status || "")}`
         }),
-        grid: { top: 74, right: 64, bottom: 54, left: 142, containLabel: true },
+        grid: { top: 56, right: 58, bottom: 28, left: 72, containLabel: true },
         xAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
-        yAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), formatter: shortAxisLabel } },
+        yAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), width: 82, overflow: "truncate", formatter: shortAxisLabel } },
         series: [{
           type: "bar",
+          barMaxWidth: 18,
+          barMinHeight: 3,
           data: rows.map((row) => ({ value: row.value, name: row.name, unit: row.unit, status: row.status, type: row.type, itemStyle: { color: colorForType(row.type, labels) } })),
-          label: { show: true, position: "right", color: textColor(), formatter: (params) => `${params.value} ${params.data.unit || ""}` },
+          label: { show: true, position: "right", distance: 4, color: textColor(), formatter: (params) => `${params.value} ${params.data.unit || ""}` },
           itemStyle: { borderRadius: [0, 6, 6, 0] }
         }]
       }, true);
@@ -671,7 +673,34 @@
         .replace(/'/g, "&#39;");
     }
 
+    function installHostWheelForwarding() {
+      if (!window.chrome || !window.chrome.webview) {
+        return;
+      }
+
+      window.addEventListener("wheel", (event) => {
+        if (event.ctrlKey || event.metaKey) {
+          return;
+        }
+
+        const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? 40
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? window.innerHeight || 760
+            : 1;
+        const deltaY = event.deltaY * scale;
+        if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.01) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        window.chrome.webview.postMessage({ type: "wheel", deltaY });
+      }, { capture: true, passive: false });
+    }
+
     initCharts();
+    installHostWheelForwarding();
     if (window.chrome && window.chrome.webview) {
       window.chrome.webview.addEventListener("message", (event) => render(event.data));
       window.chrome.webview.postMessage({ type: "ready" });

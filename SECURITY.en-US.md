@@ -34,25 +34,40 @@ ipmitool -I lanplus -H <host> -U <user> -E <ipmi-arguments>
 
 The password is passed to `ipmitool -E` through the `IPMI_PASSWORD` environment variable. This avoids exposing the password in command-line arguments, Task Manager command-line columns, process enumeration output, or UI logs.
 
-UI logs record:
+The Recent Log and JSONL runtime log record:
 
 - The `ipmitool` path and arguments.
 - Exit code.
 - Success or failure state.
 - Command duration.
-- stdout/stderr summary on failure.
+- Start time, finish time, duration, `operationId`, and terminal state for user commands, sensor refreshes, and smart auto ticks.
+- User-visible error text on failure; when `ipmitool` fails, the error text can include a stdout/stderr summary.
 
-UI logs do not record the password.
+The Recent Log and JSONL runtime log do not record the password, but they can record the iDRAC host, username, tool path, local paths, preset names, sensor names, and command arguments.
 
 ## Local Logs
 
-The in-app Recent Log keeps the latest 80 runtime entries. If an unhandled exception happens during startup, the app writes:
+The in-app Recent Log keeps the latest 80 in-memory entries. Overview includes an "Open logs" button that opens:
+
+```text
+%LocalAppData%\DellR730xdFanControlCenter\logs
+```
+
+Runtime log files are named by local date:
+
+```text
+%LocalAppData%\DellR730xdFanControlCenter\logs\runtime-YYYYMMDD.jsonl
+```
+
+Each line is a complete JSON object; one event is not split across multiple lines. Common fields include `eventId`, `timestamp`, `level`, `category`, `eventName`, and `message`. Operation-duration records also include `operationId`, `phase`, `startedAt`, `finishedAt`, `durationMilliseconds`, and `succeeded`.
+
+If runtime log writing fails, the app does not show the operation as successful. Button-triggered user commands stop, and the status bar plus Recent Log show "Runtime log write failed" with the underlying exception. If an unhandled exception happens during startup, the app writes:
 
 ```text
 %LocalAppData%\DellR730xdFanControlCenter\startup-error.log
 ```
 
-Before filing an issue, sharing a screenshot, or attaching logs, check whether they include your iDRAC address, username, host name, paths, or other environment details you do not want public. Do not publish iDRAC passwords, VPN addresses, internal network ranges, security policies, asset numbers, or other sensitive data.
+There is currently no automatic retention period or cleanup policy. Long-running polling continues growing the daily JSONL file; archive or delete old logs manually according to your operational needs. Before filing an issue, sharing a screenshot, or attaching logs, check whether they include your iDRAC address, username, host name, paths, preset names, sensor output, or other environment details you do not want public. Do not publish iDRAC passwords, VPN addresses, internal network ranges, security policies, asset numbers, or other sensitive data.
 
 ## iDRAC Privileges
 
@@ -85,14 +100,16 @@ Fan control changes server cooling capacity. Low manual speeds can raise CPU, dr
 - Power, voltage, and current.
 - iDRAC alerts and system events.
 
-When workload is unknown, ambient temperature is high, the chassis is drive-dense, sensors are abnormal, or you cannot keep watching the machine, use Dell automatic mode.
+When workload is unknown, ambient temperature is high, the chassis is drive-dense, sensors are abnormal, or you cannot keep watching the machine, use Dell automatic mode. Overview Quick Actions and the tray menu item "Restore Dell factory fan speed" send the Dell automatic mode command and hand fan control back to iDRAC/BMC firmware; they are not manual 10%.
 
-## Individual Fan Raw Target Risk
+The hero live summary and Overview top hardware summary are display-only and use the latest successful SDR refresh. The hero "Live temperature" value is the current average of temperature sensor readings, not a historical maximum, and it does not drive smart auto or emergency automatic protection; actual control still uses the CPU/max temperature semantics described in the smart auto policy section. The small detail rows under each hero value show at most 3 concrete sensor readings, and extra sensors are not shown in the hero, so they do not replace the full sensor table. Before the first refresh, or when one sensor category is missing, the hero and Overview electrical summaries show "Waiting" or no-reading text. Hero and hardware-card colors are UI hints: normal green, near-risk yellow, clear deviation orange, and danger red. These thresholds do not change fan commands and do not replace iDRAC alerts, the full sensor table, or emergency automatic protection. Fan-card rotation is only a visual rhythm derived from current RPM readings, not part of the control loop. For fan changes or troubleshooting, still check the Temperature Board, Fan RPM Board, Power & Health board, and iDRAC alerts.
 
-Individual fan control is disabled by default. On the locally tested R730xd/iDRAC 2.82, Fan 1 target byte `0x00` did not isolate Fan 1 and instead ramped all fans high. Different firmware may map targets differently. Before enabling individual fan control, confirm:
+## Individual Fan Target Selector Risk
+
+Individual fan control is disabled by default. In individual-fan commands, `0x00-0x05` are firmware raw-command target selectors used to choose a fan; they are not fan speeds, and `0x00` is not `0%` fan speed. On the locally tested R730xd/iDRAC 2.82, Fan 1 target selector `0x00` did not isolate Fan 1 and instead ramped all fans high. Different firmware may map targets differently. Before enabling individual fan control, confirm:
 
 - Your iDRAC firmware accepts the raw command.
-- Target bytes map to the expected physical fans.
+- Target selectors map to the expected physical fans.
 - RPM and temperature behave as expected after each operation.
 - You can restore Dell automatic mode immediately.
 
@@ -113,6 +130,22 @@ This policy is not a firmware-level real-time control loop. It is affected by:
 The default and minimum saved polling interval is 15 seconds. Older settings below 15 seconds pause automatic connection, and saving a new value below 15 seconds fails with a visible reason. Too-low polling keeps opening IPMI v2/RMCP+ sessions and may cause iDRAC to reject new sessions with `Unable to establish IPMI v2 / RMCP+ session`.
 
 At the emergency temperature threshold, the app sends the Dell automatic mode command so the BMC can take over. That action still depends on successful IPMI command execution.
+
+## Temperature Curve Preset Risk
+
+Curve presets are a software smart-auto rule; they are not written into iDRAC/BMC firmware. After switching to a curve preset, each software auto tick reads SDR, parses CPU temperature, interpolates the user-saved temperature-fan points, and sends an all-fan percentage command. Points are maintained from the Fan Control page with chart clicks and numeric point controls; Smooth curve is only a software-side interpolation mode between adjacent points and does not program a firmware fan curve into iDRAC/BMC.
+
+Safety boundaries for curve presets:
+
+- Curve points control only the all-fan percentage, not individual fans.
+- Save or switch validates at least 2 points, temperatures from `-40` to `125` C, percentages from `0` to `100`, and no duplicate temperatures.
+- The point list and `SmoothCurve` setting are stored in local `settings.json`. Deleting, editing, or saving a preset affects later software tick calculations, but it does not change server firmware configuration.
+- CPU temperatures below the first point use the first point; temperatures above the last point use the last point. If the final point is too low, sustained high load can still be under-cooled.
+- Smooth mode makes percentage changes between two points softer, but it does not change endpoints, emergency thresholds, or percentage bounds. If the points themselves are too low, smoothing does not add safety margin.
+- At the emergency temperature threshold, the app first sends Dell automatic mode, but that protection still depends on SDR reads, CPU temperature detection, network availability, and successful IPMI command execution.
+- Manual all-fan control, individual fan control, the built-in Restore Manual preset, Dell Auto, Overview/tray Restore Dell factory fan speed, or Stop Auto clears the active curve state so an old curve does not continue overriding manual commands.
+
+Validate curves first under low load and with someone watching the machine. Do not set the final temperature point below realistic high-load temperatures, and do not set the final fan percentage too low. If charts, sensor status, or iDRAC alerts look abnormal, restore Dell automatic mode immediately.
 
 ## Supply Chain And Bundled Assets
 

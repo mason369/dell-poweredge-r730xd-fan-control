@@ -87,6 +87,9 @@ public static class Localization
             case ToggleSwitch toggleSwitch:
                 toggleSwitch.Header = value;
                 break;
+            case CheckBox checkBox:
+                checkBox.Content = value;
+                break;
             case NumberBox numberBox:
                 numberBox.Header = value;
                 break;

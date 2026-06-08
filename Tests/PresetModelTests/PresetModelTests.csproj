@@ -9,8 +9,16 @@
 
   <ItemGroup>
     <Compile Include="..\..\Models\AppSettings.cs" Link="Models\AppSettings.cs" />
+    <Compile Include="..\..\Models\AppLogRecord.cs" Link="Models\AppLogRecord.cs" />
+    <Compile Include="..\..\Models\FanCurvePoint.cs" Link="Models\FanCurvePoint.cs" />
     <Compile Include="..\..\Models\FanPreset.cs" Link="Models\FanPreset.cs" />
+    <Compile Include="..\..\Models\HeroRealtimeMetrics.cs" Link="Models\HeroRealtimeMetrics.cs" />
     <Compile Include="..\..\Models\LanguageOption.cs" Link="Models\LanguageOption.cs" />
+    <Compile Include="..\..\Models\LogLevelStyle.cs" Link="Models\LogLevelStyle.cs" />
+    <Compile Include="..\..\Models\HeroMetricSeverityStyle.cs" Link="Models\HeroMetricSeverityStyle.cs" />
+    <Compile Include="..\..\Models\SensorReading.cs" Link="Models\SensorReading.cs" />
+    <Compile Include="..\..\Services\AppLogOperation.cs" Link="Services\AppLogOperation.cs" />
+    <Compile Include="..\..\Services\AppLogService.cs" Link="Services\AppLogService.cs" />
     <Compile Include="..\..\Services\LocalizationService.cs" Link="Services\LocalizationService.cs" />
     <Compile Include="..\..\Services\SettingsStore.cs" Link="Services\SettingsStore.cs" />
   </ItemGroup>

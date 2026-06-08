@@ -236,9 +236,17 @@ public sealed class TrayIconManager : IDisposable
 
     private static string BuildPresetMenuLabel(FanPreset preset)
     {
-        return preset.IsManual
-            ? $"{preset.DisplayName} - {preset.Percent:0}%"
-            : preset.DisplayName;
+        if (preset.IsManual)
+        {
+            return $"{preset.DisplayName} - {preset.Percent:0}%";
+        }
+
+        if (preset.IsCurvePreset)
+        {
+            return $"{preset.DisplayName} - {LocalizationService.T("Preset.CurveMetric")}";
+        }
+
+        return preset.DisplayName;
     }
 
     private void HandleCommand(int command)
