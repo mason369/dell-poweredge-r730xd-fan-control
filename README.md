@@ -252,14 +252,37 @@ dotnet run --project .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x6
 - WinUI/Windows App SDK 运行所需文件
 - 应用图标和清单资产
 
-示例发布命令：
+开发调试运行仍使用 `dotnet run`。要生成可直接运行的 unpackaged exe 发布目录，使用：
 
 ```powershell
 cd C:\DellR730xdFanControlCenter
-dotnet publish .\DellR730xdFanControlCenter.csproj -c Release -p:Platform=x64
+.\tools\Publish-UnpackagedExe.ps1
 ```
 
-发布后请在目标机器上实际启动一次，确认内置 `ipmitool.exe`、图表页面和托盘图标都能从输出目录解析到。
+输出目录为：
+
+```text
+artifacts/exe/win-x64/
+```
+
+该目录内的 `DellR730xdFanControlCenter.exe` 可直接启动。发布脚本会检查 exe、`Assets/AppIcon.ico`、图表资产和内置 `BundledTools/ipmitool/ipmitool.exe` 是否都存在，缺失时直接失败。该 exe 发布目录是 self-contained unpackaged 输出，不依赖 MSIX 安装身份；分发时需要保留整个目录，不能只复制单个 exe。
+
+要生成可安装的签名 MSIX 包，使用仓库内发布脚本：
+
+```powershell
+cd C:\DellR730xdFanControlCenter
+.\tools\Publish-SignedMsix.ps1
+```
+
+脚本会校验 `Package.appxmanifest` 中的 `Publisher` 是否等于签名证书 Subject，默认生成或复用当前用户证书库中的 `CN=mason369` 代码签名证书，把公开证书导出到 `artifacts/certificates/mason369-msix-signing.cer`，并把公开证书导入当前用户 `TrustedPeople` 和 `Root` 以便本机验证与安装。私钥只保存在当前用户证书库，不会写入仓库，也不会导出 `.pfx`。
+
+签名包输出到：
+
+```text
+artifacts/msix/DellR730xdFanControlCenter_1.0.0.0_x64_Test/DellR730xdFanControlCenter_1.0.0.0_x64.msix
+```
+
+脚本末尾会对 MSIX 执行 `Get-AuthenticodeSignature`，签名状态不是 `Valid` 时会失败停止。自签证书适合本机测试或内部受控分发；公开发布应换成受信任代码签名证书，并保持证书 Subject 与 manifest Publisher 完全一致。发布后请在目标机器上实际安装并启动一次，确认内置 `ipmitool.exe`、图表页面和托盘图标都能从安装目录解析到。
 
 ## IPMI 命令行为
 

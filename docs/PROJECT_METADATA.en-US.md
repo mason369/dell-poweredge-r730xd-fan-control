@@ -201,6 +201,9 @@ Before publishing or packaging, confirm:
 - `dotnet run --project Tests\PresetModelTests\PresetModelTests.csproj` succeeds, covering manual preset editing, temperature/power curve evaluation from current readings, smooth curve evaluation, settings storage, sensor-state translation keys, and runtime logging JSONL behavior.
 - Output contains `BundledTools/ipmitool/ipmitool.exe`.
 - Output contains `Assets/Charts/dashboard.html` and `Assets/Charts/echarts.min.js`.
+- For directly runnable exe-directory releases, use `tools/Publish-UnpackagedExe.ps1` or an equivalent command and confirm that the output directory contains `DellR730xdFanControlCenter.exe`, `Assets/AppIcon.ico`, dashboard assets, and the bundled `ipmitool.exe`; this mode requires distributing the whole directory, not just the single exe file.
+- For MSIX releases, sign with `tools/Publish-SignedMsix.ps1` or an equivalent command; the signing certificate subject must exactly match the `Package.appxmanifest` `Publisher`, and `Get-AuthenticodeSignature` must return `Valid`.
+- Keep self-signed certificate private keys only in the local certificate store or a controlled key system. Do not commit `.pfx` files; the public `.cer` is only for trusting that signer on target machines.
 - The app starts and shows the main window.
 - Settings can be saved.
 - The tray right-click menu shows window/page entries, refresh sensors, logs/iDRAC entries, Dell automatic restore, stop auto, all-fan 20/35/50%, and a preset submenu; common fixed actions are no longer nested behind a second-level Fan Control menu.

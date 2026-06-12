@@ -252,14 +252,37 @@ The project enables MSIX tooling and configures `Microsoft.Windows.SDK.BuildTool
 - WinUI / Windows App SDK runtime files
 - Application icon and manifest assets
 
-Example publish command:
+Development runs still use `dotnet run`. To create a directly runnable unpackaged exe output directory, use:
 
 ```powershell
 cd C:\DellR730xdFanControlCenter
-dotnet publish .\DellR730xdFanControlCenter.csproj -c Release -p:Platform=x64
+.\tools\Publish-UnpackagedExe.ps1
 ```
 
-After publishing, start the app on the target machine and confirm that the bundled `ipmitool.exe`, dashboard page, and tray icon resolve from the output directory.
+The output directory is:
+
+```text
+artifacts/exe/win-x64/
+```
+
+`DellR730xdFanControlCenter.exe` inside that directory can be launched directly. The publish script verifies that the exe, `Assets/AppIcon.ico`, dashboard assets, and the bundled `BundledTools/ipmitool/ipmitool.exe` are all present, and fails if any required file is missing. This exe output is a self-contained unpackaged directory; it does not rely on MSIX package identity. Distribute the whole directory, not just the single exe file.
+
+To create an installable signed MSIX package, use the repository publish script:
+
+```powershell
+cd C:\DellR730xdFanControlCenter
+.\tools\Publish-SignedMsix.ps1
+```
+
+The script verifies that the `Package.appxmanifest` `Publisher` equals the signing certificate subject. By default it creates or reuses a `CN=mason369` code-signing certificate in the current user's certificate store, exports the public certificate to `artifacts/certificates/mason369-msix-signing.cer`, and imports that public certificate into the current user's `TrustedPeople` and `Root` stores for local verification and installation. The private key remains in the current user's certificate store; the script does not write a `.pfx` file into the repository.
+
+The signed package is written to:
+
+```text
+artifacts/msix/DellR730xdFanControlCenter_1.0.0.0_x64_Test/DellR730xdFanControlCenter_1.0.0.0_x64.msix
+```
+
+At the end, the script runs `Get-AuthenticodeSignature` against the MSIX and fails if the signature status is not `Valid`. The self-signed certificate is appropriate for local testing or controlled internal distribution. Public releases should use a trusted code-signing certificate whose subject exactly matches the manifest publisher. After publishing, install and start the app on the target machine and confirm that the bundled `ipmitool.exe`, dashboard page, and tray icon resolve from the installed package.
 
 ## IPMI Command Behavior
 

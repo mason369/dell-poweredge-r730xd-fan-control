@@ -201,6 +201,9 @@ WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, BMC sensor
 - `dotnet run --project Tests\PresetModelTests\PresetModelTests.csproj` 成功，覆盖手动预设编辑、温度/功耗曲线按当前读数求值、平滑曲线求值、设置存储、传感器状态翻译键和运行日志 JSONL 行为。
 - 输出目录包含 `BundledTools/ipmitool/ipmitool.exe`。
 - 输出目录包含 `Assets/Charts/dashboard.html` 和 `Assets/Charts/echarts.min.js`。
+- 若发布可直接运行的 exe 目录，使用 `tools/Publish-UnpackagedExe.ps1` 或等价命令，并确认输出目录包含 `DellR730xdFanControlCenter.exe`、`Assets/AppIcon.ico`、图表资产和内置 `ipmitool.exe`；该模式需要分发整个目录，不能只复制单个 exe。
+- 若发布 MSIX，使用 `tools/Publish-SignedMsix.ps1` 或等价命令签名；签名证书 Subject 必须与 `Package.appxmanifest` 的 `Publisher` 完全一致，生成后 `Get-AuthenticodeSignature` 必须返回 `Valid`。
+- 自签证书的私钥只允许留在本机证书库或受控密钥系统，不要提交 `.pfx`；公开 `.cer` 只能用于目标机器信任该签名者。
 - 应用能启动并显示主窗口。
 - 设置页能保存设置。
 - 托盘右键菜单能显示窗口/页面入口、刷新传感器、日志/iDRAC 入口、Dell 自动恢复、停止自动、全部风扇 20/35/50% 和预设子菜单，常用固定动作不再嵌套在二级风扇控制菜单中。
