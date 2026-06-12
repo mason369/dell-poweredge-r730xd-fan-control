@@ -62,6 +62,7 @@ public sealed partial class MainPage : Page
     private readonly SemaphoreSlim _ipmiOperationLock = new(1, 1);
     private readonly PollingSkipLogGate _pollingSkipLogGate = new();
     private readonly List<SensorDashboardHistoryPoint> _sensorHistory = [];
+    private readonly List<LogEntry> _volatileLogEntries = [];
     private long _sensorHistorySequence;
     private AppSettings _settings = new();
     private bool _syncingAllFanControls;
@@ -81,6 +82,9 @@ public sealed partial class MainPage : Page
     private bool _visualizationSnapshotUpdateScheduled;
     private double _pendingVisualizationWheelDeltaY;
     private bool _visualizationWheelScrollScheduled;
+    private bool _overviewMetricsDirty = true;
+    private bool _visualizationSnapshotDirty = true;
+    private bool _volatileLogsDirty;
     private VisualizationSnapshot? _latestVisualizationSnapshot;
     private DateTime? _latestVisualizationSnapshotTime;
     private string? _activePresetId;
@@ -2095,6 +2099,35 @@ public sealed partial class MainPage : Page
         {
             RefreshLocalizedSensorRowsIfVisible();
         }
+
+        if (tag == "Overview")
+        {
+            RefreshVisibleLogsIfDirty();
+            RefreshOverviewDataIfVisible();
+        }
+    }
+
+    private bool IsOverviewViewVisible()
+    {
+        return OverviewView.Visibility == Visibility.Visible;
+    }
+
+    private void RefreshOverviewDataIfVisible()
+    {
+        if (!IsOverviewViewVisible())
+        {
+            return;
+        }
+
+        if (_overviewMetricsDirty && Sensors.Count > 0)
+        {
+            UpdateOverviewMetricSummaries();
+        }
+
+        if (_visualizationSnapshotDirty)
+        {
+            ScheduleVisualizationSnapshot();
+        }
     }
 
     private async Task<bool> RunUiCommandAsync(
@@ -2185,6 +2218,18 @@ public sealed partial class MainPage : Page
 
     private void UpdateMetricSummaries()
     {
+        UpdateHeroRealtimeMetrics();
+        if (!IsOverviewViewVisible())
+        {
+            _overviewMetricsDirty = true;
+            return;
+        }
+
+        UpdateOverviewMetricSummaries();
+    }
+
+    private void UpdateOverviewMetricSummaries()
+    {
         var temperatureReadings = Sensors
             .Where(IsTemperatureSensor)
             .Where(sensor => sensor.NumericValue.HasValue)
@@ -2223,7 +2268,7 @@ public sealed partial class MainPage : Page
             .Where(sensor => IsPowerSensor(sensor) || IsHealthSensor(sensor))
             .Select(BuildDashboardTile);
         ReplaceTiles(PowerTiles, powerAndHealth);
-        UpdateHeroRealtimeMetrics();
+        _overviewMetricsDirty = false;
     }
 
     private DashboardTileViewModel BuildDashboardTile(SensorReading sensor)
@@ -2855,8 +2900,15 @@ public sealed partial class MainPage : Page
 
     private void ScheduleVisualizationSnapshot()
     {
+        if (!IsOverviewViewVisible())
+        {
+            _visualizationSnapshotDirty = true;
+            return;
+        }
+
         if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
         {
+            _visualizationSnapshotDirty = true;
             return;
         }
 
@@ -2865,10 +2917,12 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        _visualizationSnapshotDirty = false;
         _visualizationSnapshotUpdateScheduled = true;
         if (!DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, SendScheduledVisualizationSnapshot))
         {
             _visualizationSnapshotUpdateScheduled = false;
+            _visualizationSnapshotDirty = true;
             ShowFailure(new InvalidOperationException("Unable to schedule chart update on the UI dispatcher."));
         }
     }
@@ -2881,8 +2935,15 @@ public sealed partial class MainPage : Page
 
     private void SendVisualizationSnapshot()
     {
+        if (!IsOverviewViewVisible())
+        {
+            _visualizationSnapshotDirty = true;
+            return;
+        }
+
         if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
         {
+            _visualizationSnapshotDirty = true;
             return;
         }
 
@@ -2919,8 +2980,15 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        if (!IsOverviewViewVisible())
+        {
+            _visualizationSnapshotDirty = true;
+            return;
+        }
+
         if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
         {
+            _visualizationSnapshotDirty = true;
             return;
         }
 
@@ -4647,16 +4715,46 @@ public sealed partial class MainPage : Page
 
     private void AddVolatileLog(string level, string message)
     {
-        Logs.Insert(0, new LogEntry
+        var entry = new LogEntry
         {
             Level = level,
             SemanticLevel = GetDisplayLogSemanticLevel(level),
             Message = message,
-        });
+        };
+
+        _volatileLogEntries.Insert(0, entry);
+        while (_volatileLogEntries.Count > 80)
+        {
+            _volatileLogEntries.RemoveAt(_volatileLogEntries.Count - 1);
+        }
+
+        if (!IsOverviewViewVisible())
+        {
+            _volatileLogsDirty = true;
+            return;
+        }
+
+        Logs.Insert(0, entry);
         while (Logs.Count > 80)
         {
             Logs.RemoveAt(Logs.Count - 1);
         }
+    }
+
+    private void RefreshVisibleLogsIfDirty()
+    {
+        if (!_volatileLogsDirty || !IsOverviewViewVisible())
+        {
+            return;
+        }
+
+        Logs.Clear();
+        foreach (var entry in _volatileLogEntries)
+        {
+            Logs.Add(entry);
+        }
+
+        _volatileLogsDirty = false;
     }
 
     private IReadOnlyDictionary<string, string> MergeLogProperties(

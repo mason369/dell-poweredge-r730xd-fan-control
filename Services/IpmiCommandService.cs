@@ -37,22 +37,22 @@ public sealed partial class IpmiCommandService
 
     public async Task SetDellAutomaticModeAsync(IdracProfile profile, CancellationToken cancellationToken)
     {
-        await ExecuteAsync(profile, ["raw", "0x30", "0x30", "0x01", "0x01"], cancellationToken);
+        await ExecuteAsync(profile, ["raw", "0x30", "0x30", "0x01", "0x01"], cancellationToken).ConfigureAwait(false);
     }
 
     public async Task SetManualModeAsync(IdracProfile profile, CancellationToken cancellationToken)
     {
-        await ExecuteAsync(profile, ["raw", "0x30", "0x30", "0x01", "0x00"], cancellationToken);
+        await ExecuteAsync(profile, ["raw", "0x30", "0x30", "0x01", "0x00"], cancellationToken).ConfigureAwait(false);
     }
 
     public async Task TestConnectionAsync(IdracProfile profile, CancellationToken cancellationToken)
     {
-        await ExecuteAsync(profile, ["mc", "info"], cancellationToken);
+        await ExecuteAsync(profile, ["mc", "info"], cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<SensorReading>> ReadSensorsAsync(IdracProfile profile, CancellationToken cancellationToken)
     {
-        var result = await ExecuteAsync(profile, ["sdr", "elist"], cancellationToken);
+        var result = await ExecuteAsync(profile, ["sdr", "elist"], cancellationToken).ConfigureAwait(false);
         var readings = ParseSensorReadings(result.StandardOutput).ToList();
 
         if (readings.Count == 0)
@@ -69,11 +69,11 @@ public sealed partial class IpmiCommandService
         int percent,
         CancellationToken cancellationToken)
     {
-        await SetManualModeAsync(profile, cancellationToken);
+        await SetManualModeAsync(profile, cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(
             profile,
             ["raw", "0x30", "0x30", "0x02", ToHexByte(targetByte), ToHexByte(percent)],
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<IpmiCommandResult> ExecuteAsync(
@@ -86,7 +86,7 @@ public sealed partial class IpmiCommandService
         var toolPath = ResolveToolPath(profile.IpmiToolPath);
         var arguments = BuildArguments(profile, ipmiArguments);
         var commandLine = $"{Quote(toolPath)} {string.Join(" ", arguments.Select(Quote))}";
-        var result = await ExecuteProcessAsync(profile, toolPath, arguments, commandLine, cancellationToken);
+        var result = await ExecuteProcessAsync(profile, toolPath, arguments, commandLine, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode == 0)
         {
             return result;
@@ -145,9 +145,9 @@ public sealed partial class IpmiCommandService
             var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
             var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
 
-            await process.WaitForExitAsync(timeoutCts.Token);
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
+            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            var stderr = await stderrTask.ConfigureAwait(false);
 
             stopwatch.Stop();
             var result = new IpmiCommandResult(process.ExitCode, stdout, stderr);

@@ -321,6 +321,7 @@ RunDpiTextWrappingXamlChecks();
 RunCurveEditorInteractionPerformanceChecks();
 RunRequestScrollResponsivenessChecks();
 RunRequestIoResponsivenessChecks();
+RunGlobalPollingResponsivenessChecks();
 RunHardwareTileValueLayoutXamlChecks();
 RunFanAnimationSpeedChecks();
 RunPostFanCommandRefreshChecks();
@@ -915,6 +916,45 @@ static void RunRequestIoResponsivenessChecks()
         pageSource.Contains("ShowAppLogWriteFailure", StringComparison.Ordinal) &&
         pageSource.Contains("AddVolatileLog(T(\"Log.Error\"), message);", StringComparison.Ordinal),
         "The main page should expose background runtime-log write failures in the visible UI log and status bar.");
+}
+
+static void RunGlobalPollingResponsivenessChecks()
+{
+    var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var ipmiSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Services", "IpmiCommandService.cs")));
+    var ipmiAwaitCount = Regex.Matches(ipmiSource, @"\bawait\b", RegexOptions.CultureInvariant).Count;
+    var ipmiConfigureAwaitCount = Regex.Matches(ipmiSource, @"ConfigureAwait\(false\)", RegexOptions.CultureInvariant).Count;
+    var scheduleVisualizationBody = ExtractMethodBody(pageSource, "ScheduleVisualizationSnapshot");
+    var sendVisualizationBody = ExtractMethodBody(pageSource, "SendVisualizationSnapshot");
+    var addVolatileLogBody = ExtractMethodBody(pageSource, "AddVolatileLog");
+
+    Require(
+        ipmiAwaitCount > 0 &&
+        ipmiAwaitCount == ipmiConfigureAwaitCount,
+        "Every await inside IpmiCommandService should use ConfigureAwait(false) so command completion, stdout/stderr reading, and SDR parsing do not resume on the WinUI UI thread.");
+    Require(
+        ipmiSource.Contains("ParseSensorReadings(result.StandardOutput).ToList();", StringComparison.Ordinal) &&
+        ipmiSource.Contains("CommandCompleted?.Invoke(", StringComparison.Ordinal),
+        "The IPMI service should keep real SDR parsing and command completion events in the service layer while its continuations stay off the UI context.");
+    Require(
+        pageSource.Contains("private bool IsOverviewViewVisible()", StringComparison.Ordinal) &&
+        pageSource.Contains("private void RefreshOverviewDataIfVisible()", StringComparison.Ordinal) &&
+        pageSource.Contains("_overviewMetricsDirty = true;", StringComparison.Ordinal) &&
+        pageSource.Contains("UpdateOverviewMetricSummaries();", StringComparison.Ordinal),
+        "Sensor polling should keep current data but defer overview-only card and chart UI updates while another page is visible.");
+    Require(
+        scheduleVisualizationBody.Contains("if (!IsOverviewViewVisible())", StringComparison.Ordinal) &&
+        scheduleVisualizationBody.IndexOf("if (!IsOverviewViewVisible())", StringComparison.Ordinal) <
+        scheduleVisualizationBody.IndexOf("VisualizationWebView.CoreWebView2", StringComparison.Ordinal) &&
+        sendVisualizationBody.Contains("if (!IsOverviewViewVisible())", StringComparison.Ordinal),
+        "Chart WebView payload updates should not be scheduled or sent while the overview page is hidden.");
+    Require(
+        pageSource.Contains("_volatileLogEntries", StringComparison.Ordinal) &&
+        pageSource.Contains("_volatileLogsDirty", StringComparison.Ordinal) &&
+        pageSource.Contains("RefreshVisibleLogsIfDirty();", StringComparison.Ordinal) &&
+        addVolatileLogBody.Contains("if (!IsOverviewViewVisible())", StringComparison.Ordinal) &&
+        addVolatileLogBody.Contains("Logs.Insert(0, entry);", StringComparison.Ordinal),
+        "Visible runtime-log ListView updates should be deferred while the overview page is hidden instead of changing an off-screen bound collection on every command completion.");
 }
 
 static void RunHardwareTileValueLayoutXamlChecks()
