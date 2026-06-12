@@ -873,6 +873,12 @@ static void RunRequestScrollResponsivenessChecks()
         !pageSource.Contains("RecordVisualizationHistoryPoint(snapshotTime);\n            SendVisualizationSnapshot();", StringComparison.Ordinal),
         "Sensor refresh completion should not synchronously serialize and post the full chart payload on the UI thread immediately after history recording.");
     Require(
+        pageSource.Contains("private const int MaxVisualizationPayloadHistoryPoints = 720", StringComparison.Ordinal) &&
+        pageSource.Contains("History = BuildVisualizationPayloadHistory()", StringComparison.Ordinal) &&
+        pageSource.Contains("private SensorDashboardHistoryPoint[] BuildVisualizationPayloadHistory()", StringComparison.Ordinal) &&
+        !pageSource.Contains("History = _sensorHistory.ToArray()", StringComparison.Ordinal),
+        "Chart WebView payloads should send a bounded sampled history instead of cloning and serializing the entire retained history on every refresh.");
+    Require(
         pageSource.Contains("_pendingVisualizationWheelDeltaY", StringComparison.Ordinal) &&
         pageSource.Contains("ScheduleVisualizationWheelScroll", StringComparison.Ordinal),
         "Forwarded WebView wheel messages should be coalesced before calling ScrollViewer.ChangeView.");
@@ -1323,9 +1329,14 @@ static void RunDashboardChartLayoutChecks()
         pageSource.Contains("private sealed class VisualizationSnapshot", StringComparison.Ordinal) &&
         pageSource.Contains("public VisualizationSummary? Summary", StringComparison.Ordinal) &&
         pageSource.Contains("public VisualizationCurrent? Current", StringComparison.Ordinal) &&
-        pageSource.Contains("TypeCounts = snapshot.TypeCounts", StringComparison.Ordinal) &&
-        pageSource.Contains("SensorTree = snapshot.SensorTree", StringComparison.Ordinal),
-        "Dashboard history points should carry the full sensor snapshot needed by every chart, not only trend summary numbers.");
+        pageSource.Contains("Current = BuildHistoryCurrent(snapshot.Current)", StringComparison.Ordinal) &&
+        pageSource.Contains("private static VisualizationCurrent BuildHistoryCurrent", StringComparison.Ordinal) &&
+        pageSource.Contains("NormalizeVisualizationHistoryPoint(point)", StringComparison.Ordinal) &&
+        Regex.IsMatch(pageSource, @"\[JsonIgnore\]\s+public object\[\] TypeCounts", RegexOptions.CultureInvariant) &&
+        Regex.IsMatch(pageSource, @"\[JsonIgnore\]\s+public object\[\] SensorTree", RegexOptions.CultureInvariant) &&
+        !pageSource.Contains("TypeCounts = snapshot.TypeCounts", StringComparison.Ordinal) &&
+        !pageSource.Contains("SensorTree = snapshot.SensorTree", StringComparison.Ordinal),
+        "Dashboard history points should keep compact trend data and must not persist repeated sensor trees/type counts for every poll.");
     Require(
         pageSource.Contains("private const int VisualizationHistoryRetentionDays = 7", StringComparison.Ordinal) &&
         pageSource.Contains("chart-history-*.jsonl", StringComparison.Ordinal) &&

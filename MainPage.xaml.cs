@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
@@ -27,6 +28,7 @@ namespace DellR730xdFanControlCenter;
 public sealed partial class MainPage : Page
 {
     private const int VisualizationHistoryRetentionDays = 7;
+    private const int MaxVisualizationPayloadHistoryPoints = 720;
     private const string DefaultCurvePointsText = "45 = 18%" + "\r\n" + "68 = 28%" + "\r\n" + "78 = 42%";
     private const string DefaultPowerCurvePointsText = "280W = 18%" + "\r\n" + "500W = 28%" + "\r\n" + "750W = 42%";
     private const double TemperatureCurveCanvasMinCelsius = 30;
@@ -2761,6 +2763,7 @@ public sealed partial class MainPage : Page
                     continue;
                 }
 
+                NormalizeVisualizationHistoryPoint(point);
                 _sensorHistory.Add(point);
                 if (long.TryParse(point.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var sequence))
                 {
@@ -2770,6 +2773,17 @@ public sealed partial class MainPage : Page
         }
 
         _sensorHistory.Sort((left, right) => left.UnixMilliseconds.CompareTo(right.UnixMilliseconds));
+    }
+
+    private static void NormalizeVisualizationHistoryPoint(SensorDashboardHistoryPoint point)
+    {
+        if (point.Current is not null)
+        {
+            point.Current = BuildHistoryCurrent(point.Current);
+        }
+
+        point.TypeCounts = [];
+        point.SensorTree = [];
     }
 
     private void PruneVisualizationHistoryFiles(DateTimeOffset now)
@@ -2811,9 +2825,7 @@ public sealed partial class MainPage : Page
             Timestamp = timestamp.ToString("O", CultureInfo.InvariantCulture),
             UnixMilliseconds = timestamp.ToUnixTimeMilliseconds(),
             Summary = snapshot.Summary,
-            Current = snapshot.Current,
-            TypeCounts = snapshot.TypeCounts,
-            SensorTree = snapshot.SensorTree,
+            Current = BuildHistoryCurrent(snapshot.Current),
             MaxTemperature = snapshot.Summary.MaxTemperature,
             AverageFanRpm = snapshot.Summary.AverageFanRpm,
             CpuUsage = snapshot.Summary.CpuUsage,
@@ -2826,6 +2838,31 @@ public sealed partial class MainPage : Page
         _sensorHistory.Add(historyPoint);
         PruneVisualizationHistoryMemory(timestamp);
         QueueVisualizationHistoryPersistence(historyPoint, timestamp);
+    }
+
+    private static VisualizationCurrent BuildHistoryCurrent(VisualizationCurrent current)
+    {
+        return new VisualizationCurrent
+        {
+            Temperatures = BuildHistoryPoints(current.Temperatures),
+            Fans = BuildHistoryPoints(current.Fans),
+            Performance = BuildHistoryPoints(current.Performance),
+            Electrical = BuildHistoryPoints(current.Electrical),
+        };
+    }
+
+    private static List<VisualizationPoint> BuildHistoryPoints(IEnumerable<VisualizationPoint> points)
+    {
+        return points
+            .Select(point => new VisualizationPoint
+            {
+                Id = point.Id,
+                Name = point.Name,
+                Type = point.Type,
+                Value = point.Value,
+                Unit = point.Unit,
+            })
+            .ToList();
     }
 
     private void PruneVisualizationHistoryMemory(DateTimeOffset now)
@@ -3013,10 +3050,40 @@ public sealed partial class MainPage : Page
             Labels = BuildVisualizationLabels(),
             Summary = currentSnapshot.Summary,
             Current = currentSnapshot.Current,
-            History = _sensorHistory.ToArray(),
+            History = BuildVisualizationPayloadHistory(),
             TypeCounts = currentSnapshot.TypeCounts,
             SensorTree = currentSnapshot.SensorTree,
         };
+    }
+
+    private SensorDashboardHistoryPoint[] BuildVisualizationPayloadHistory()
+    {
+        if (_sensorHistory.Count <= MaxVisualizationPayloadHistoryPoints)
+        {
+            return _sensorHistory.ToArray();
+        }
+
+        var result = new List<SensorDashboardHistoryPoint>(MaxVisualizationPayloadHistoryPoints);
+        var lastIndex = _sensorHistory.Count - 1;
+        var lastAddedIndex = -1;
+        for (var index = 0; index < MaxVisualizationPayloadHistoryPoints; index++)
+        {
+            var sourceIndex = (int)Math.Round(index * lastIndex / (double)(MaxVisualizationPayloadHistoryPoints - 1));
+            if (sourceIndex <= lastAddedIndex)
+            {
+                continue;
+            }
+
+            result.Add(_sensorHistory[sourceIndex]);
+            lastAddedIndex = sourceIndex;
+        }
+
+        if (lastAddedIndex != lastIndex)
+        {
+            result.Add(_sensorHistory[lastIndex]);
+        }
+
+        return result.ToArray();
     }
 
     private VisualizationSnapshot BuildVisualizationSnapshot(DateTime timestamp)
@@ -5273,8 +5340,10 @@ public sealed partial class MainPage : Page
 
         public VisualizationCurrent? Current { get; set; }
 
+        [JsonIgnore]
         public object[] TypeCounts { get; set; } = [];
 
+        [JsonIgnore]
         public object[] SensorTree { get; set; } = [];
 
         public double? MaxTemperature { get; set; }
