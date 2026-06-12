@@ -1750,23 +1750,24 @@ public sealed partial class MainPage : Page
     {
         if (_autoPolicyTickRunning)
         {
-            AddLog(T("Log.Warn"), T("Status.AutoTickSkipped"));
+            LogPollingSkip(PollingSkipKind.AutoPolicyTickRunning, T("Status.AutoTickSkipped"));
             return;
         }
 
         _autoPolicyTickRunning = true;
+        _pollingSkipLogGate.Reset(PollingSkipKind.AutoPolicyTickRunning);
         var lockTaken = false;
         try
         {
             if (!await _ipmiOperationLock.WaitAsync(0))
             {
                 var message = T("Status.AutoTickSkippedIpmiBusy");
-                SetHeroRequestStatus(message, InfoBarSeverity.Warning);
-                AddLog(T("Log.Warn"), message);
+                LogPollingSkip(PollingSkipKind.AutoPolicyIpmiBusy, message);
                 return;
             }
 
             lockTaken = true;
+            _pollingSkipLogGate.Reset(PollingSkipKind.AutoPolicyIpmiBusy);
             await RunAutoPolicyOnceCoreAsync(CancellationToken.None);
         }
         catch (Exception ex)

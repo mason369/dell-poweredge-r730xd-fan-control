@@ -1404,7 +1404,17 @@ static void RunPollingSkipLogGateChecks()
     gate.Reset(PollingSkipKind.IpmiCommandBusy);
     Require(gate.ShouldLog(PollingSkipKind.IpmiCommandBusy), "IPMI-busy skip logging should resume after polling acquires the IPMI lock again.");
 
-    Require(!PollingSkipLogGate.OpenTopStatusForSkippedTick, "Skipped polling ticks should not open or overwrite the top InfoBar.");
+    Require(gate.ShouldLog(PollingSkipKind.AutoPolicyTickRunning), "The first overlapping auto-policy tick skip should be logged.");
+    Require(!gate.ShouldLog(PollingSkipKind.AutoPolicyTickRunning), "Repeated overlapping auto-policy tick skips in the same busy period should not spam logs.");
+    gate.Reset(PollingSkipKind.AutoPolicyTickRunning);
+    Require(gate.ShouldLog(PollingSkipKind.AutoPolicyTickRunning), "Overlapping auto-policy tick logging should resume after the next real auto tick starts.");
+
+    Require(gate.ShouldLog(PollingSkipKind.AutoPolicyIpmiBusy), "The first auto-policy IPMI-busy skip should be logged.");
+    Require(!gate.ShouldLog(PollingSkipKind.AutoPolicyIpmiBusy), "Repeated auto-policy IPMI-busy skips in the same busy period should not spam logs.");
+    gate.Reset(PollingSkipKind.AutoPolicyIpmiBusy);
+    Require(gate.ShouldLog(PollingSkipKind.AutoPolicyIpmiBusy), "Auto-policy IPMI-busy skip logging should resume after auto policy acquires the IPMI lock again.");
+
+    Require(!PollingSkipLogGate.OpenTopStatusForSkippedTick, "Skipped background ticks should not open or overwrite the top InfoBar.");
 }
 
 static void RunSensorValueLocalizationChecks()

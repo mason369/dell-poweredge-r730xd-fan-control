@@ -84,7 +84,7 @@ The tray menu is organized by action risk and frequency so common fan actions ar
 - `Presets`: the only remaining one-level submenu. It dynamically reads saved presets from `settings.json`; manual presets show percentages and curve presets are marked as curves.
 - `Exit`: closes the app and removes the tray icon.
 
-Every tray action that executes IPMI shares the app-wide IPMI lock. If another IPMI command is running, user-triggered tray commands wait for the current command to finish before continuing; the app does not start a concurrent `ipmitool` process and does not present a waiting switch as already completed. Background polling, smart-auto, and curve-auto ticks still skip while IPMI is busy, and the skip reason is written to the in-page log and runtime log.
+Every tray action that executes IPMI shares the app-wide IPMI lock. If another IPMI command is running, user-triggered tray commands wait for the current command to finish before continuing; the app does not start a concurrent `ipmitool` process and does not present a waiting switch as already completed. Background polling, smart-auto, and curve-auto ticks still skip while IPMI is busy; only the first skip reason in the same busy period is written to the in-page log and runtime log.
 
 ## Percent To Hex
 
@@ -168,7 +168,7 @@ The app then parses CPU temperature:
 - Within the target-to-high policy curve: evaluate the fan percent at the current temperature's position on that linear policy curve.
 - At or above emergency auto threshold: send Dell automatic mode command; the software auto timer is not stopped by this command.
 
-Smart auto ticks are mutually exclusive with sensor polling and user-triggered fan commands. When the user starts smart auto or switches to a curve preset, the app waits for the current IPMI command to finish, then runs the first tick before starting the background timer; if that first tick fails, the timer is not started and the UI/logs show the real failure reason. If a later background tick fires while another IPMI command holds the lock, that auto policy cycle is skipped and logged; no new `ipmitool` process or RMCP+ session is started.
+Smart auto ticks are mutually exclusive with sensor polling and user-triggered fan commands. When the user starts smart auto or switches to a curve preset, the app waits for the current IPMI command to finish, then runs the first tick before starting the background timer; if that first tick fails, the timer is not started and the UI/logs show the real failure reason. If a later background tick fires while the previous auto-policy tick is still running or another IPMI command holds the lock, that auto-policy cycle is skipped; only the first skipped tick in the same busy period is logged, the top InfoBar is not opened or overwritten, and no new `ipmitool` process or RMCP+ session is started.
 
 When a curve preset is active, the tick still starts with the same `sdr elist` read, but the percentage comes from saved curve points instead of the global target/high thresholds. There are two curve types:
 
@@ -216,8 +216,8 @@ Clicking "Start polling" or successfully saving settings tests the connection, r
 - 1 second is the polling tick cadence, not real-time streaming of SDR data; use the Overview page and runtime log for actual timing.
 - Every successful polling pass appends one JSONL chart history point. Skipped ticks, IPMI-busy ticks, and failed polls do not append history because they have no new SDR data to display. History load or write failures are shown as errors and written to the runtime log instead of being treated as success.
 - While smart auto or curve auto is running, regular sensor polling ticks do not independently start `sdr elist`; the auto-policy tick's SDR result refreshes sensors, boards, charts, and history points. After auto policy stops, regular polling continues on the configured cadence.
-- If the previous SDR read is still running, the current tick is skipped; skipped tick records are written to the in-page log and runtime JSONL log, but they do not open or overwrite the top InfoBar.
-- If another IPMI command is running, the current tick is skipped to avoid overlapping commands; only the first skipped tick in the same busy period is logged.
+- If the previous SDR read is still running, the current tick is skipped; only the first skip in the same previous-read period is written to the in-page log and runtime JSONL log, and it does not open or overwrite the top InfoBar.
+- If another IPMI command is running, the current tick is skipped to avoid overlapping commands; only the first skipped tick in the same IPMI-busy period is logged.
 - A skipped tick does not start a new `ipmitool` process or establish a new RMCP+ session. It is not a successful request and does not update the request state to success.
 - If one read takes longer than the configured polling interval, the app shows a top warning with a recommended polling interval based on the actual duration.
 - If polling fails, the app stops polling, marks the state as disconnected, and shows the failure reason without retrying automatically, silently degrading, or pretending success.
