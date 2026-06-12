@@ -135,6 +135,7 @@ public sealed partial class MainPage : Page
         LanguageComboBox.ItemsSource = LocalizationService.SupportedLanguages;
         LanguageComboBox.DisplayMemberPath = nameof(LanguageOption.DisplayName);
 
+        _appLog.WriteFailed += OnAppLogWriteFailed;
         _ipmi.CommandCompleted += OnCommandCompleted;
         _autoPolicyTimer.Tick += OnAutoPolicyTimerTick;
         _sensorPollingTimer.Tick += OnSensorPollingTimerTick;
@@ -301,7 +302,7 @@ public sealed partial class MainPage : Page
 
         TemperatureGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 300 : double.PositiveInfinity;
         FanGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 260 : double.PositiveInfinity;
-        PowerHealthGridView.MaxHeight = double.PositiveInfinity;
+        PowerHealthGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 420 : 560;
     }
 
     private void ApplyResponsiveControlLayout(ResponsiveLayoutSize layoutSize)
@@ -4450,6 +4451,27 @@ public sealed partial class MainPage : Page
                 ShowFailure(ex);
             }
         });
+    }
+
+    private void OnAppLogWriteFailed(object? sender, Exception ex)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            ShowAppLogWriteFailure(ex);
+            return;
+        }
+
+        if (!DispatcherQueue.TryEnqueue(() => ShowAppLogWriteFailure(ex)))
+        {
+            throw new InvalidOperationException(F("Status.LogWriteFailed", ex.Message), ex);
+        }
+    }
+
+    private void ShowAppLogWriteFailure(Exception ex)
+    {
+        var message = F("Status.LogWriteFailed", ex.Message);
+        AddVolatileLog(T("Log.Error"), message);
+        ShowStatus(message, InfoBarSeverity.Error);
     }
 
     private void ShowStatus(string message, InfoBarSeverity severity)

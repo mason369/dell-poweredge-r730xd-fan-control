@@ -679,20 +679,20 @@ static void RunPowerHealthLayoutXamlChecks()
         "Power and health board should keep binding to PowerTiles.");
 
     Require(
-        powerHealthGrid.Attribute("MaxHeight") is null &&
-        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollMode")?.Value == "Disabled" &&
-        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollBarVisibility")?.Value == "Disabled" &&
+        powerHealthGrid.Attribute("MaxHeight")?.Value == "420" &&
+        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollMode")?.Value == "Enabled" &&
+        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollBarVisibility")?.Value == "Auto" &&
         powerHealthGrid.Attribute("ScrollViewer.HorizontalScrollMode")?.Value == "Disabled" &&
         powerHealthGrid.Attribute("ScrollViewer.HorizontalScrollBarVisibility")?.Value == "Disabled",
-        "Power and health board should render all rows under the page scroll viewer without its own scrollbars.");
+        "Power and health board should keep a finite scroll-owned viewport so live hardware rows do not all measure under the page ScrollViewer.");
 
     var wrapGrid = powerHealthGrid
         .Descendants(ui + "ItemsWrapGrid")
         .SingleOrDefault();
     Require(
         wrapGrid?.Attribute("Orientation")?.Value == "Horizontal" &&
-        wrapGrid.Attribute("MaximumRowsOrColumns")?.Value == "6",
-        "Power and health board should wrap hardware cards horizontally with no more than six columns so right-side cards never render partially.");
+        wrapGrid.Attribute("MaximumRowsOrColumns") is null,
+        "Power and health board should wrap hardware cards within its finite viewport instead of forcing an all-row horizontal expansion.");
     RequireGridViewOwnsHardwareTileSpacing(xaml, ui, "PowerTiles", "Power and health tile grid should own hardware card spacing so card borders render fully.");
     Require(
         !powerHealthPanel.Elements(ui + "ListView").Any() &&
@@ -773,8 +773,9 @@ static void RunDpiTextWrappingXamlChecks()
     Require(
         pageSource.Contains("TemperatureGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 300 : double.PositiveInfinity;", StringComparison.Ordinal) &&
         pageSource.Contains("FanGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 260 : double.PositiveInfinity;", StringComparison.Ordinal) &&
+        pageSource.Contains("PowerHealthGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 420 : 560;", StringComparison.Ordinal) &&
         pageSource.Contains("VisualizationWebView.MinHeight = layoutSize == ResponsiveLayoutSize.Large ? 1520 : 3200;", StringComparison.Ordinal),
-        "Nested boards and the chart WebView should expand in medium and small layouts instead of clipping scaled content.");
+        "Nested boards and the chart WebView should size intentionally, while the long power/health board keeps a finite viewport for responsive scrolling.");
 
     foreach (var binding in new[]
     {
@@ -904,6 +905,16 @@ static void RunRequestIoResponsivenessChecks()
         !logSource.Contains("FileOptions.WriteThrough", StringComparison.Ordinal) &&
         !logSource.Contains("Flush(flushToDisk: true)", StringComparison.Ordinal),
         "Runtime logging should not force a physical disk flush for every UI log record because it blocks scrolling and input during requests.");
+    Require(
+        logSource.Contains("Channel.CreateUnbounded<AppLogRecord>", StringComparison.Ordinal) &&
+        logSource.Contains("Task.Run(ProcessWriteQueueAsync)", StringComparison.Ordinal) &&
+        logSource.Contains("WriteFailed?.Invoke(this, ex);", StringComparison.Ordinal),
+        "Runtime logging should queue disk writes to a single background worker and surface write failures instead of blocking the UI thread.");
+    Require(
+        pageSource.Contains("_appLog.WriteFailed += OnAppLogWriteFailed;", StringComparison.Ordinal) &&
+        pageSource.Contains("ShowAppLogWriteFailure", StringComparison.Ordinal) &&
+        pageSource.Contains("AddVolatileLog(T(\"Log.Error\"), message);", StringComparison.Ordinal),
+        "The main page should expose background runtime-log write failures in the visible UI log and status bar.");
 }
 
 static void RunHardwareTileValueLayoutXamlChecks()
@@ -1896,6 +1907,7 @@ static void RunAppLogServiceChecks()
                 ["scope"] = "atomic-jsonl",
             },
         });
+        log.FlushAsync().GetAwaiter().GetResult();
 
         var lines = File.ReadAllLines(log.CurrentLogPath);
         Require(lines.Length == 1, "A log event must be written as one atomic JSONL record.");
@@ -1924,6 +1936,7 @@ static void RunAppLogServiceChecks()
 
         var failure = log.StartOperation("SetFans", "Setting all fans to 35%");
         failure.Fail(new InvalidOperationException("raw command rejected"));
+        log.FlushAsync().GetAwaiter().GetResult();
 
         var lines = File.ReadAllLines(log.CurrentLogPath);
         Require(lines.Length == 4, "Each operation must write explicit start and terminal records.");

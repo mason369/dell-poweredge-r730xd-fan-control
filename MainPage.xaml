@@ -986,13 +986,14 @@
                                     Text="功耗与状态" />
                                 <GridView
                                     x:Name="PowerHealthGridView"
+                                    MaxHeight="420"
                                     ItemTemplate="{StaticResource HardwareTileTemplate}"
                                     IsItemClickEnabled="False"
                                     ItemsSource="{x:Bind PowerTiles, Mode=OneWay}"
                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                     ScrollViewer.HorizontalScrollMode="Disabled"
-                                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                                    ScrollViewer.VerticalScrollMode="Disabled"
+                                    ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                    ScrollViewer.VerticalScrollMode="Enabled"
                                     SelectionMode="None">
                                     <GridView.ItemContainerStyle>
                                         <Style TargetType="GridViewItem">
@@ -1004,7 +1005,7 @@
                                     </GridView.ItemContainerStyle>
                                     <GridView.ItemsPanel>
                                         <ItemsPanelTemplate>
-                                            <ItemsWrapGrid MaximumRowsOrColumns="6" Orientation="Horizontal" />
+                                            <ItemsWrapGrid Orientation="Horizontal" />
                                         </ItemsPanelTemplate>
                                     </GridView.ItemsPanel>
                                 </GridView>
