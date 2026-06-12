@@ -40,7 +40,7 @@ Each log entry is a single-line JSON object for line-oriented parsing and auditi
 
 - `Operation/UiCommand`: Settings connection, refresh sensors, set fans, Overview/tray "Restore Dell factory fan speed", Dell Auto preset, manual 10% preset, and similar button actions. Each operation writes `Started` plus either `Succeeded` or `Failed`, with `operationId`, `startedAt`, `finishedAt`, and `durationMilliseconds`.
 - `Operation/SensorRefresh`: each `sdr elist` refresh. Records host, polling seconds, sensor count, and duration.
-- `Operation/SmartAutoPolicyTick`: each smart auto policy tick. Records temperature thresholds, CPU temperature, computed fan percent, or the Dell Auto action after the emergency threshold is reached.
+- `Operation/SmartAutoPolicyTick`: each software auto policy tick. Records temperature thresholds, CPU temperature, curve preset type, `powerWatts` for power curves, computed fan percent, or the Dell Auto action after the emergency threshold is reached.
 - `IpmiCommand/CommandCompleted`: each actual completed `ipmitool` child command. Records full command line, exit code, success state, and duration.
 
 If the runtime log cannot be written, the app does not show a button-triggered user command as successful; the status bar and Recent Log show "Runtime log write failed". There is currently no automatic cleanup policy, so persistent polling grows the daily JSONL file.
@@ -57,12 +57,34 @@ If the runtime log cannot be written, the app does not show a button-triggered u
 
 | Purpose | IPMI arguments | UI entry | Notes |
 | --- | --- | --- | --- |
-| Test connection | `mc info` | Settings "Connect", automatic connection after saving settings | Confirms host, user, password, network, and basic `ipmitool` availability. |
-| Read sensors | `sdr elist` | Overview/Sensors refresh, connection polling, smart auto policy | Returns full SDR rows; the app parses temperature, fans, power, voltage, current, and state. |
+| Test connection before starting polling | `mc info` | Overview/Settings "Start polling", automatic polling start after saving settings | Confirms host, user, password, network, and basic `ipmitool` availability; after success, the app reads SDR once and starts sensor polling. |
+| Read sensors | `sdr elist` | Overview/Sensors refresh, continuous polling after Start polling, smart auto policy | Returns full SDR rows; the app parses temperature, fans, power, voltage, current, and state. |
 | Enter manual fan mode | `raw 0x30 0x30 0x01 0x00` | All-fan control, manual presets, built-in Default/Restore Manual 10% preset, smart auto policy | Sent before setting a manual percentage. Overview/tray "Restore Dell factory fan speed" does not send this command. |
 | Set all-fan percentage | `raw 0x30 0x30 0x02 0xff <percent-hex>` | All-fan control, manual presets, tray all-fan menu | `0xff` targets all fans. |
 | Set individual fan percentage | `raw 0x30 0x30 0x02 <fan-target-selector> <percent-hex>` | Individual fan controls | Disabled by default. `<fan-target-selector>` selects the fan and is not a speed; verify firmware mapping before enabling. |
-| Restore Dell automatic mode | `raw 0x30 0x30 0x01 0x01` | Overview/tray "Restore Dell factory fan speed", Dell Auto preset, emergency temperature protection | Hands fan control back to iDRAC/BMC firmware policy. |
+| Restore Dell automatic mode | `raw 0x30 0x30 0x01 0x01` | Overview/tray "Restore Dell factory fan speed", Dell Auto preset, emergency temperature protection | Hands fan control back to iDRAC/BMC firmware policy; if the software auto timer is still running, a later tick can send software fan commands again. |
+
+## Fan Raw Command Failure Handling
+
+Dell fan-control raw commands are all commands that start with `raw 0x30 0x30`, including enter manual mode, set all fans, set one fan, and restore Dell automatic mode. If this kind of `ipmitool` child process returns a non-zero exit code, the app immediately marks the operation as failed, writes one `IpmiCommand/CommandCompleted` record, and shows stdout/stderr from that execution to the user.
+
+`mc info`, `sdr elist`, raw commands, argument validation failures, missing `ipmitool.exe`, and command timeouts do not automatically retry, delay and retry, or write "retrying" records. Sensor polling failures stop polling and show the root cause without writing fabricated chart history points.
+
+## Tray Right-Click Menu
+
+The tray menu is organized by action risk and frequency so common fan actions are not hidden behind multiple submenu levels:
+
+- `Restore window`, `Open Overview`, `Open Fan Control`, `Open Sensors`, and `Settings`: restore the window and switch pages only; they do not execute IPMI commands.
+- `Refresh sensors`: runs `sdr elist`, then refreshes the table, dashboard cards, and charts on success, and writes one complete JSONL chart history point that can be reviewed from the Overview chart's "History range" control. Failures show the real error, are written to the runtime log, and do not create synthetic history points.
+- `Open iDRAC`: opens `https://<host>/` from the current configured host.
+- `Open logs`: opens `%LocalAppData%\DellR730xdFanControlCenter\logs`, creating the directory if needed.
+- `Restore Dell factory fan speed`: sends `raw 0x30 0x30 0x01 0x01`; it is not manual 10%.
+- `Stop auto policy`: stops the software auto timer and clears the active curve state; it does not send an IPMI command.
+- `All fans 20%`, `All fans 35%`, and `All fans 50%`: directly send manual all-fan percentage commands, still entering manual fan mode before setting the percentage.
+- `Presets`: the only remaining one-level submenu. It dynamically reads saved presets from `settings.json`; manual presets show percentages and curve presets are marked as curves.
+- `Exit`: closes the app and removes the tray icon.
+
+Every tray action that executes IPMI shares the app-wide IPMI lock. If another IPMI command is running, user-triggered tray commands wait for the current command to finish before continuing; the app does not start a concurrent `ipmitool` process and does not present a waiting switch as already completed. Background polling, smart-auto, and curve-auto ticks still skip while IPMI is busy, and the skip reason is written to the in-page log and runtime log.
 
 ## Percent To Hex
 
@@ -82,14 +104,14 @@ The app does not allow fan percentages below 0 or above 100.
 
 ## Common Execution Sequences
 
-### Connect And Start Polling
+### Start Or Cancel Polling
 
 ```text
 mc info
 sdr elist
 ```
 
-After connection succeeds, the app starts persistent sensor polling. The Overview page shows the last polling time and the read duration.
+Clicking "Start polling" first runs `mc info`, then reads `sdr elist`; after both commands succeed, the app starts persistent sensor polling. The Overview page shows the last polling time and the read duration. After polling starts, the same button reads "Cancel polling"; clicking "Cancel polling" does not run a new IPMI command. It stops future polling ticks, updates connection/polling state, and writes the event to the runtime log. If an `ipmitool` command is already in flight, that command is allowed to finish, and the cancel action does not start another `ipmitool` process.
 
 ### Refresh Sensors
 
@@ -97,7 +119,9 @@ After connection succeeds, the app starts persistent sensor polling. The Overvie
 sdr elist
 ```
 
-Refresh updates the sensor table, temperature board, fan RPM board, power and state board, and interactive chart data.
+Refresh updates the sensor table, temperature board, fan RPM board, power and state board, and interactive chart data. A successful refresh also saves a JSONL chart history point containing the summary, temperature, fan, performance/electrical, type-count, and sensor-tree data from that moment, plus `timestamp` and `unixMilliseconds`. The Overview chart's top-right "History range" control switches between Current, Last 6 hours, Last 1 day, Last 3 days, Last 7 days, and Custom. The app retains the latest 7 days by default and reloads still-retained data from `%LocalAppData%\DellR730xdFanControlCenter\chart-history` on startup. Failed refreshes do not write history.
+
+After a user-triggered fan control command succeeds, the app immediately runs this `sdr elist` refresh after the command releases the IPMI lock instead of waiting for the next polling tick. The refresh uses the real BMC response to update Overview cards, fan RPM, performance/electrical charts, and JSONL history points. If it fails, the UI and runtime log show the real error instead of fabricating chart data from the just-sent fan percentage. After the refresh succeeds, the next background polling interval restarts from the refresh completion time to avoid an immediate duplicate read.
 
 ### Set All Fans To 20%
 
@@ -107,6 +131,8 @@ raw 0x30 0x30 0x02 0xff 0x14
 ```
 
 The first command enters manual mode. The second command sets the all-fan target.
+
+When these commands succeed, the app immediately runs one `sdr elist` read afterward, so the Overview fan RPM board and performance charts no longer depend only on the configured polling seconds before updating. This post-command refresh is still a serialized IPMI operation; if it fails, the failure reason is shown, but the already successful fan command is not rolled back.
 
 ### Built-In Restore Manual Preset
 
@@ -123,7 +149,9 @@ raw 0x30 0x30 0x02 0xff 0x0a
 raw 0x30 0x30 0x01 0x01
 ```
 
-This command lets the iDRAC/BMC firmware policy take over fan control. Overview Quick Actions and the tray menu item "Restore Dell factory fan speed" execute this command. On success, the UI shows Dell automatic mode; on failure, the real IPMI error is shown and the app does not pretend restoration succeeded.
+This command lets the iDRAC/BMC firmware policy take over fan control. Overview Quick Actions and the tray menu item "Restore Dell factory fan speed" execute this command. On success, the UI shows Dell automatic mode; on failure, the real IPMI error is shown and the app does not pretend restoration succeeded. The command does not stop an already running software auto timer; use "Stop auto" when firmware control must remain in effect.
+
+After Dell automatic mode is restored successfully, the app also immediately appends one `sdr elist` refresh so cards, charts, and history points reflect the real sensor readings under the firmware policy.
 
 ### Smart Auto Policy Tick
 
@@ -137,17 +165,20 @@ The app then parses CPU temperature:
 
 - Less than or equal to target temperature: use smart auto minimum fan percent.
 - Greater than or equal to high temperature: use smart auto maximum fan percent.
-- Between the two thresholds: linearly interpolate.
-- At or above emergency auto threshold: send Dell automatic mode command.
+- Within the target-to-high policy curve: evaluate the fan percent at the current temperature's position on that linear policy curve.
+- At or above emergency auto threshold: send Dell automatic mode command; the software auto timer is not stopped by this command.
 
-When a curve preset is active, the tick still starts with the same `sdr elist` read, but the percentage comes from the saved temperature-fan curve instead of the global target/high thresholds:
+Smart auto ticks are mutually exclusive with sensor polling and user-triggered fan commands. When the user starts smart auto or switches to a curve preset, the app waits for the current IPMI command to finish, then runs the first tick before starting the background timer; if that first tick fails, the timer is not started and the UI/logs show the real failure reason. If a later background tick fires while another IPMI command holds the lock, that auto policy cycle is skipped and logged; no new `ipmitool` process or RMCP+ session is started.
 
-- Curve points are stored in `%LocalAppData%\DellR730xdFanControlCenter\settings.json` under `Presets[].CurvePoints`.
-- The Fan Control page maintains points with a graphical editor: clicking the curve chart creates a temperature/fan-percent point from that position, the right-side point list can fine-tune values with numeric controls, and existing curve presets can be loaded into the same editor from their preset card.
-- Save or switch requires at least 2 points, temperatures from `-40` to `125` C, fan percentages from `0` to `100`, and no duplicate temperatures.
-- Below the first point, the first point percent is used. Above the last point, the last point percent is used. Between two points, the app linearly interpolates and rounds to an integer percent by default.
+When a curve preset is active, the tick still starts with the same `sdr elist` read, but the percentage comes from saved curve points instead of the global target/high thresholds. There are two curve types:
+
+- Temperature curves are stored as `Kind = TemperatureCurve` and each point contains `TemperatureCelsius` plus `FanPercent`; power curves are stored as `Kind = PowerCurve` and each point contains `PowerWatts` plus `FanPercent`. Both live in `%LocalAppData%\DellR730xdFanControlCenter\settings.json` under `Presets[].CurvePoints` and both persist the same `SmoothCurve` switch.
+- The Fan Control page maintains points with two graphical editors: clicking empty space in the upper temperature chart creates temperature/fan-percent points, and clicking empty space in the lower power chart creates power-watt/fan-percent points. Hovering over a curve chart shows crosshair guides, the current temperature/power value, and fan-speed percent. Dragging existing points updates the chart point and matching right-side numeric controls live; the right-side point list can also fine-tune values directly. During drag, the editor uses lightweight drawing, while full preview text and strict validation refresh after pointer release, right-side numeric edits, add-point actions, or save. Existing curve presets load into the matching editor from their preset card and the page automatically scrolls to the matching chart. After a successful save, the page scrolls back to the newly added or updated preset card.
+- Temperature curve save/switch requires at least 2 points, temperatures from `-40` to `125` C, fan percentages from `0` to `100`, and no duplicate temperatures. Power curve save/switch requires at least 2 points, power from `0` to `1200` W, fan percentages from `0` to `100`, and no duplicate power points.
+- Temperature curves calculate from CPU temperature. Power curves calculate from the current SDR power sensor whose unit contains `Watts` or whose key contains `Pwr Consumption`. Power curves still parse CPU temperature and check the emergency auto threshold first; if CPU temperature or power reading is missing, the UI/logs show the error and no fan command is sent for that tick.
+- Below the first point, the first point percent is used. Above the last point, the last point percent is used. Otherwise, the current temperature or current power reading is evaluated on the curve formed by the configured points, then rounded to an integer percent.
 - If the preset enables `SmoothCurve`, the points and endpoints stay the same, but the middle percentage uses a smooth transition before rounding. The command still sends one final `<calculated-percent-hex>` all-fan percentage.
-- At or above the emergency auto threshold, the curve result is not sent; the app sends Dell automatic mode first.
+- At or above the emergency auto threshold, the curve result is not sent; the app sends Dell automatic mode first. This action does not stop the software auto timer.
 
 If the emergency threshold is not reached, the app sends:
 
@@ -180,9 +211,11 @@ Individual target-selector control is implemented but disabled by default in the
 
 ## Polling Behavior
 
-After connection succeeds, the app starts persistent sensor polling. The default interval is 1 second, and saved values of 1 second or higher are allowed. Important details:
+Clicking "Start polling" or successfully saving settings tests the connection, reads SDR once, and starts persistent sensor polling; after polling is running, the button becomes "Cancel polling" and stops future polling ticks when clicked. Polling seconds are edited from the Settings page's Application area and saved with the top "Save settings" command that spans both Settings columns. The default interval is 1 second, and saved values of 1 second or higher are allowed. Important details:
 
 - 1 second is the polling tick cadence, not real-time streaming of SDR data; use the Overview page and runtime log for actual timing.
+- Every successful polling pass appends one JSONL chart history point. Skipped ticks, IPMI-busy ticks, and failed polls do not append history because they have no new SDR data to display. History load or write failures are shown as errors and written to the runtime log instead of being treated as success.
+- While smart auto or curve auto is running, regular sensor polling ticks do not independently start `sdr elist`; the auto-policy tick's SDR result refreshes sensors, boards, charts, and history points. After auto policy stops, regular polling continues on the configured cadence.
 - If the previous SDR read is still running, the current tick is skipped; skipped tick records are written to the in-page log and runtime JSONL log, but they do not open or overwrite the top InfoBar.
 - If another IPMI command is running, the current tick is skipped to avoid overlapping commands; only the first skipped tick in the same busy period is logged.
 - A skipped tick does not start a new `ipmitool` process or establish a new RMCP+ session. It is not a successful request and does not update the request state to success.
@@ -190,6 +223,16 @@ After connection succeeds, the app starts persistent sensor polling. The default
 - If polling fails, the app stops polling, marks the state as disconnected, and shows the failure reason without retrying automatically, silently degrading, or pretending success.
 
 The locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds for a full SDR read. If your environment shows a top warning that one read exceeded the current interval, you can manually set the interval slightly above the observed SDR read duration; the app does not force-rewrite that setting.
+
+## Running State Persistence And Restore
+
+- After a manual preset, Dell Auto preset, temperature curve, power curve, or smart temperature policy completes its first run successfully, the app writes the running state to `%LocalAppData%\DellR730xdFanControlCenter\settings.json`.
+- `LastRunningPresetId` stores the most recent successfully running preset ID. `LastSmartAutoPolicyRunning` stores whether the smart temperature policy was the most recent successfully running state. When both are present, the preset ID wins, and loading settings normalizes `LastSmartAutoPolicyRunning` to `false`.
+- On the next app launch, the app still starts with the normal Start polling flow: `mc info` must succeed, one `sdr elist` read must succeed, and polling must start before the app re-executes the saved preset or smart temperature policy. Connection or first-read failure does not pretend that restore succeeded.
+- If the saved preset ID was deleted, the preset type is invalid, a power curve has no matching power reading, or an IPMI command fails, the UI shows the real error and writes it to the runtime log.
+- Saving the currently running manual preset, Dell Auto preset, temperature curve, or power curve waits for the current IPMI command to finish and immediately re-applies that preset; another "Switch" click is not required. Saving an active curve immediately runs one real `sdr elist` read and curve fan-percent calculation; if that first run fails, that automatic policy is stopped.
+- When the user clicks Switch preset, Apply preset, all-fan percentage, or Restore Dell automatic mode while an IPMI command is already running, the operation waits for the current command to finish before continuing. Background polling and automatic-policy ticks do not queue; they still skip while IPMI is busy.
+- While an automatic policy is running, regular polling does not start a second SDR read path; every automatic-policy tick reads real SDR and updates sensors, charts, and history points.
 
 ## SDR Parsing Rules
 
@@ -200,7 +243,8 @@ The app parses `sdr elist` output line by line:
 - For common `sdr elist` output, status comes from field 3 and reading text from field 5.
 - If the reading starts with a number, it is split into `Value`, `Unit`, and `NumericValue`.
 - Numeric parsing uses invariant culture and supports integers, decimals, and negative numbers.
-- Readings without a numeric prefix keep the raw text and do not produce `NumericValue`.
+- Readings without a numeric prefix keep the raw text and do not produce `NumericValue`; the UI translates registered discrete values such as `No Reading`, `State Deasserted`, `Fully Redundant`, `OEM Specific`/`Vendor specific`, and `Bus Uncorrectable error` into the current language. `OEM Specific`/`Vendor specific` displays as "Dell custom state" for R730xd because the BMC returned a Dell/iDRAC private enum; it is not a standalone fault conclusion, and the card's `Status` row plus iDRAC alerts remain the health authority. Unknown readings keep the raw BMC text instead of being guessed.
+- Sensor names are matched against registered SDR names and patterns first. Unregistered English/vendor discrete event names do not display the raw key directly; they display as localized "Hardware event <SDR ID>" labels. The original name still participates in internal classification; use manual `sdr elist` output when exact raw comparison is required.
 - If no sensor rows are produced, the app raises an error.
 
 ## Sensor Classification Rules
@@ -213,7 +257,7 @@ Charts and dashboard cards classify sensors as follows:
 - Power: unit contains `Watts`, or name contains `Pwr Consumption`.
 - Voltage: unit contains `Volts` and has a numeric value.
 - Current: unit contains `Amps` and has a numeric value.
-- Health state: name contains `Redundancy`, `Battery`, `Intrusion`, or `Power Optimized`.
+- Health state: name contains `Redundancy`, `Battery`, `Intrusion`, or `Power Optimized`; `Power Optimized` displays as "Power optimization policy" in the UI.
 - Other non-numeric sensors are treated as state sensors.
 - Other numeric sensors are treated as other numeric sensors.
 
@@ -265,7 +309,7 @@ Common causes include insufficient account privileges, disabled iDRAC capability
 
 ### SDR polling is slow or RMCP+ sessions fail
 
-iDRAC may take several to more than ten seconds to return full SDR data. Too-low polling keeps opening IPMI v2/RMCP+ sessions and can lead to `Unable to establish IPMI v2 / RMCP+ session`. Raise polling seconds to the UI recommendation or higher; the app does not retry automatically or pretend the failed poll succeeded.
+iDRAC may take several to more than ten seconds to return full SDR data. Too-low polling keeps opening IPMI v2/RMCP+ sessions and can lead to `Unable to establish IPMI v2 / RMCP+ session`. While smart auto or curve auto is running, regular polling does not add another SDR read, which avoids duplicate sessions competing with the auto-policy tick. Raise polling seconds from the Settings page's Application area to the UI recommendation or higher; the app does not retry automatically or pretend the failed poll succeeded.
 
 ### Sensor classification is unexpected
 

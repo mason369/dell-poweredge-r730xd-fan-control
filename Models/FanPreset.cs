@@ -13,8 +13,11 @@ public sealed class FanPreset
     public const string RestoreManualKind = "RestoreManual";
     public const string DellAutoKind = "DellAuto";
     public const string CurveKind = "TemperatureCurve";
+    public const string PowerCurveKind = "PowerCurve";
     public const double MinimumCurveTemperatureCelsius = -40;
     public const double MaximumCurveTemperatureCelsius = 125;
+    public const double MinimumPowerCurveWatts = 0;
+    public const double MaximumPowerCurveWatts = 1200;
 
     private string? _curvePointsText;
 
@@ -44,7 +47,13 @@ public sealed class FanPreset
     public bool IsManual => string.Equals(Kind, ManualKind, StringComparison.OrdinalIgnoreCase);
 
     [JsonIgnore]
-    public bool IsCurvePreset => string.Equals(Kind, CurveKind, StringComparison.OrdinalIgnoreCase);
+    public bool IsTemperatureCurvePreset => string.Equals(Kind, CurveKind, StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool IsPowerCurvePreset => string.Equals(Kind, PowerCurveKind, StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool IsCurvePreset => IsTemperatureCurvePreset || IsPowerCurvePreset;
 
     [JsonIgnore]
     public bool IsPercentPreset =>
@@ -101,22 +110,33 @@ public sealed class FanPreset
                 return _curvePointsText;
             }
 
-            return IsCurvePreset || CurvePoints.Count > 0 ? FormatCurvePoints(CurvePoints) : string.Empty;
+            if (IsPowerCurvePreset)
+            {
+                return FormatPowerCurvePoints(CurvePoints);
+            }
+
+            return IsTemperatureCurvePreset || CurvePoints.Count > 0 ? FormatCurvePoints(CurvePoints) : string.Empty;
         }
         set => _curvePointsText = value ?? string.Empty;
     }
 
     [JsonIgnore]
-    public string CurveEditorHeader => LocalizationService.T("Preset.CurvePoints");
+    public string CurveEditorHeader => IsPowerCurvePreset
+        ? LocalizationService.T("Control.PowerCurvePresetPoints")
+        : LocalizationService.T("Preset.CurvePoints");
 
     [JsonIgnore]
-    public string CurvePointsPlaceholder => LocalizationService.T("Preset.CurvePointsPlaceholder");
+    public string CurvePointsPlaceholder => IsPowerCurvePreset
+        ? LocalizationService.T("Preset.PowerCurvePointsPlaceholder")
+        : LocalizationService.T("Preset.CurvePointsPlaceholder");
 
     [JsonIgnore]
     public string CurvePreviewHeader => LocalizationService.T("Preset.CurvePreview");
 
     [JsonIgnore]
-    public string CurveChartText => IsCurvePreset
+    public string CurveChartText => IsPowerCurvePreset
+        ? BuildPowerCurveChartText(CurvePoints, SmoothCurve)
+        : IsTemperatureCurvePreset
         ? BuildCurveChartText(CurvePoints, SmoothCurve)
         : LocalizationService.T("Preset.CurveUnused");
 
@@ -133,6 +153,11 @@ public sealed class FanPreset
             if (!string.IsNullOrWhiteSpace(DescriptionKey))
             {
                 return LocalizationService.T(DescriptionKey);
+            }
+
+            if (IsPowerCurvePreset)
+            {
+                return LocalizationService.T("Preset.PowerCurveDetail");
             }
 
             var defaultKey = DefaultDescriptionKey;
@@ -157,7 +182,12 @@ public sealed class FanPreset
                 return LocalizationService.T("Preset.DellAutoSubtitle");
             }
 
-            if (IsCurvePreset)
+            if (IsPowerCurvePreset)
+            {
+                return LocalizationService.Format("Preset.PowerCurveSubtitle", CurvePoints.Count);
+            }
+
+            if (IsTemperatureCurvePreset)
             {
                 return LocalizationService.Format("Preset.CurveSubtitle", CurvePoints.Count);
             }
@@ -189,6 +219,7 @@ public sealed class FanPreset
         "cooling" => "\uE9CA",
         "performance" => "\uE7C1",
         "dell-auto" => "\uE950",
+        _ when string.Equals(Kind, PowerCurveKind, StringComparison.OrdinalIgnoreCase) => "\uE945",
         _ when string.Equals(Kind, CurveKind, StringComparison.OrdinalIgnoreCase) => "\uE9D2",
         _ => "\uE713",
     };
@@ -221,7 +252,12 @@ public sealed class FanPreset
                 return LocalizationService.T("Preset.DellAutoBadge");
             }
 
-            if (IsCurvePreset)
+            if (IsPowerCurvePreset)
+            {
+                return LocalizationService.T("Preset.PowerCurveBadge");
+            }
+
+            if (IsTemperatureCurvePreset)
             {
                 return LocalizationService.T("Preset.CurveBadge");
             }
@@ -240,7 +276,12 @@ public sealed class FanPreset
                 return LocalizationService.T("Preset.BmcMetric");
             }
 
-            if (IsCurvePreset)
+            if (IsPowerCurvePreset)
+            {
+                return LocalizationService.T("SensorDisplay.PowerConsumption");
+            }
+
+            if (IsTemperatureCurvePreset)
             {
                 return LocalizationService.T("Preset.CurveMetric");
             }
@@ -283,7 +324,9 @@ public sealed class FanPreset
             return;
         }
 
-        CurvePoints = ParseCurvePoints(CurvePointsText);
+        CurvePoints = IsPowerCurvePreset
+            ? ParsePowerCurvePoints(CurvePointsText)
+            : ParseCurvePoints(CurvePointsText);
         _curvePointsText = null;
     }
 
@@ -294,14 +337,16 @@ public sealed class FanPreset
             return;
         }
 
-        CurvePoints = NormalizeCurvePoints(CurvePoints);
+        CurvePoints = IsPowerCurvePreset
+            ? NormalizePowerCurvePoints(CurvePoints)
+            : NormalizeCurvePoints(CurvePoints);
     }
 
     public int CalculateFanPercent(double temperatureCelsius)
     {
-        if (!IsCurvePreset)
+        if (!IsTemperatureCurvePreset)
         {
-            throw new InvalidOperationException($"Fan preset is not a temperature curve: {Kind}");
+            throw new InvalidOperationException(LocalizationService.Format("Validation.CurvePresetKind", Kind));
         }
 
         var points = NormalizeCurvePoints(CurvePoints);
@@ -334,7 +379,47 @@ public sealed class FanPreset
             }
         }
 
-        throw new InvalidOperationException("Temperature curve interpolation reached an unreachable state.");
+        throw new InvalidOperationException(LocalizationService.T("Validation.CurveEvaluationUnreachable"));
+    }
+
+    public int CalculateFanPercentForPower(double powerWatts)
+    {
+        if (!IsPowerCurvePreset)
+        {
+            throw new InvalidOperationException(LocalizationService.Format("Validation.PowerCurvePresetKind", Kind));
+        }
+
+        var points = NormalizePowerCurvePoints(CurvePoints);
+        if (powerWatts <= points[0].PowerWatts)
+        {
+            return ToPercent(points[0].FanPercent);
+        }
+
+        var last = points[^1];
+        if (powerWatts >= last.PowerWatts)
+        {
+            return ToPercent(last.FanPercent);
+        }
+
+        for (var index = 1; index < points.Count; index++)
+        {
+            var previous = points[index - 1];
+            var current = points[index];
+            if (powerWatts <= current.PowerWatts)
+            {
+                var powerSpan = current.PowerWatts - previous.PowerWatts;
+                var progress = (powerWatts - previous.PowerWatts) / powerSpan;
+                if (SmoothCurve)
+                {
+                    progress = SmoothProgress(progress);
+                }
+
+                var fanSpan = current.FanPercent - previous.FanPercent;
+                return ToPercent(previous.FanPercent + fanSpan * progress);
+            }
+        }
+
+        throw new InvalidOperationException(LocalizationService.T("Validation.PowerCurveEvaluationUnreachable"));
     }
 
     public static List<FanCurvePoint> ParseCurvePoints(string text)
@@ -383,6 +468,52 @@ public sealed class FanPreset
                     point.FanPercent)));
     }
 
+    public static List<FanCurvePoint> ParsePowerCurvePoints(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new InvalidOperationException(LocalizationService.T("Validation.PowerCurvePointCount"));
+        }
+
+        var points = new List<FanCurvePoint>();
+        var normalizedText = text
+            .Replace('，', ',')
+            .Replace('：', ':')
+            .Replace('％', '%')
+            .Replace('瓦', 'W');
+        var rows = normalizedText.Split(['\r', '\n', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var row in rows)
+        {
+            var match = Regex.Match(
+                row,
+                @"^(?<power>\d+(?:\.\d+)?)\s*(?:[wW])?\s*(?:=|:|,|->|=>|\s+)\s*(?<percent>\d+(?:\.\d+)?)\s*%?$");
+            if (!match.Success)
+            {
+                throw new InvalidOperationException(LocalizationService.Format("Validation.PowerCurvePointFormat", row));
+            }
+
+            points.Add(new FanCurvePoint
+            {
+                PowerWatts = double.Parse(match.Groups["power"].Value, CultureInfo.InvariantCulture),
+                FanPercent = double.Parse(match.Groups["percent"].Value, CultureInfo.InvariantCulture),
+            });
+        }
+
+        return NormalizePowerCurvePoints(points);
+    }
+
+    public static string FormatPowerCurvePoints(IEnumerable<FanCurvePoint> points)
+    {
+        return string.Join(
+            Environment.NewLine,
+            NormalizePowerCurvePoints(points)
+                .Select(point => string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0:0.#}W = {1:0.#}%",
+                    point.PowerWatts,
+                    point.FanPercent)));
+    }
+
     public static string BuildCurveChartText(IEnumerable<FanCurvePoint> points, bool smooth = false)
     {
         var normalized = NormalizeCurvePoints(points);
@@ -409,6 +540,36 @@ public sealed class FanPreset
             firstTemperature,
             new string(glyphs),
             lastTemperature,
+            minFan,
+            maxFan);
+    }
+
+    public static string BuildPowerCurveChartText(IEnumerable<FanCurvePoint> points, bool smooth = false)
+    {
+        var normalized = NormalizePowerCurvePoints(points);
+        var firstPower = normalized[0].PowerWatts;
+        var lastPower = normalized[^1].PowerWatts;
+        var minFan = normalized.Min(point => point.FanPercent);
+        var maxFan = normalized.Max(point => point.FanPercent);
+        const int samples = 18;
+        const string bars = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588";
+        var glyphs = new char[samples];
+        for (var index = 0; index < samples; index++)
+        {
+            var ratio = samples == 1 ? 0 : index / (double)(samples - 1);
+            var power = firstPower + ((lastPower - firstPower) * ratio);
+            var fan = CalculateFanPercentFromPowerPoints(normalized, power, smooth);
+            var fanRatio = maxFan.Equals(minFan) ? 0 : (fan - minFan) / (maxFan - minFan);
+            var glyphIndex = Math.Clamp((int)Math.Round(fanRatio * (bars.Length - 1), MidpointRounding.AwayFromZero), 0, bars.Length - 1);
+            glyphs[index] = bars[glyphIndex];
+        }
+
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "{0:0.#}W {1} {2:0.#}W  {3:0.#}-{4:0.#}%",
+            firstPower,
+            new string(glyphs),
+            lastPower,
             minFan,
             maxFan);
     }
@@ -444,7 +605,41 @@ public sealed class FanPreset
             }
         }
 
-        throw new InvalidOperationException("Temperature curve interpolation reached an unreachable state.");
+        throw new InvalidOperationException(LocalizationService.T("Validation.CurveEvaluationUnreachable"));
+    }
+
+    private static int CalculateFanPercentFromPowerPoints(IReadOnlyList<FanCurvePoint> points, double powerWatts, bool smooth)
+    {
+        if (powerWatts <= points[0].PowerWatts)
+        {
+            return ToPercent(points[0].FanPercent);
+        }
+
+        var last = points[^1];
+        if (powerWatts >= last.PowerWatts)
+        {
+            return ToPercent(last.FanPercent);
+        }
+
+        for (var index = 1; index < points.Count; index++)
+        {
+            var previous = points[index - 1];
+            var current = points[index];
+            if (powerWatts <= current.PowerWatts)
+            {
+                var powerSpan = current.PowerWatts - previous.PowerWatts;
+                var progress = (powerWatts - previous.PowerWatts) / powerSpan;
+                if (smooth)
+                {
+                    progress = SmoothProgress(progress);
+                }
+
+                var fanSpan = current.FanPercent - previous.FanPercent;
+                return ToPercent(previous.FanPercent + fanSpan * progress);
+            }
+        }
+
+        throw new InvalidOperationException(LocalizationService.T("Validation.PowerCurveEvaluationUnreachable"));
     }
 
     private static double SmoothProgress(double progress)
@@ -485,6 +680,48 @@ public sealed class FanPreset
             if (index > 0 && normalized[index - 1].TemperatureCelsius.Equals(point.TemperatureCelsius))
             {
                 throw new InvalidOperationException(LocalizationService.Format("Validation.CurvePointDuplicate", point.TemperatureCelsius));
+            }
+        }
+
+        return normalized;
+    }
+
+    private static List<FanCurvePoint> NormalizePowerCurvePoints(IEnumerable<FanCurvePoint> points)
+    {
+        var normalized = points
+            .Select(point => point.Clone())
+            .OrderBy(point => point.PowerWatts)
+            .ToList();
+
+        if (normalized.Count < 2)
+        {
+            throw new InvalidOperationException(LocalizationService.T("Validation.PowerCurvePointCount"));
+        }
+
+        for (var index = 0; index < normalized.Count; index++)
+        {
+            var point = normalized[index];
+            if (double.IsNaN(point.PowerWatts) ||
+                double.IsInfinity(point.PowerWatts) ||
+                point.PowerWatts is < MinimumPowerCurveWatts or > MaximumPowerCurveWatts)
+            {
+                throw new InvalidOperationException(LocalizationService.Format(
+                    "Validation.PowerCurveWattsRange",
+                    MinimumPowerCurveWatts,
+                    MaximumPowerCurveWatts,
+                    point.PowerWatts));
+            }
+
+            if (double.IsNaN(point.FanPercent) ||
+                double.IsInfinity(point.FanPercent) ||
+                point.FanPercent is < 0 or > 100)
+            {
+                throw new InvalidOperationException(LocalizationService.Format("Validation.CurveFanPercentRange", point.FanPercent));
+            }
+
+            if (index > 0 && normalized[index - 1].PowerWatts.Equals(point.PowerWatts))
+            {
+                throw new InvalidOperationException(LocalizationService.Format("Validation.PowerCurvePointDuplicate", point.PowerWatts));
             }
         }
 

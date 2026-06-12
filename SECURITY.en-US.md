@@ -100,7 +100,7 @@ Fan control changes server cooling capacity. Low manual speeds can raise CPU, dr
 - Power, voltage, and current.
 - iDRAC alerts and system events.
 
-When workload is unknown, ambient temperature is high, the chassis is drive-dense, sensors are abnormal, or you cannot keep watching the machine, use Dell automatic mode. Overview Quick Actions and the tray menu item "Restore Dell factory fan speed" send the Dell automatic mode command and hand fan control back to iDRAC/BMC firmware; they are not manual 10%.
+When workload is unknown, ambient temperature is high, the chassis is drive-dense, sensors are abnormal, or you cannot keep watching the machine, use Dell automatic mode. Overview Quick Actions and the tray menu item "Restore Dell factory fan speed" send the Dell automatic mode command and hand fan control back to iDRAC/BMC firmware; they are not manual 10%. If the software auto timer is still running, a later tick can send software fan commands again; use "Stop auto" when firmware control must remain in effect.
 
 The hero live summary and Overview top hardware summary are display-only and use the latest successful SDR refresh. The hero "Live temperature" value is the current average of temperature sensor readings, not a historical maximum, and it does not drive smart auto or emergency automatic protection; actual control still uses the CPU/max temperature semantics described in the smart auto policy section. The small detail rows under each hero value show at most 3 concrete sensor readings, and extra sensors are not shown in the hero, so they do not replace the full sensor table. Before the first refresh, or when one sensor category is missing, the hero and Overview electrical summaries show "Waiting" or no-reading text. Hero and hardware-card colors are UI hints: normal green, near-risk yellow, clear deviation orange, and danger red. These thresholds do not change fan commands and do not replace iDRAC alerts, the full sensor table, or emergency automatic protection. Fan-card rotation is only a visual rhythm derived from current RPM readings, not part of the control loop. For fan changes or troubleshooting, still check the Temperature Board, Fan RPM Board, Power & Health board, and iDRAC alerts.
 
@@ -127,23 +127,24 @@ This policy is not a firmware-level real-time control loop. It is affected by:
 - Polling interval setting.
 - Sensor naming and firmware output format.
 
-The default polling interval is 1 second, and saved values of 1 second or higher are allowed. This value is only the polling tick cadence; it does not guarantee that iDRAC can return a complete SDR read at the same frequency. The app allows only one IPMI operation at a time; when the previous SDR read or another IPMI command is still running, the current tick is skipped and no new `ipmitool` process or RMCP+ session is started. If a real command returns `Unable to establish IPMI v2 / RMCP+ session`, the app stops polling and shows the failure reason without retrying automatically, silently degrading, or pretending success.
+The default polling interval is 1 second, and saved values of 1 second or higher are allowed. This value is only the polling tick cadence; it does not guarantee that iDRAC can return a complete SDR read at the same frequency. The app allows only one IPMI operation at a time; when a previous SDR read, smart auto tick, or another IPMI command is still running, the new background tick is skipped and no new `ipmitool` process or RMCP+ session is started. When starting smart auto or switching to a curve preset, the first tick must succeed before the background timer starts; first-tick failure or a busy IPMI lock stops startup, shows the root cause, and does not queue to increase handling time. While smart auto or curve auto is running, regular sensor polling does not independently start a second `sdr elist` path; the auto-policy tick's SDR result refreshes the UI and history points. If a real command returns `Unable to establish IPMI v2 / RMCP+ session`, the app stops polling and shows the failure reason without retrying automatically, delaying and retrying, silently degrading, or pretending success; Dell fan-control raw commands also fail immediately on non-zero exit.
 
-At the emergency temperature threshold, the app sends the Dell automatic mode command so the BMC can take over. That action still depends on successful IPMI command execution.
+At the emergency temperature threshold, the app sends the Dell automatic mode command so the BMC can take over. That action still depends on successful IPMI command execution, and it does not stop the software auto timer; later ticks continue running the current policy.
 
-## Temperature Curve Preset Risk
+## Curve Preset Risk
 
-Curve presets are a software smart-auto rule; they are not written into iDRAC/BMC firmware. After switching to a curve preset, each software auto tick reads SDR, parses CPU temperature, interpolates the user-saved temperature-fan points, and sends an all-fan percentage command. Points are maintained from the Fan Control page with chart clicks and numeric point controls; Smooth curve is only a software-side interpolation mode between adjacent points and does not program a firmware fan curve into iDRAC/BMC.
+Curve presets are a software auto rule; they are not written into iDRAC/BMC firmware. Temperature curves read SDR on each software auto tick, parse CPU temperature, interpolate the user-saved temperature-fan points, and send an all-fan percentage command. Power curves also read SDR, but use the power sensor whose unit contains `Watts` or whose key contains `Pwr Consumption` as the curve input; they still parse CPU temperature and check the emergency auto threshold first. Points are maintained from the Fan Control page with chart clicks and numeric point controls; Smooth curve is only a software-side interpolation mode between adjacent points and does not program a firmware fan curve into iDRAC/BMC.
 
 Safety boundaries for curve presets:
 
 - Curve points control only the all-fan percentage, not individual fans.
-- Save or switch validates at least 2 points, temperatures from `-40` to `125` C, percentages from `0` to `100`, and no duplicate temperatures.
+- Save or switch validates at least 2 points. Temperature curves validate temperatures from `-40` to `125` C, percentages from `0` to `100`, and no duplicate temperatures; power curves validate power from `0` to `1200` W, percentages from `0` to `100`, and no duplicate power points.
 - The point list and `SmoothCurve` setting are stored in local `settings.json`. Deleting, editing, or saving a preset affects later software tick calculations, but it does not change server firmware configuration.
-- CPU temperatures below the first point use the first point; temperatures above the last point use the last point. If the final point is too low, sustained high load can still be under-cooled.
+- Input values below the first point use the first point; values above the last point use the last point. If the final point is too low, sustained high load can still be under-cooled.
+- Power curves do not replace temperature protection. Low power does not guarantee safe local hardware temperatures; drives, PCIe cards, memory, inlet, or exhaust temperatures can still rise. If the current SDR result has no power reading, the power curve shows the failure and stops that tick instead of continuing with a default or previous power value.
 - Smooth mode makes percentage changes between two points softer, but it does not change endpoints, emergency thresholds, or percentage bounds. If the points themselves are too low, smoothing does not add safety margin.
-- At the emergency temperature threshold, the app first sends Dell automatic mode, but that protection still depends on SDR reads, CPU temperature detection, network availability, and successful IPMI command execution.
-- Manual all-fan control, individual fan control, the built-in Restore Manual preset, Dell Auto, Overview/tray Restore Dell factory fan speed, or Stop Auto clears the active curve state so an old curve does not continue overriding manual commands.
+- At the emergency temperature threshold, the app first sends Dell automatic mode, but that protection still depends on SDR reads, CPU temperature detection, network availability, and successful IPMI command execution, and it does not stop the software auto timer.
+- Manual all-fan control, individual fan control, the built-in Restore Manual preset, Dell Auto, Overview/tray Restore Dell factory fan speed, and Stop Auto all clear the active curve state. Only Stop Auto, deleting the running curve preset, or an auto-policy failure stops the software auto timer; if the timer is still running, the next tick continues controlling all fans with the global linear policy.
 
 Validate curves first under low load and with someone watching the machine. Do not set the final temperature point below realistic high-load temperatures, and do not set the final fan percentage too low. If charts, sensor status, or iDRAC alerts look abnormal, restore Dell automatic mode immediately.
 
@@ -165,7 +166,7 @@ This project requires explicit failure exposure:
 - Missing bundled `ipmitool.exe` raises an error.
 - Empty iDRAC host, username, or password raises an error.
 - Command timeout kills the process and shows the timeout reason.
-- Non-zero `ipmitool` exit code shows stdout/stderr.
+- Non-zero `ipmitool` exit code immediately shows stdout/stderr from that execution; Dell fan-control raw commands do not use a fixed retry.
 - Empty SDR output raises an error.
 - Missing UI translations raise an error.
 

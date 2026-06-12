@@ -112,7 +112,7 @@ public static class Localization
                 button.Content = value;
                 break;
             default:
-                throw new InvalidOperationException($"Localization key '{key}' cannot be applied to {element.GetType().Name}.");
+                throw new InvalidOperationException($"本地化键 {key} 无法应用到控件类型 {element.GetType().Name}。");
         }
     }
 }

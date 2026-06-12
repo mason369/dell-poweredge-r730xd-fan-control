@@ -17,9 +17,13 @@
     <Compile Include="..\..\Models\LogLevelStyle.cs" Link="Models\LogLevelStyle.cs" />
     <Compile Include="..\..\Models\PollingSkipLogGate.cs" Link="Models\PollingSkipLogGate.cs" />
     <Compile Include="..\..\Models\HeroMetricSeverityStyle.cs" Link="Models\HeroMetricSeverityStyle.cs" />
+    <Compile Include="..\..\Models\IdracProfile.cs" Link="Models\IdracProfile.cs" />
     <Compile Include="..\..\Models\SensorReading.cs" Link="Models\SensorReading.cs" />
+    <Compile Include="..\..\Models\SensorSubtitleFormatter.cs" Link="Models\SensorSubtitleFormatter.cs" />
     <Compile Include="..\..\Services\AppLogOperation.cs" Link="Services\AppLogOperation.cs" />
     <Compile Include="..\..\Services\AppLogService.cs" Link="Services\AppLogService.cs" />
+    <Compile Include="..\..\Services\CommandTraceEventArgs.cs" Link="Services\CommandTraceEventArgs.cs" />
+    <Compile Include="..\..\Services\IpmiCommandService.cs" Link="Services\IpmiCommandService.cs" />
     <Compile Include="..\..\Services\LocalizationService.cs" Link="Services\LocalizationService.cs" />
     <Compile Include="..\..\Services\SettingsStore.cs" Link="Services\SettingsStore.cs" />
   </ItemGroup>

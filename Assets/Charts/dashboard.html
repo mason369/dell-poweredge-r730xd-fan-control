@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
@@ -87,7 +87,14 @@
       flex-wrap: wrap;
       gap: 8px;
       justify-content: flex-end;
-      max-width: 520px;
+      max-width: 560px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
     }
 
     .chip {
@@ -107,6 +114,76 @@
       background: var(--accent);
       color: #fff;
       border-color: transparent;
+    }
+
+    .range-control {
+      display: flex;
+      align-items: flex-end;
+      flex-direction: column;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .range-label {
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .range-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+      max-width: 680px;
+    }
+
+    .range-chip {
+      height: 32px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      box-shadow: 0 3px 12px rgba(15, 23, 42, .04);
+      cursor: pointer;
+    }
+
+    .range-chip.active {
+      background: var(--accent-2);
+      color: #fff;
+      border-color: transparent;
+    }
+
+    .custom-range {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .custom-range[hidden] {
+      display: none;
+    }
+
+    .custom-range label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .custom-range input {
+      height: 32px;
+      min-width: 190px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      padding: 0 8px;
     }
 
     .dashboard-tooltip {
@@ -152,15 +229,15 @@
       margin-top: 5px;
       color: var(--muted);
       font-size: 12px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      line-height: 1.35;
     }
 
     .grid {
       display: grid;
-      grid-template-columns: 1.15fr 1fr 1.25fr;
-      grid-template-rows: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-rows: minmax(400px, 1fr);
       gap: 8px;
       min-height: 0;
       flex: 1 1 auto;
@@ -176,7 +253,7 @@
       min-height: 0;
     }
 
-    .panel.wide { grid-column: span 2; }
+    .panel.wide { grid-column: span 1; }
 
     .chart {
       width: 100%;
@@ -211,9 +288,12 @@
       body { overflow-y: auto; }
       .shell { height: auto; min-height: 100vh; overflow: visible; }
       .topbar { flex-direction: column; }
+      .toolbar { align-items: flex-start; }
       .chips { justify-content: flex-start; }
+      .range-control { align-items: flex-start; }
+      .range-buttons, .custom-range { justify-content: flex-start; }
       .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .grid { grid-template-columns: 1fr; grid-template-rows: repeat(6, 300px); }
+      .grid { grid-template-columns: 1fr; grid-template-rows: repeat(6, minmax(420px, auto)); grid-auto-rows: minmax(420px, auto); }
       .panel.wide { grid-column: span 1; }
     }
   </style>
@@ -225,7 +305,17 @@
         <div class="title" id="title"></div>
         <div class="subtitle" id="subtitle"></div>
       </div>
-      <div class="chips" id="chips"></div>
+      <div class="toolbar">
+        <div class="chips" id="chips"></div>
+        <div class="range-control" id="rangeControl">
+          <span class="range-label" id="rangeLabel"></span>
+          <div class="range-buttons" id="rangeButtons"></div>
+          <div class="custom-range" id="customRange" hidden>
+            <label><span id="customStartLabel"></span><input id="customStart" type="datetime-local" /></label>
+            <label><span id="customEndLabel"></span><input id="customEnd" type="datetime-local" /></label>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="metric-strip" id="metrics"></section>
@@ -243,8 +333,19 @@
   <script>
     const chartIds = ["trend", "overall", "temperature", "fans", "power", "types"];
     const charts = new Map();
+    const rangeDurations = {
+      "6h": 6 * 60 * 60 * 1000,
+      "1d": 24 * 60 * 60 * 1000,
+      "3d": 3 * 24 * 60 * 60 * 1000,
+      "7d": 7 * 24 * 60 * 60 * 1000
+    };
     let currentView = "all";
+    let selectedRange = "6h";
+    let customRangeStart = "";
+    let customRangeEnd = "";
     let lastPayload = null;
+    let pendingHostWheelDeltaY = 0;
+    let hostWheelFrameRequested = false;
 
     function initCharts() {
       chartIds.forEach((id) => {
@@ -297,12 +398,15 @@
     function render(payload) {
       lastPayload = payload;
       document.body.classList.toggle("dark", payload.theme === "Dark");
-      document.documentElement.lang = payload.language || "en";
+      document.documentElement.lang = payload.language || "und";
+      document.body.dataset.dpiScale = dpiScale().toFixed(2);
       document.getElementById("title").textContent = payload.labels.title;
       document.getElementById("subtitle").textContent = payload.labels.subtitle;
       renderChips(payload.labels);
-      renderMetrics(payload);
-      renderCharts(payload);
+      renderRangeControls(payload);
+      const rangePayload = buildRangePayload(payload);
+      renderMetrics(rangePayload);
+      renderCharts(rangePayload);
       setView(currentView);
       requestAnimationFrame(resizeCharts);
     }
@@ -338,8 +442,58 @@
       requestAnimationFrame(resizeCharts);
     }
 
+    function renderRangeControls(payload) {
+      const labels = payload.labels;
+      const options = [
+        ["live", labels.rangeLive],
+        ["6h", labels.range6Hours],
+        ["1d", labels.range1Day],
+        ["3d", labels.range3Days],
+        ["7d", labels.range7Days],
+        ["custom", labels.rangeCustom]
+      ];
+      document.getElementById("rangeLabel").textContent = labels.historyRange;
+      const buttons = document.getElementById("rangeButtons");
+      buttons.innerHTML = "";
+      options.forEach(([range, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "range-chip" + (range === selectedRange ? " active" : "");
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          selectedRange = range;
+          if (range === "custom") {
+            initializeCustomRange(payload);
+          }
+          render(payload);
+        });
+        buttons.appendChild(button);
+      });
+
+      const customPanel = document.getElementById("customRange");
+      customPanel.hidden = selectedRange !== "custom";
+      document.getElementById("customStartLabel").textContent = labels.rangeStart;
+      document.getElementById("customEndLabel").textContent = labels.rangeEnd;
+      const startInput = document.getElementById("customStart");
+      const endInput = document.getElementById("customEnd");
+      startInput.value = customRangeStart;
+      endInput.value = customRangeEnd;
+      startInput.onchange = () => {
+        customRangeStart = startInput.value;
+        if (lastPayload) {
+          render(lastPayload);
+        }
+      };
+      endInput.onchange = () => {
+        customRangeEnd = endInput.value;
+        if (lastPayload) {
+          render(lastPayload);
+        }
+      };
+    }
+
     function renderMetrics(payload) {
-      const s = payload.summary;
+      const s = payload.summary || emptySummary();
       const labels = payload.labels;
       const entries = [
         [labels.maxCpuTemp, number(s.maxTemperature, 1) + " " + labels.tempUnit, labels.temperatureSensors + ": " + s.temperatureCount],
@@ -357,47 +511,61 @@
     function renderCharts(payload) {
       renderTrend(payload);
       renderOverall(payload);
-      renderTemperature(payload);
-      renderFans(payload);
-      renderPower(payload);
+      renderTemperatureHistory(payload);
+      renderFansHistory(payload);
+      renderPowerHistory(payload);
       renderTypes(payload);
     }
 
     function renderTrend(payload) {
       const labels = payload.labels;
-      const history = payload.history || [];
-      const times = history.map((row) => row.time);
+      const history = chartHistory(payload);
+      if (history.length === 0) {
+        renderEmptyChart("trend", labels.trendTitle, labels.trendSubtitle, labels.noHistoryData);
+        return;
+      }
+
+      const series = [
+        summaryTimeLine(labels.maxCpuTemp, history, "maxTemperature", 0),
+        summaryTimeLine(labels.averageFanRpm, history, "averageFanRpm", 1),
+        summaryTimeLine(labels.cpuUsage, history, "cpuUsage", 0),
+        summaryTimeLine(labels.memoryUsage, history, "memUsage", 0),
+        summaryTimeLine(labels.ioUsage, history, "ioUsage", 0),
+        summaryTimeLine(labels.systemUsage, history, "sysUsage", 0),
+        summaryTimeLine(labels.typePower, history, "powerWatts", 2)
+      ];
+      const layout = chartLayout("trend", series, { right: 112, left: 54 });
       charts.get("trend").setOption({
         color: colorSet(),
-        title: chartTitle(labels.trendTitle, labels.trendSubtitle),
+        title: chartTitle(labels.trendTitle, labels.trendSubtitle, payload.rangeLabel),
         tooltip: dashboardTooltip({ trigger: "axis" }),
-        legend: { top: 34, textStyle: { color: axisColor() } },
-        grid: { top: 78, right: 62, bottom: 62, left: 54, containLabel: true },
-        dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 18 }],
-        xAxis: { type: "category", data: times, axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
+        legend: chartLegend(layout.legendTop),
+        grid: chartGrid(layout.gridTop, layout.right, layout.bottom, layout.left),
+        dataZoom: chartDataZoom(layout),
+        xAxis: { type: "time", axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
         yAxis: [
-          { type: "value", name: labels.tempUnit, axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
-          { type: "value", name: labels.fanUnit, axisLabel: { color: axisColor() }, splitLine: { show: false } }
+          { type: "value", name: labels.tempPercentUnit, axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+          { type: "value", name: labels.fanUnit, axisLabel: { color: axisColor() }, splitLine: { show: false } },
+          { type: "value", name: labels.powerUnit, offset: 46, axisLabel: { color: axisColor() }, splitLine: { show: false } }
         ],
-        series: [
-          smoothLine(labels.maxCpuTemp, history.map((row) => row.maxTemperature), 0),
-          smoothLine(labels.averageFanRpm, history.map((row) => row.averageFanRpm), 1),
-          smoothLine(labels.cpuUsage, history.map((row) => row.cpuUsage), 0),
-          smoothLine(labels.memoryUsage, history.map((row) => row.memUsage), 0),
-          smoothLine(labels.ioUsage, history.map((row) => row.ioUsage), 0),
-          smoothLine(labels.systemUsage, history.map((row) => row.sysUsage), 0)
-        ]
+        series
       }, true);
     }
 
     function renderOverall(payload) {
       const labels = payload.labels;
-      const s = payload.summary;
-      const healthRatio = s.sensorCount > 0 ? (s.okCount / s.sensorCount) * 100 : 0;
-      const coverage = Math.min(100, (s.sensorCount || 0) / 2);
+      const history = chartHistory(payload);
+      if (history.length === 0) {
+        renderEmptyChart("overall", labels.overallTitle, labels.overallSubtitle, labels.noHistoryData);
+        return;
+      }
+
+      const s = payload.summary || emptySummary();
+      const peak = peakSummary(history);
+      const latest = history[history.length - 1]?.summary || s;
       charts.get("overall").setOption({
         color: ["#0f766e", "#2563eb", "#d97706", "#16a34a"],
-        title: chartTitle(labels.overallTitle, labels.overallSubtitle),
+        title: chartTitle(labels.overallTitle, labels.overallSubtitle, payload.rangeLabel),
         tooltip: dashboardTooltip({
           formatter: () => [
             `${labels.maxCpuTemp}: ${number(s.maxTemperature, 1)} ${labels.tempUnit}`,
@@ -410,9 +578,10 @@
             `${labels.hardwareTypes}: ${s.sensorCount}`
           ].join("<br/>")
         }),
+        legend: { bottom: 8, textStyle: { color: axisColor() } },
         radar: {
-          center: ["50%", "58%"],
-          radius: "62%",
+          center: ["50%", "53%"],
+          radius: "58%",
           splitLine: { lineStyle: { color: splitColor() } },
           splitArea: { areaStyle: { color: ["rgba(15,118,110,.05)", "rgba(37,99,235,.05)"] } },
           axisName: { color: axisColor() },
@@ -432,155 +601,262 @@
           areaStyle: { opacity: .22 },
           lineStyle: { width: 3 },
           symbolSize: 5,
-          data: [{
-            name: labels.currentSnapshot,
-            value: [
-              clamp(s.maxTemperature || 0, 0, 100),
-              normalize(s.averageFanRpm, 0, Math.max(3600, s.maxFanRpm || 0)),
-              clamp(s.maxPerformance || 0, 0, 100),
-              normalize(s.powerWatts, 0, 500),
-              normalize(s.averageVoltage, 0, 240),
-              normalize(s.totalCurrent, 0, 5),
-              healthRatio,
-              coverage
-            ]
-          }]
+          data: [
+            { name: labels.rangeAverage, value: radarValues(s) },
+            { name: labels.rangePeak, value: radarValues(peak) },
+            { name: labels.rangeLatest, value: radarValues(latest) }
+          ]
         }]
       }, true);
     }
 
-    function renderTemperature(payload) {
+    function renderTemperatureHistory(payload) {
       const labels = payload.labels;
-      const rows = (payload.current.temperatures || []).slice().sort((a, b) => b.value - a.value);
+      const history = chartHistory(payload);
+      const series = buildSensorTimeSeries(history, (row) => row.current?.temperatures || [], 0);
+      if (series.length === 0) {
+        renderEmptyChart("temperature", labels.temperatureTitle, labels.temperatureSubtitle, labels.noHistoryData);
+        return;
+      }
+
+      const layout = chartLayout("temperature", series);
       charts.get("temperature").setOption({
-        color: ["#dc2626"],
-        title: chartTitle(labels.temperatureTitle, labels.temperatureSubtitle),
-        tooltip: valueTooltip(labels.tempUnit),
-        grid: { top: 74, right: 34, bottom: 54, left: 104, containLabel: true },
-        xAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
-        yAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), formatter: shortAxisLabel } },
-        visualMap: {
-          show: false,
-          min: 20,
-          max: 90,
-          dimension: 0,
-          inRange: { color: ["#0f766e", "#d97706", "#dc2626"] }
-        },
-        series: [{
-          type: "bar",
-          realtimeSort: true,
-          data: rows.map((row) => ({ value: row.value, name: row.name, status: row.status })),
-          label: { show: true, position: "right", color: textColor(), formatter: "{c}" },
-          itemStyle: { borderRadius: [0, 6, 6, 0] }
-        }]
+        color: colorSet(),
+        title: chartTitle(labels.temperatureTitle, labels.temperatureSubtitle, payload.rangeLabel),
+        tooltip: dashboardTooltip({ trigger: "axis" }),
+        legend: chartLegend(layout.legendTop),
+        grid: chartGrid(layout.gridTop, layout.right, layout.bottom, layout.left),
+        dataZoom: chartDataZoom(layout),
+        xAxis: { type: "time", axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
+        yAxis: { type: "value", name: labels.tempUnit, axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+        series
       }, true);
     }
 
-    function renderFans(payload) {
+    function renderFansHistory(payload) {
       const labels = payload.labels;
-      const rows = (payload.current.fans || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      const history = chartHistory(payload);
+      const series = buildSensorTimeSeries(history, (row) => row.current?.fans || [], 0);
+      if (series.length === 0) {
+        renderEmptyChart("fans", labels.fanTitle, labels.fanSubtitle, labels.noHistoryData);
+        return;
+      }
+
+      const layout = chartLayout("fans", series);
       charts.get("fans").setOption({
-        color: ["#2563eb"],
-        title: chartTitle(labels.fanTitle, labels.fanSubtitle),
-        tooltip: valueTooltip(labels.fanUnit),
-        grid: { top: 74, right: 32, bottom: 62, left: 54, containLabel: true },
-        xAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), rotate: rows.length > 7 ? 35 : 0, interval: 0, formatter: compactFanLabel } },
-        yAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
-        series: [{
-          type: "bar",
-          data: rows.map((row) => ({ value: row.value, name: row.name, status: row.status })),
-          label: { show: true, position: "top", color: textColor() },
-          itemStyle: { borderRadius: [6, 6, 0, 0] }
-        }]
+        color: colorSet(),
+        title: chartTitle(labels.fanTitle, labels.fanSubtitle, payload.rangeLabel),
+        tooltip: dashboardTooltip({ trigger: "axis" }),
+        legend: chartLegend(layout.legendTop),
+        grid: chartGrid(layout.gridTop, layout.right, layout.bottom, layout.left),
+        dataZoom: chartDataZoom(layout),
+        xAxis: { type: "time", axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
+        yAxis: { type: "value", name: labels.fanUnit, axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+        series
       }, true);
     }
 
-    function renderPower(payload) {
+    function renderPowerHistory(payload) {
       const labels = payload.labels;
-      const rows = [
-        ...(payload.current.performance || []),
-        ...(payload.current.electrical || [])
-      ].filter((row) => row.value !== null);
+      const history = chartHistory(payload);
+      const series = [
+        ...buildSensorTimeSeries(history, (row) => row.current?.performance || [], 0),
+        ...buildSensorTimeSeries(history, (row) => (row.current?.electrical || []).filter((point) => point.type === labels.typePower), 1),
+        ...buildSensorTimeSeries(history, (row) => (row.current?.electrical || []).filter((point) => point.type === labels.typeVoltage), 2),
+        ...buildSensorTimeSeries(history, (row) => (row.current?.electrical || []).filter((point) => point.type === labels.typeCurrent), 3)
+      ];
+      if (series.length === 0) {
+        renderEmptyChart("power", labels.powerTitle, labels.powerSubtitle, labels.noHistoryData);
+        return;
+      }
+
+      const layout = chartLayout("power", series, { right: 144, left: 58 });
       charts.get("power").setOption({
         color: ["#7c3aed", "#a16207", "#0891b2", "#db2777"],
-        title: chartTitle(labels.powerTitle, labels.powerSubtitle),
-        tooltip: dashboardTooltip({
-          trigger: "item",
-          formatter: (params) => `${escapeHtml(params.name)}<br/>${labels.value}: ${params.value} ${escapeHtml(params.data.unit || "")}<br/>${labels.hardwareTypes}: ${escapeHtml(params.data.type || "")}<br/>${labels.status}: ${escapeHtml(params.data.status || "")}`
-        }),
-        grid: { top: 56, right: 58, bottom: 28, left: 72, containLabel: true },
-        xAxis: { type: "value", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
-        yAxis: { type: "category", data: rows.map((row) => row.name), axisLabel: { color: axisColor(), width: 82, overflow: "truncate", formatter: shortAxisLabel } },
-        series: [{
-          type: "bar",
-          barMaxWidth: 18,
-          barMinHeight: 3,
-          data: rows.map((row) => ({ value: row.value, name: row.name, unit: row.unit, status: row.status, type: row.type, itemStyle: { color: colorForType(row.type, labels) } })),
-          label: { show: true, position: "right", distance: 4, color: textColor(), formatter: (params) => `${params.value} ${params.data.unit || ""}` },
-          itemStyle: { borderRadius: [0, 6, 6, 0] }
-        }]
+        title: chartTitle(labels.powerTitle, labels.powerSubtitle, payload.rangeLabel),
+        tooltip: dashboardTooltip({ trigger: "axis" }),
+        legend: chartLegend(layout.legendTop),
+        grid: chartGrid(layout.gridTop, layout.right, layout.bottom, layout.left),
+        dataZoom: chartDataZoom(layout),
+        xAxis: { type: "time", axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
+        yAxis: [
+          { type: "value", name: "%", axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+          { type: "value", name: labels.powerUnit, axisLabel: { color: axisColor() }, splitLine: { show: false } },
+          { type: "value", name: labels.voltageUnit, offset: 42, axisLabel: { color: axisColor() }, splitLine: { show: false } },
+          { type: "value", name: labels.currentUnit, offset: 84, axisLabel: { color: axisColor() }, splitLine: { show: false } }
+        ],
+        series
       }, true);
     }
 
     function renderTypes(payload) {
       const labels = payload.labels;
+      const history = chartHistory(payload);
+      if (history.length === 0) {
+        renderEmptyChart("types", labels.typeTitle, labels.typeSubtitle, labels.noHistoryData);
+        return;
+      }
+
+      const series = [
+        summaryTimeLine(labels.statusOk, history, "okCount", 0),
+        summaryTimeLine(labels.statusWarning, history, "warningCount", 0),
+        summaryTimeLine(labels.hardwareTypes, history, "sensorCount", 0)
+      ];
+      const layout = chartLayout("types", series);
       charts.get("types").setOption({
         color: colorSet(),
-        title: chartTitle(labels.typeTitle, labels.typeSubtitle),
-        tooltip: dashboardTooltip({
-          trigger: "item",
-          formatter: (params) => {
-            const data = params.data || {};
-            if (data.reading !== undefined) {
-              return `${escapeHtml(params.name)}<br/>${labels.value}: ${escapeHtml(data.reading)}<br/>${labels.status}: ${escapeHtml(data.status || "")}<br/>${escapeHtml(data.subtitle || "")}`;
-            }
-
-            return `${escapeHtml(params.name)}<br/>${labels.hardwareTypes}: ${params.value}`;
-          }
-        }),
-        series: [
-          {
-            name: labels.hardwareTypes,
-            type: "pie",
-            radius: ["34%", "58%"],
-            center: ["30%", "58%"],
-            data: payload.typeCounts || [],
-            label: { color: textColor(), formatter: "{b}\n{c}" }
-          },
-          {
-            name: labels.sensorTree,
-            type: "treemap",
-            roam: false,
-            nodeClick: false,
-            breadcrumb: { show: false },
-            left: "56%",
-            top: 78,
-            right: 14,
-            bottom: 18,
-            data: payload.sensorTree || [],
-            label: { color: "#fff" },
-            upperLabel: { show: true, color: textColor() },
-            levels: [
-              { itemStyle: { borderColor: "transparent", borderWidth: 3, gapWidth: 4 } },
-              { itemStyle: { borderColor: "rgba(255,255,255,.5)", borderWidth: 1, gapWidth: 2 } }
-            ]
-          }
-        ]
+        title: chartTitle(labels.typeTitle, labels.typeSubtitle, payload.rangeLabel),
+        tooltip: dashboardTooltip({ trigger: "axis" }),
+        legend: chartLegend(layout.legendTop),
+        grid: chartGrid(layout.gridTop, layout.right, layout.bottom, layout.left),
+        dataZoom: chartDataZoom(layout),
+        xAxis: { type: "time", axisLabel: { color: axisColor() }, axisLine: { lineStyle: { color: splitColor() } } },
+        yAxis: { type: "value", name: labels.countUnit, axisLabel: { color: axisColor() }, splitLine: { lineStyle: { color: splitColor() } } },
+        series
       }, true);
     }
 
-    function chartTitle(title, subtitle) {
+    function chartTitle(title, subtitle, rangeLabel) {
       return {
         text: title,
-        subtext: subtitle,
+        subtext: [subtitle, rangeLabel].filter(Boolean).join("\n"),
         left: 16,
+        right: 16,
         top: 12,
         textStyle: { color: textColor(), fontSize: 15, fontWeight: 700 },
-        subtextStyle: { color: axisColor(), fontSize: 11 }
+        subtextStyle: { color: axisColor(), fontSize: 11, lineHeight: 17 },
+        itemGap: 7
       };
     }
 
-    function smoothLine(name, data, yAxisIndex) {
+    function chartLegend(top) {
+      return {
+        type: "plain",
+        top,
+        left: 16,
+        right: 16,
+        itemWidth: 12,
+        itemHeight: 8,
+        itemGap: 12,
+        textStyle: { color: axisColor(), fontSize: scaledFont(11), lineHeight: scaledLineHeight(16) },
+        selector: false
+      };
+    }
+
+    function chartLayout(chartId, series, options) {
+      const settings = Object.assign({
+        left: 58,
+        right: 42,
+        bottom: 96,
+        zoomBottom: 28,
+        zoomHeight: 22,
+        minPlotHeight: 132
+      }, options || {});
+      const element = document.getElementById(chartId);
+      const width = element ? element.getBoundingClientRect().width : 520;
+      const titleBlockBottom = Math.ceil(12 + scaledLineHeight(18) + 7 + (2 * scaledLineHeight(17)));
+      const legendTop = titleBlockBottom + scaledLineHeight(12);
+      const names = (series || []).map((item) => item.name || "").filter(Boolean);
+      const legendRows = estimateLegendRows(names, width - 32);
+      const legendHeight = Math.max(scaledLineHeight(18), legendRows * scaledLineHeight(19));
+      const legendToPlotGap = scaledLineHeight(18);
+      const preferredGridTop = Math.ceil(legendTop + legendHeight + legendToPlotGap);
+      const bottom = Math.max(settings.bottom, settings.zoomBottom + settings.zoomHeight + scaledLineHeight(38));
+      return {
+        legendTop,
+        gridTop: preferredGridTop,
+        left: settings.left,
+        right: settings.right,
+        bottom,
+        zoomBottom: settings.zoomBottom,
+        zoomHeight: settings.zoomHeight,
+        zoomLeft: Math.max(settings.left, 92),
+        zoomRight: Math.max(settings.right, 92)
+      };
+    }
+
+    function chartDataZoom(layout) {
+      return [
+        { type: "inside" },
+        {
+          type: "slider",
+          height: layout.zoomHeight,
+          bottom: layout.zoomBottom,
+          left: layout.zoomLeft,
+          right: layout.zoomRight,
+          labelFormatter: zoomLabelFormatter,
+          textStyle: { color: axisColor(), fontSize: scaledFont(10) }
+        }
+      ];
+    }
+
+    function zoomLabelFormatter(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return "";
+      }
+
+      return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    }
+
+    function estimateLegendRows(names, availableWidth) {
+      if (!Array.isArray(names) || names.length === 0) {
+        return 1;
+      }
+
+      const width = Math.max(160, Number(availableWidth) || 160);
+      let rows = 1;
+      let used = 0;
+      names.forEach((name) => {
+        const itemWidth = estimateLegendItemWidth(name);
+        if (used > 0 && used + itemWidth > width) {
+          rows++;
+          used = 0;
+        }
+
+        used += itemWidth;
+      });
+      return rows;
+    }
+
+    function estimateLegendItemWidth(name) {
+      const label = text(name);
+      let width = 34;
+      for (const char of label) {
+        width += /[\u2E80-\u9FFF]/.test(char) ? 12 : 7;
+      }
+
+      return Math.ceil(width * dpiScale());
+    }
+
+    function dpiScale() {
+      const ratio = Number(window.devicePixelRatio);
+      if (!Number.isFinite(ratio) || ratio <= 0) {
+        return 1;
+      }
+
+      return clamp(ratio, 1, 2);
+    }
+
+    function scaledFont(size) {
+      return Math.ceil(size * Math.min(dpiScale(), 1.35));
+    }
+
+    function scaledLineHeight(size) {
+      return Math.ceil(size * Math.min(dpiScale(), 1.35));
+    }
+
+    function chartGrid(top, right, bottom, left) {
+      return {
+        top,
+        right,
+        bottom,
+        left,
+        containLabel: true
+      };
+    }
+
+    function smoothTimeLine(name, data, yAxisIndex) {
       return {
         name,
         type: "line",
@@ -591,6 +867,325 @@
         lineStyle: { width: 3 },
         areaStyle: { opacity: .08 }
       };
+    }
+
+    function summaryTimeLine(name, history, property, yAxisIndex) {
+      return smoothTimeLine(name, history.map((row) => [row._time, numericOrNull(row.summary?.[property] ?? row[property])]), yAxisIndex);
+    }
+
+    function buildSensorTimeSeries(history, selector, yAxisIndex) {
+      const seriesBySensor = new Map();
+      history.forEach((row) => {
+        const time = row._time;
+        const points = selector(row) || [];
+        points.forEach((point) => {
+          const value = numericOrNull(point.value);
+          if (value === null) {
+            return;
+          }
+
+          const key = `${point.id || point.name || ""}|${point.name || ""}|${point.unit || ""}`;
+          if (!seriesBySensor.has(key)) {
+            seriesBySensor.set(key, smoothTimeLine(point.name || key, [], yAxisIndex));
+          }
+
+          seriesBySensor.get(key).data.push({
+            value: [time, value],
+            unit: point.unit || "",
+            status: point.status || "",
+            type: point.type || ""
+          });
+        });
+      });
+
+      return Array.from(seriesBySensor.values()).sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    function renderEmptyChart(id, title, subtitle, message) {
+      charts.get(id).setOption({
+        title: chartTitle(title, subtitle),
+        xAxis: { show: false },
+        yAxis: { show: false },
+        series: [],
+        graphic: {
+          type: "text",
+          left: "center",
+          top: "middle",
+          style: {
+            text: message,
+            fill: axisColor(),
+            fontSize: 14,
+            fontFamily: "Segoe UI, sans-serif"
+          }
+        }
+      }, true);
+    }
+
+    function buildRangePayload(payload) {
+      const history = normalizedHistory(payload);
+      if (selectedRange === "live") {
+        const latest = history.length > 0 ? history[history.length - 1] : currentHistoryPoint(payload);
+        const liveHistory = latest ? [latest] : [];
+        return Object.assign({}, payload, {
+          summary: latest?.summary || payload.summary || emptySummary(),
+          current: latest?.current || payload.current || emptyCurrent(),
+          typeCounts: latest?.typeCounts || payload.typeCounts || [],
+          sensorTree: latest?.sensorTree || payload.sensorTree || [],
+          rangeHistory: liveHistory,
+          rangeLabel: labelsRange(payload.labels, liveHistory)
+        });
+      }
+
+      const filtered = filterHistoryBySelectedRange(history);
+      const latest = filtered.length > 0 ? filtered[filtered.length - 1] : null;
+      return Object.assign({}, payload, {
+        summary: filtered.length > 0 ? aggregateSummary(filtered) : emptySummary(),
+        current: latest?.current || emptyCurrent(),
+        typeCounts: latest?.typeCounts || [],
+        sensorTree: latest?.sensorTree || [],
+        rangeHistory: filtered,
+        rangeLabel: labelsRange(payload.labels, filtered)
+      });
+    }
+
+    function normalizedHistory(payload) {
+      const rows = Array.isArray(payload.history) ? payload.history : [];
+      return rows
+        .map((row) => Object.assign({}, row, { _time: historyTimestamp(row) }))
+        .filter((row) => Number.isFinite(row._time))
+        .sort((left, right) => left._time - right._time);
+    }
+
+    function historyTimestamp(row) {
+      const unix = Number(row?.unixMilliseconds);
+      if (Number.isFinite(unix) && unix > 0) {
+        return unix;
+      }
+
+      const parsed = Date.parse(row?.timestamp || "");
+      return Number.isFinite(parsed) ? parsed : NaN;
+    }
+
+    function filterHistoryBySelectedRange(history) {
+      if (history.length === 0) {
+        return [];
+      }
+
+      if (selectedRange === "custom") {
+        const start = Date.parse(customRangeStart);
+        const end = Date.parse(customRangeEnd);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+          return [];
+        }
+
+        return history.filter((row) => row._time >= start && row._time <= end);
+      }
+
+      const latest = history[history.length - 1]._time;
+      const duration = rangeDurations[selectedRange] || rangeDurations["6h"];
+      const start = latest - duration;
+      return history.filter((row) => row._time >= start && row._time <= latest);
+    }
+
+    function initializeCustomRange(payload) {
+      const history = normalizedHistory(payload);
+      const end = history.length > 0 ? history[history.length - 1]._time : Date.now();
+      const start = history.length > 0 ? history[0]._time : end - rangeDurations["6h"];
+      if (!customRangeStart) {
+        customRangeStart = toLocalInputValue(start);
+      }
+      if (!customRangeEnd) {
+        customRangeEnd = toLocalInputValue(end);
+      }
+    }
+
+    function currentHistoryPoint(payload) {
+      if (!payload.summary || !payload.current) {
+        return null;
+      }
+
+      const time = Date.now();
+      return {
+        id: "current",
+        time: payload.summary.lastUpdated || formatDateTime(time),
+        timestamp: new Date(time).toISOString(),
+        unixMilliseconds: time,
+        _time: time,
+        summary: payload.summary,
+        current: payload.current,
+        typeCounts: payload.typeCounts || [],
+        sensorTree: payload.sensorTree || []
+      };
+    }
+
+    function labelsRange(labels, history) {
+      if (!history || history.length === 0) {
+        return labels.noHistoryData;
+      }
+
+      const start = history[0]._time;
+      const end = history[history.length - 1]._time;
+      return start === end ? formatDateTime(end) : `${formatDateTime(start)} - ${formatDateTime(end)}`;
+    }
+
+    function chartHistory(payload) {
+      return Array.isArray(payload.rangeHistory) ? payload.rangeHistory : [];
+    }
+
+    function aggregateSummary(history) {
+      const latest = history[history.length - 1]?.summary || {};
+      return {
+        sensorCount: latest.sensorCount || 0,
+        temperatureCount: latest.temperatureCount || 0,
+        fanCount: latest.fanCount || 0,
+        performanceCount: latest.performanceCount || 0,
+        electricalCount: latest.electricalCount || 0,
+        maxTemperature: maxSummaryValue(history, "maxTemperature"),
+        averageFanRpm: averageSummaryValue(history, "averageFanRpm"),
+        minFanRpm: minSummaryValue(history, "minFanRpm"),
+        maxFanRpm: maxSummaryValue(history, "maxFanRpm"),
+        maxPerformance: maxSummaryValue(history, "maxPerformance"),
+        averagePerformance: averageSummaryValue(history, "averagePerformance"),
+        powerWatts: averageSummaryValue(history, "powerWatts"),
+        voltageCount: latest.voltageCount || 0,
+        averageVoltage: averageSummaryValue(history, "averageVoltage"),
+        currentCount: latest.currentCount || 0,
+        totalCurrent: averageSummaryValue(history, "totalCurrent"),
+        cpuUsage: averageSummaryValue(history, "cpuUsage"),
+        memUsage: averageSummaryValue(history, "memUsage"),
+        ioUsage: averageSummaryValue(history, "ioUsage"),
+        sysUsage: averageSummaryValue(history, "sysUsage"),
+        okCount: latest.okCount || 0,
+        warningCount: latest.warningCount || 0,
+        lastUpdated: history[history.length - 1]?.time || ""
+      };
+    }
+
+    function peakSummary(history) {
+      const latest = history[history.length - 1]?.summary || {};
+      return {
+        sensorCount: latest.sensorCount || 0,
+        maxTemperature: maxSummaryValue(history, "maxTemperature"),
+        averageFanRpm: maxSummaryValue(history, "averageFanRpm"),
+        maxFanRpm: maxSummaryValue(history, "maxFanRpm"),
+        maxPerformance: maxSummaryValue(history, "maxPerformance"),
+        powerWatts: maxSummaryValue(history, "powerWatts"),
+        averageVoltage: maxSummaryValue(history, "averageVoltage"),
+        totalCurrent: maxSummaryValue(history, "totalCurrent"),
+        okCount: latest.okCount || 0,
+        warningCount: latest.warningCount || 0
+      };
+    }
+
+    function summaryValues(history, property) {
+      return history
+        .map((row) => numericOrNull(row.summary?.[property] ?? row[property]))
+        .filter((value) => value !== null);
+    }
+
+    function averageSummaryValue(history, property) {
+      const values = summaryValues(history, property);
+      if (values.length === 0) {
+        return null;
+      }
+
+      return values.reduce((sum, value) => sum + value, 0) / values.length;
+    }
+
+    function maxSummaryValue(history, property) {
+      const values = summaryValues(history, property);
+      return values.length === 0 ? null : Math.max(...values);
+    }
+
+    function minSummaryValue(history, property) {
+      const values = summaryValues(history, property);
+      return values.length === 0 ? null : Math.min(...values);
+    }
+
+    function radarValues(summary) {
+      const healthRatio = summary.sensorCount > 0 ? ((summary.okCount || 0) / summary.sensorCount) * 100 : 0;
+      const coverage = Math.min(100, (summary.sensorCount || 0) / 2);
+      return [
+        clamp(summary.maxTemperature || 0, 0, 100),
+        normalize(summary.averageFanRpm, 0, Math.max(3600, summary.maxFanRpm || 0)),
+        clamp(summary.maxPerformance || 0, 0, 100),
+        normalize(summary.powerWatts, 0, 500),
+        normalize(summary.averageVoltage, 0, 240),
+        normalize(summary.totalCurrent, 0, 5),
+        healthRatio,
+        coverage
+      ];
+    }
+
+    function emptySummary() {
+      return {
+        sensorCount: 0,
+        temperatureCount: 0,
+        fanCount: 0,
+        performanceCount: 0,
+        electricalCount: 0,
+        voltageCount: 0,
+        currentCount: 0,
+        okCount: 0,
+        warningCount: 0,
+        lastUpdated: ""
+      };
+    }
+
+    function emptyCurrent() {
+      return {
+        temperatures: [],
+        fans: [],
+        power: [],
+        performance: [],
+        electrical: [],
+        allNumeric: [],
+        statusSensors: [],
+        health: []
+      };
+    }
+
+    function numericOrNull(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function formatDateTime(time) {
+      const date = new Date(time);
+      if (Number.isNaN(date.getTime())) {
+        return "";
+      }
+
+      return new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      }).format(date);
+    }
+
+    function toLocalInputValue(time) {
+      const date = new Date(time);
+      if (Number.isNaN(date.getTime())) {
+        return "";
+      }
+
+      return [
+        date.getFullYear(),
+        "-",
+        pad2(date.getMonth() + 1),
+        "-",
+        pad2(date.getDate()),
+        "T",
+        pad2(date.getHours()),
+        ":",
+        pad2(date.getMinutes())
+      ].join("");
+    }
+
+    function pad2(value) {
+      return String(value).padStart(2, "0");
     }
 
     function dashboardTooltip(options) {
@@ -610,22 +1205,6 @@
       }, options || {});
     }
 
-    function valueTooltip(unit) {
-      return dashboardTooltip({
-        trigger: "item",
-        formatter: (params) => `${escapeHtml(params.name)}<br/>${params.value} ${escapeHtml(unit)}<br/>${escapeHtml(params.data.status || "")}`
-      });
-    }
-
-    function shortAxisLabel(value) {
-      const label = text(value);
-      return label.length > 18 ? label.slice(0, 16) + "..." : label;
-    }
-
-    function compactFanLabel(value) {
-      return text(value).replace(/\s+RPM$/i, "");
-    }
-
     function clamp(value, min, max) {
       const n = Number(value);
       if (Number.isNaN(n)) {
@@ -642,26 +1221,6 @@
       }
 
       return clamp(((n - min) / (max - min)) * 100, 0, 100);
-    }
-
-    function colorForType(type, labels) {
-      if (type === labels.typePerformance) {
-        return "#7c3aed";
-      }
-
-      if (type === labels.typePower) {
-        return "#a16207";
-      }
-
-      if (type === labels.typeVoltage) {
-        return "#0891b2";
-      }
-
-      if (type === labels.typeCurrent) {
-        return "#db2777";
-      }
-
-      return "#64748b";
     }
 
     function escapeHtml(value) {
@@ -695,8 +1254,23 @@
 
         event.preventDefault();
         event.stopPropagation();
-        window.chrome.webview.postMessage({ type: "wheel", deltaY });
+        pendingHostWheelDeltaY += deltaY;
+        if (!hostWheelFrameRequested) {
+          hostWheelFrameRequested = true;
+          requestAnimationFrame(postPendingHostWheelDelta);
+        }
       }, { capture: true, passive: false });
+    }
+
+    function postPendingHostWheelDelta() {
+      hostWheelFrameRequested = false;
+      const deltaY = pendingHostWheelDeltaY;
+      pendingHostWheelDeltaY = 0;
+      if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.01) {
+        return;
+      }
+
+      window.chrome.webview.postMessage({ type: "wheel", deltaY });
     }
 
     initCharts();

@@ -28,7 +28,7 @@ public sealed partial class IpmiCommandService
     {
         if (fanIndex is < 1 or > 6)
         {
-            throw new ArgumentOutOfRangeException(nameof(fanIndex), fanIndex, "R730xd fan index must be between 1 and 6.");
+            throw new ArgumentOutOfRangeException(nameof(fanIndex), fanIndex, "R730xd 风扇编号必须在 1 到 6 之间。");
         }
 
         AppSettings.ValidatePercent(percent, nameof(percent));
@@ -57,7 +57,7 @@ public sealed partial class IpmiCommandService
 
         if (readings.Count == 0)
         {
-            throw new InvalidOperationException("ipmitool completed but returned no SDR sensor rows.");
+            throw new InvalidOperationException("ipmitool 已完成，但未返回任何 SDR 传感器行。");
         }
 
         return readings;
@@ -83,12 +83,28 @@ public sealed partial class IpmiCommandService
     {
         ValidateProfile(profile);
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(profile.CommandTimeoutSeconds));
-
         var toolPath = ResolveToolPath(profile.IpmiToolPath);
         var arguments = BuildArguments(profile, ipmiArguments);
         var commandLine = $"{Quote(toolPath)} {string.Join(" ", arguments.Select(Quote))}";
+        var result = await ExecuteProcessAsync(profile, toolPath, arguments, commandLine, cancellationToken);
+        if (result.ExitCode == 0)
+        {
+            return result;
+        }
+
+        throw new InvalidOperationException(BuildCommandFailureMessage(result));
+    }
+
+    private async Task<IpmiCommandResult> ExecuteProcessAsync(
+        IdracProfile profile,
+        string toolPath,
+        IReadOnlyList<string> arguments,
+        string commandLine,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(profile.CommandTimeoutSeconds));
+
         var stopwatch = Stopwatch.StartNew();
 
         using var process = new Process();
@@ -114,13 +130,13 @@ public sealed partial class IpmiCommandService
         {
             if (!process.Start())
             {
-                throw new InvalidOperationException($"Unable to start ipmitool process: {profile.IpmiToolPath}");
+                throw new InvalidOperationException($"无法启动 ipmitool 进程：{profile.IpmiToolPath}");
             }
         }
         catch (Win32Exception ex)
         {
             throw new InvalidOperationException(
-                $"Cannot start bundled ipmitool at '{toolPath}'. Rebuild the app so BundledTools\\ipmitool is included.",
+                $"无法启动内置 ipmitool：{toolPath}。请重新构建应用，确保 BundledTools\\ipmitool 已包含在输出目录中。",
                 ex);
         }
 
@@ -145,19 +161,13 @@ public sealed partial class IpmiCommandService
                     Elapsed = stopwatch.Elapsed,
                 });
 
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException(
-                    $"ipmitool failed with exit code {process.ExitCode}.{Environment.NewLine}{BuildFailureDetail(stdout, stderr)}");
-            }
-
             return result;
         }
         catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             TryKill(process);
             throw new TimeoutException(
-                $"ipmitool command exceeded the configured timeout of {profile.CommandTimeoutSeconds} seconds: {commandLine}",
+                $"ipmitool 命令超过配置的 {profile.CommandTimeoutSeconds} 秒超时时间：{commandLine}",
                 ex);
         }
     }
@@ -182,33 +192,33 @@ public sealed partial class IpmiCommandService
     {
         if (string.IsNullOrWhiteSpace(profile.IpmiToolPath))
         {
-            throw new InvalidOperationException("Bundled ipmitool path is empty.");
+            throw new InvalidOperationException("内置 ipmitool 路径为空。");
         }
 
         var resolvedToolPath = ResolveToolPath(profile.IpmiToolPath);
         if (!File.Exists(resolvedToolPath))
         {
-            throw new FileNotFoundException("Bundled ipmitool.exe is missing from the application output.", resolvedToolPath);
+            throw new FileNotFoundException("应用输出目录中缺少内置 ipmitool.exe。", resolvedToolPath);
         }
 
         if (string.IsNullOrWhiteSpace(profile.Host))
         {
-            throw new InvalidOperationException("iDRAC host/IP is empty.");
+            throw new InvalidOperationException("iDRAC 主机/IP 为空。");
         }
 
         if (string.IsNullOrWhiteSpace(profile.UserName))
         {
-            throw new InvalidOperationException("iDRAC username is empty.");
+            throw new InvalidOperationException("iDRAC 用户名为空。");
         }
 
         if (string.IsNullOrWhiteSpace(profile.Password))
         {
-            throw new InvalidOperationException("iDRAC password is empty.");
+            throw new InvalidOperationException("iDRAC 密码为空。");
         }
 
         if (profile.CommandTimeoutSeconds < 5)
         {
-            throw new InvalidOperationException("Command timeout must be at least 5 seconds.");
+            throw new InvalidOperationException("命令超时时间至少需要 5 秒。");
         }
     }
 
@@ -254,6 +264,12 @@ public sealed partial class IpmiCommandService
 
     public static double FindCpuTemperatureCelsius(IEnumerable<SensorReading> sensors)
     {
+        return TryFindCpuTemperatureCelsius(sensors)
+            ?? throw new InvalidOperationException("SDR 输出中未找到 CPU 温度传感器。");
+    }
+
+    public static double? TryFindCpuTemperatureCelsius(IEnumerable<SensorReading> sensors)
+    {
         var temperatureRows = sensors
             .Where(sensor =>
                 sensor.NumericValue.HasValue &&
@@ -268,7 +284,7 @@ public sealed partial class IpmiCommandService
         var candidates = cpuRows.Count > 0 ? cpuRows : temperatureRows;
         if (candidates.Count == 0)
         {
-            throw new InvalidOperationException("No CPU temperature sensor was found in the SDR output.");
+            return null;
         }
 
         return candidates.Max(sensor => sensor.NumericValue!.Value);
@@ -278,7 +294,7 @@ public sealed partial class IpmiCommandService
     {
         if (value is < 0 or > 255)
         {
-            throw new ArgumentOutOfRangeException(nameof(value), value, "Raw IPMI byte must be between 0 and 255.");
+            throw new ArgumentOutOfRangeException(nameof(value), value, "IPMI raw 字节必须在 0 到 255 之间。");
         }
 
         return $"0x{value:x2}";
@@ -295,7 +311,12 @@ public sealed partial class IpmiCommandService
             Environment.NewLine,
             new[] { stderr.Trim(), stdout.Trim() }.Where(text => !string.IsNullOrWhiteSpace(text)));
 
-        return string.IsNullOrWhiteSpace(detail) ? "No output was returned by ipmitool." : detail;
+        return string.IsNullOrWhiteSpace(detail) ? "ipmitool 未返回任何输出。" : detail;
+    }
+
+    private static string BuildCommandFailureMessage(IpmiCommandResult result)
+    {
+        return $"ipmitool 执行失败，退出码为 {result.ExitCode}。{Environment.NewLine}{BuildFailureDetail(result.StandardOutput, result.StandardError)}";
     }
 
     private static void TryKill(Process process)

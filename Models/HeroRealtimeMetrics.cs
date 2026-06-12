@@ -6,8 +6,6 @@ namespace DellR730xdFanControlCenter;
 
 public sealed class HeroRealtimeMetrics
 {
-    private const int DetailItemLimit = 3;
-
     public double? CurrentTemperatureCelsius { get; init; }
 
     public double? AverageFanRpm { get; init; }
@@ -89,7 +87,6 @@ public sealed class HeroRealtimeMetrics
     private static IReadOnlyList<HeroRealtimeMetricItem> BuildItems(IEnumerable<SensorReading> sensors)
     {
         return sensors
-            .Take(DetailItemLimit)
             .Select(sensor => new HeroRealtimeMetricItem(
                 sensor.Key,
                 Math.Round(sensor.NumericValue!.Value, 1),
@@ -99,7 +96,7 @@ public sealed class HeroRealtimeMetrics
 
     private static int HiddenCount(IReadOnlyCollection<SensorReading> sensors)
     {
-        return Math.Max(0, sensors.Count - DetailItemLimit);
+        return 0;
     }
 
     private static bool IsTemperatureSensor(SensorReading sensor)

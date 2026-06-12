@@ -8,7 +8,9 @@ public sealed class LogEntry
 {
     public DateTimeOffset Time { get; set; } = DateTimeOffset.Now;
 
-    public string Level { get; set; } = "Info";
+    public string Level { get; set; } = LocalizationService.T("Log.Info");
+
+    public string SemanticLevel { get; set; } = "Info";
 
     public string Message { get; set; } = string.Empty;
 
@@ -20,13 +22,13 @@ public sealed class LogEntry
 
     public SolidColorBrush LevelBorderBrush => ToBrush(Style.BorderHex);
 
-    private LogLevelStyle Style => LogLevelStyle.FromDisplayLevel(Level);
+    private LogLevelStyle Style => LogLevelStyle.FromSemanticLevel(SemanticLevel);
 
     private static SolidColorBrush ToBrush(string hex)
     {
         if (hex.Length != 9 || hex[0] != '#')
         {
-            throw new InvalidOperationException($"Invalid log level color value: {hex}");
+            throw new InvalidOperationException(LocalizationService.Format("Dashboard.MetricColorInvalid", hex));
         }
 
         var alpha = Convert.ToByte(hex.Substring(1, 2), 16);

@@ -19,7 +19,7 @@ public sealed class PollingSkipLogGate
         {
             PollingSkipKind.PreviousPollRunning => ShouldLogPreviousPollRunning(),
             PollingSkipKind.IpmiCommandBusy => ShouldLogIpmiCommandBusy(),
-            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported polling skip kind."),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "不支持的轮询跳过类型。"),
         };
     }
 
@@ -34,7 +34,7 @@ public sealed class PollingSkipLogGate
                 _ipmiCommandBusyLogged = false;
                 break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported polling skip kind.");
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "不支持的轮询跳过类型。");
         }
     }
 

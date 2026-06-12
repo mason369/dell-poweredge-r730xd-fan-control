@@ -34,7 +34,7 @@ public sealed class AppLogService
     {
         if (string.IsNullOrWhiteSpace(logDirectory))
         {
-            throw new ArgumentException("Log directory cannot be empty.", nameof(logDirectory));
+            throw new ArgumentException("日志目录不能为空。", nameof(logDirectory));
         }
 
         LogDirectory = logDirectory;
@@ -66,17 +66,17 @@ public sealed class AppLogService
 
         if (string.IsNullOrWhiteSpace(record.Level))
         {
-            throw new InvalidOperationException("Log record level cannot be empty.");
+            throw new InvalidOperationException("日志记录级别不能为空。");
         }
 
         if (string.IsNullOrWhiteSpace(record.Category))
         {
-            throw new InvalidOperationException("Log record category cannot be empty.");
+            throw new InvalidOperationException("日志记录分类不能为空。");
         }
 
         if (string.IsNullOrWhiteSpace(record.EventName))
         {
-            throw new InvalidOperationException("Log record event name cannot be empty.");
+            throw new InvalidOperationException("日志记录事件名不能为空。");
         }
 
         var line = JsonSerializer.Serialize(record, JsonOptions);
@@ -92,12 +92,9 @@ public sealed class AppLogService
                     Mode = FileMode.Append,
                     Access = FileAccess.Write,
                     Share = FileShare.Read,
-                    Options = FileOptions.WriteThrough,
                 });
             using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             writer.WriteLine(line);
-            writer.Flush();
-            stream.Flush(flushToDisk: true);
             _lastTimestamp = timestamp;
         }
     }
@@ -109,7 +106,7 @@ public sealed class AppLogService
     {
         if (string.IsNullOrWhiteSpace(operationName))
         {
-            throw new ArgumentException("Operation name cannot be empty.", nameof(operationName));
+            throw new ArgumentException("操作名称不能为空。", nameof(operationName));
         }
 
         var startedAt = _clock();

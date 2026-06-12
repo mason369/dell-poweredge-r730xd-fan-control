@@ -2,7 +2,7 @@
 
 Language: [中文](PROJECT_METADATA.md) | English
 
-This file organizes repository presentation, release notes, search keywords, project positioning, and maintenance conventions. README targets users, `COMMANDS.md` targets command details, and this file targets repository maintenance, naming, and public presentation.
+This file organizes repository presentation, release notes, search keywords, and project positioning. README targets users, `COMMANDS.md` targets command details, and this file targets repository naming, search, and public presentation information.
 
 ## English Name
 
@@ -22,7 +22,7 @@ Windows WinUI 3 desktop app for Dell PowerEdge R730xd fan control through iDRAC/
 
 ## Long Description
 
-Dell R730xd iDRAC Fan Control Center brings common R730xd IPMI fan control, sensor polling, preset management, temperature-fan curve presets, tray quick actions, local visualization, and JSONL runtime logging into one Windows desktop app. It bundles `ipmitool.exe` and local chart assets, avoiding dependency on external command paths or online CDNs. The app defaults to Chinese, includes English, and routes visible UI strings through a localization service.
+Dell R730xd iDRAC Fan Control Center brings common R730xd IPMI fan control, sensor polling, preset management, temperature-fan curve presets, tray quick actions, local visualization, and JSONL runtime logging into one Windows desktop app. It bundles `ipmitool.exe` and local chart assets, avoiding dependency on external command paths or online CDNs. The app defaults to Chinese, includes 22 interface languages, routes visible UI strings through a localization service, and localizes the MSIX package manifest display name and description through `Strings/<language>/Resources.resw`.
 
 The core goal is to make it clear what the software is doing to the BMC: every command has an explicit UI trigger, failures are displayed directly, runtime logs record atomic events and operation durations, passwords do not enter command-line arguments, and low-speed plus individual fan target-selector risks are documented in the UI and docs, especially that `0x00` is a target selector rather than `0%` fan speed.
 
@@ -47,14 +47,14 @@ Includes:
 - Fan 1-6 individual target-selector control, disabled by default; `0x00` is a target selector, not `0%` fan speed.
 - Dell automatic mode restore.
 - Built-in and custom manual presets.
-- Editable temperature-fan curve presets stored in the settings file and continuously executed through software auto polling.
-- Smart temperature automation, including the global linear policy and curve preset interpolation.
-- Sensor polling and latency warnings.
-- Hero live hardware summary for current temperature, average RPM, power, average voltage, and total current from the latest successful SDR refresh; each group shows up to 3 concrete sensor details on separate lines, extra sensors are not shown in the hero, cards use a fixed compact height, missing readings show the waiting state, the temperature summary does not use a historical maximum, and live values are colored green, yellow, orange, or red by recommended ranges.
-- Overview top hardware summary cards for max CPU temperature, fan state, live power, average voltage, total current, and control mode. Temperature, fan, and Power & Health boards use icon-based hardware cards, and fan cards rotate continuously based on RPM.
-- WebView2 interactive charts forward mouse-wheel events to the outer WinUI scroll container so scrolling over the chart keeps native smooth page motion.
+- Editable temperature-fan and power-fan curve presets stored in the settings file and continuously executed through software auto polling.
+- Software auto automation, including the global temperature linear policy, temperature curve evaluation from the current reading, and power curve evaluation from the current reading.
+- Sensor polling, explicit "Start polling / Cancel polling" commands, running-preset state restore, and latency warnings. Starting polling runs `mc info` and one `sdr elist` read first; canceling polling only stops future polling ticks and does not start a new IPMI command. User-triggered fan commands wait for the current IPMI command to finish before continuing, while background ticks still skip when IPMI is busy.
+- Hero live hardware summary for current temperature, average RPM, power, average voltage, and total current from the latest successful SDR refresh; each group shows every concrete sensor detail on separate lines instead of truncating to the first three items, cards use a taller baseline and grow with the actual number of returned sensors, missing readings show the waiting state, the temperature summary does not use a historical maximum, and live values are colored green, yellow, orange, or red by recommended ranges. A "Current thermal mode" badge under the title shows idle, manual, Dell automatic thermal control, smart temperature policy, temperature-curve auto, or power-curve auto from the same runtime mode state as the right-side status card.
+- Overview top hardware summary cards for max CPU temperature, fan state, live power, average voltage, total current, and control mode. Temperature, fan, and Power & Health boards use icon-based hardware cards, fan cards rotate continuously based on RPM, and card subtitles label SDR metadata as "ID 0x30 / Location 7.1" so the `h` suffix is not mistaken for hours and the location number is not mistaken for a version or reading.
+- WebView2 interactive charts forward mouse-wheel events to the outer WinUI scroll container and disable extra scroll animation so scrolling over the chart keeps responsive page motion.
 - Right-side hero live status card for current target, connection state, control mode, latest request status, and last update time.
-- WinUI 3 theme, tray, and i18n.
+- WinUI 3 theme, tray, and i18n. The tray right-click menu provides window/page entries, refresh sensors, open iDRAC, open logs, stop auto policy, restore Dell automatic mode, all-fan 20/35/50%, and a one-level dynamic preset submenu. Package manifest display name and description are emitted into the PRI index through `.resw` resources.
 - Local ECharts live visualization.
 - DPAPI local password protection.
 - Local JSON Lines runtime logs for UI events, operation start/finish durations, sensor refreshes, smart auto ticks, and IPMI command completion records; Overview Recent Log uses blue info, amber warning, green success, and red error/failure status badges.
@@ -78,7 +78,7 @@ Does not include:
 - Minimum Windows version: `10.0.19041.0`.
 - Platforms: `x86`, `x64`, `ARM64`.
 - Command tool: bundled `ipmitool.exe`.
-- Charts: local `Assets/Charts/dashboard.html` plus ECharts.
+- Charts: local `Assets/Charts/dashboard.html` plus ECharts; Overview charts save a complete JSONL history point after each successful SDR poll, and users can switch Current, Last 6 hours, Last 1 day, Last 3 days, Last 7 days, or Custom ranges through the "History range" control.
 - Credential protection: `System.Security.Cryptography.ProtectedData` / Windows DPAPI.
 - Runtime logging: local JSON Lines at `%LocalAppData%\DellR730xdFanControlCenter\logs\runtime-YYYYMMDD.jsonl`.
 
@@ -88,15 +88,21 @@ Does not include:
 | --- | --- |
 | Host | `192.168.1.73` |
 | UserName | `root` |
+| RememberPassword | `false` |
+| IpmiToolPath | `BundledTools\ipmitool\ipmitool.exe` |
 | FanCount | `6` |
 | Built-in Restore Manual preset percent | `10%` |
-| Sensor polling interval | `1s` |
+| Minimize to tray on close | `true` |
+| Chart history retention | Latest `7` days of successful polling history points, stored at `%LocalAppData%\DellR730xdFanControlCenter\chart-history\chart-history-YYYYMMDD.jsonl` and reloaded on startup while still inside the retention window |
+| Sensor polling interval | `1s`, edited from the Settings page's Application area |
 | Command timeout | `35s` |
 | Target CPU temperature | `68 °C` |
 | High temperature threshold | `78 °C` |
 | Emergency auto threshold | `84 °C` |
 | Auto policy minimum fan percent | `10%` |
 | Auto policy maximum fan percent | `42%` |
+| New temperature curve editor default points | `45 C = 18%`, `68 C = 28%`, `78 C = 42%` |
+| New power curve editor default points | `280 W = 18%`, `500 W = 28%`, `750 W = 42%` |
 | Default language | `zh-CN` |
 | Default theme | System |
 | Runtime log directory | `%LocalAppData%\DellR730xdFanControlCenter\logs` |
@@ -113,24 +119,26 @@ Does not include:
 
 ## Custom Curve Presets
 
-Curve presets are not built-in and are not created automatically by default. On the Fan Control page, the user enters a curve preset name, clicks the curve chart to add points, or fine-tunes `TemperatureCelsius` and `FanPercent` from the right-side numeric point controls. Existing curve presets can be loaded into the same editor from the preset card's "Edit points" button. After save, `settings.json` stores `Kind = TemperatureCurve`, `CurvePoints`, and `SmoothCurve`; each point contains `TemperatureCelsius` and `FanPercent`.
+Curve presets are not built-in and are not created automatically by default. On the Fan Control page, the user enters a curve preset name, clicks empty chart space to add points, drags existing points for live adjustment, or fine-tunes values from the right-side numeric point controls. Hovering over a curve chart shows crosshair guides, the current X-axis temperature/power value, and the Y-axis fan-speed percent. During drag, the editor performs lightweight chart and bound-value updates; the full preview text and strict validation refresh after pointer release, right-side numeric edits, add-point actions, or save. Temperature curves are stored as `Kind = TemperatureCurve`, and points contain `TemperatureCelsius` plus `FanPercent`; power curves are stored as `Kind = PowerCurve`, and points contain `PowerWatts` plus `FanPercent`. Both write `CurvePoints` and `SmoothCurve` into `settings.json`; existing curve presets can be loaded into the matching editor from the preset card's "Edit points" button, and the page automatically scrolls to the matching temperature or power curve chart. After a successful save, the page scrolls back to the newly added or updated preset card.
 
 Runtime behavior:
 
 - Switching to a curve preset starts software auto polling.
-- Each tick reads `sdr elist`, parses CPU temperature, computes the percentage from the curve points and `SmoothCurve` setting, and sends the all-fan percentage command.
-- If the currently running curve is edited and saved, the next tick uses the updated points and `SmoothCurve` setting.
-- CPU temperatures below the first point use the first point. Temperatures above the last point use the last point.
-- `SmoothCurve = false` uses linear interpolation between adjacent points. `SmoothCurve = true` uses the same points with a smooth transition; endpoints and emergency auto protection do not change.
-- At the emergency auto threshold, the app sends Dell automatic mode instead of continuing to send curve percentages.
-- Manual all-fan control, individual fan control, the built-in Restore Manual preset, Dell Auto, Overview/tray Restore Dell factory fan speed, or Stop Auto clears the active curve state.
+- Each tick reads `sdr elist`. Temperature curves parse CPU temperature and compute the percentage from the curve points and `SmoothCurve` setting; power curves parse CPU temperature and check the emergency auto threshold first, then compute the percentage from the current SDR power reading whose unit contains `Watts` or whose key contains `Pwr Consumption`. While the automatic policy is running, regular sensor polling does not add another SDR read; this tick's SDR result refreshes sensors, charts, and history points. The final command is still an all-fan percentage command.
+- If the currently running manual preset, Dell Auto preset, temperature curve, or power curve is saved, the app waits for the current IPMI command to finish and immediately re-applies that preset. Saving an active curve immediately runs one real `sdr elist` read, curve percentage calculation, and fan command; if the first run fails, the error is shown and that automatic policy is stopped.
+- Non-zero exits from Dell fan-control raw commands (`raw 0x30 0x30 ...`) fail immediately; every actual `ipmitool` child process writes one real result without `attempt`, `maxAttempts`, or `willRetry`, and stdout/stderr is shown directly to the user. `sdr elist` polling failures are not retried and do not write fabricated history points.
+- Input values below the first point use the first point. Values above the last point use the last point.
+- `SmoothCurve = false` evaluates the current temperature or power reading on the polyline formed by the configured points. `SmoothCurve = true` evaluates the same points with a smoothed curve position; endpoints and emergency auto protection do not change.
+- At the emergency auto threshold, the app sends Dell automatic mode instead of continuing to send curve percentages; this action does not stop the software auto timer.
+- If a power curve tick has no power reading, the app shows the failure reason and stops that tick instead of continuing with a default or previous power value.
+- Manual all-fan control, individual fan control, the built-in Restore Manual preset, Dell Auto, Overview/tray Restore Dell factory fan speed, and Stop Auto all clear the active curve state. Only Stop Auto, deleting the running curve preset, or an auto-policy failure stops the software auto timer; if the timer is still running, the next tick continues controlling all fans with the global linear policy.
 
 Validation boundaries:
 
 - At least 2 points.
-- Temperature range from `-40` to `125` C.
+- Temperature curves allow temperatures from `-40` to `125` C; power curves allow power from `0` to `1200` W.
 - Fan percent range from `0` to `100`.
-- Temperature points cannot repeat.
+- Temperature points or power points cannot repeat.
 - Invalid points show an error in the curve preview area and prevent save or switch; they are not automatically replaced with a default curve.
 
 ## Documentation Map
@@ -190,31 +198,11 @@ WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, BMC sensor
 Before publishing or packaging, confirm:
 
 - `dotnet build` succeeds for the target platform.
-- `dotnet run --project Tests\PresetModelTests\PresetModelTests.csproj` succeeds, covering manual preset editing, curve preset linear/smooth interpolation, settings storage, sensor-state translation keys, and runtime logging JSONL behavior.
+- `dotnet run --project Tests\PresetModelTests\PresetModelTests.csproj` succeeds, covering manual preset editing, temperature/power curve evaluation from current readings, smooth curve evaluation, settings storage, sensor-state translation keys, and runtime logging JSONL behavior.
 - Output contains `BundledTools/ipmitool/ipmitool.exe`.
 - Output contains `Assets/Charts/dashboard.html` and `Assets/Charts/echarts.min.js`.
 - The app starts and shows the main window.
 - Settings can be saved.
+- The tray right-click menu shows window/page entries, refresh sensors, logs/iDRAC entries, Dell automatic restore, stop auto, all-fan 20/35/50%, and a preset submenu; common fixed actions are no longer nested behind a second-level Fan Control menu.
 - Overview "Open logs" opens `%LocalAppData%\DellR730xdFanControlCenter\logs`, and today's `runtime-YYYYMMDD.jsonl` can be written.
 - No password, private IP plan, or other sensitive data is committed.
-- Chinese and English README files both cover new features.
-- Chinese and English security files both cover new risks.
-- Chinese and English command references both cover new commands, raw byte behavior, or logging behavior.
-
-## Documentation Standard
-
-All README, `docs/`, and security documents must be complete, specific, and verifiable. When adding or changing a feature, documentation should cover:
-
-- Purpose.
-- User entry point.
-- Default configuration.
-- Execution flow.
-- Related commands or file paths.
-- User-visible success behavior.
-- User-visible failure behavior.
-- Security or hardware risk.
-- Known limitations.
-- Verification steps.
-- Matching Chinese and English updates.
-
-Do not add shallow feature lists only. For fan control, credentials, command execution, sensor parsing, package contents, or failure handling, document trigger conditions, boundaries, and risks clearly.

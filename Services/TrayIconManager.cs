@@ -29,9 +29,16 @@ public sealed class TrayIconManager : IDisposable
     private const uint MfSeparator = 0x0800;
     private const uint MfPopup = 0x0010;
     private const int RestoreCommand = 100;
-    private const int Fans20Command = 120;
-    private const int Fans35Command = 135;
-    private const int Fans50Command = 150;
+    private const int OverviewCommand = 110;
+    private const int ControlCommand = 111;
+    private const int SensorsCommand = 112;
+    private const int RefreshSensorsCommand = 130;
+    private const int OpenIdracCommand = 131;
+    private const int OpenLogsCommand = 132;
+    private const int StopAutoCommand = 210;
+    private const int Fans20Command = 220;
+    private const int Fans35Command = 235;
+    private const int Fans50Command = 250;
     private const int RestoreDefaultCommand = 200;
     private const int SettingsCommand = 300;
     private const int ExitCommand = 900;
@@ -47,7 +54,7 @@ public sealed class TrayIconManager : IDisposable
     {
         if (!File.Exists(iconPath))
         {
-            throw new FileNotFoundException("Tray icon file was not found.", iconPath);
+            throw new FileNotFoundException("未找到托盘图标文件。", iconPath);
         }
 
         _windowHandle = windowHandle;
@@ -55,28 +62,42 @@ public sealed class TrayIconManager : IDisposable
         _iconHandle = LoadImage(IntPtr.Zero, iconPath, ImageIcon, 0, 0, LrLoadFromFile | LrDefaultSize);
         if (_iconHandle == IntPtr.Zero)
         {
-            throw new InvalidOperationException($"Unable to load tray icon: {iconPath}");
+            throw new InvalidOperationException($"无法加载托盘图标：{iconPath}");
         }
 
         if (!SetWindowSubclass(_windowHandle, _subclassProc, new UIntPtr(1), IntPtr.Zero))
         {
-            throw new InvalidOperationException("Unable to subclass the main window for tray messages.");
+            throw new InvalidOperationException("无法为托盘消息挂接主窗口。");
         }
 
         var data = CreateNotifyIconData(NifMessage | NifIcon | NifTip);
         if (!ShellNotifyIcon(NimAdd, ref data))
         {
-            throw new InvalidOperationException("Unable to add the tray icon.");
+            throw new InvalidOperationException("无法添加托盘图标。");
         }
     }
 
     public event EventHandler? RestoreRequested;
+
+    public event EventHandler? OverviewRequested;
+
+    public event EventHandler? ControlRequested;
+
+    public event EventHandler? SensorsRequested;
+
+    public event EventHandler? RefreshSensorsRequested;
+
+    public event EventHandler? OpenIdracRequested;
+
+    public event EventHandler? OpenLogsRequested;
 
     public event EventHandler<int>? FanPercentRequested;
 
     public event EventHandler<FanPreset>? PresetRequested;
 
     public event EventHandler? RestoreDefaultRequested;
+
+    public event EventHandler? StopAutoRequested;
 
     public event EventHandler? SettingsRequested;
 
@@ -156,22 +177,35 @@ public sealed class TrayIconManager : IDisposable
     {
         if (!GetCursorPos(out var point))
         {
-            throw new InvalidOperationException("Unable to read cursor position for tray menu.");
+            throw new InvalidOperationException("无法读取托盘菜单的鼠标位置。");
         }
 
         var menu = CreatePopupMenu();
         if (menu == IntPtr.Zero)
         {
-            throw new InvalidOperationException("Unable to create tray context menu.");
+            throw new InvalidOperationException("无法创建托盘右键菜单。");
         }
 
         try
         {
             AppendCommand(menu, RestoreCommand, LocalizationService.T("Tray.Restore"));
             AppendSeparator(menu);
-            AppendPopup(menu, BuildFanControlMenu(), LocalizationService.T("Tray.FanControlGroup"));
-            AppendSeparator(menu);
+            AppendCommand(menu, OverviewCommand, LocalizationService.T("Tray.Overview"));
+            AppendCommand(menu, ControlCommand, LocalizationService.T("Tray.Control"));
+            AppendCommand(menu, SensorsCommand, LocalizationService.T("Tray.Sensors"));
             AppendCommand(menu, SettingsCommand, LocalizationService.T("Tray.Settings"));
+            AppendSeparator(menu);
+            AppendCommand(menu, RefreshSensorsCommand, LocalizationService.T("Tray.RefreshSensors"));
+            AppendCommand(menu, OpenIdracCommand, LocalizationService.T("Tray.OpenIdrac"));
+            AppendCommand(menu, OpenLogsCommand, LocalizationService.T("Tray.OpenLogs"));
+            AppendSeparator(menu);
+            AppendCommand(menu, RestoreDefaultCommand, LocalizationService.T("Tray.RestoreDefault"));
+            AppendCommand(menu, StopAutoCommand, LocalizationService.T("Tray.StopAuto"));
+            AppendCommand(menu, Fans20Command, LocalizationService.T("Tray.AllFans20"));
+            AppendCommand(menu, Fans35Command, LocalizationService.T("Tray.AllFans35"));
+            AppendCommand(menu, Fans50Command, LocalizationService.T("Tray.AllFans50"));
+            AppendPopup(menu, BuildPresetMenu(), LocalizationService.T("Tray.Presets"));
+            AppendSeparator(menu);
             AppendCommand(menu, ExitCommand, LocalizationService.T("Tray.Exit"));
 
             SetForegroundWindow(_windowHandle);
@@ -185,26 +219,12 @@ public sealed class TrayIconManager : IDisposable
         }
     }
 
-    private IntPtr BuildFanControlMenu()
-    {
-        var fanControlMenu = CreatePopupMenu();
-        if (fanControlMenu == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("Unable to create fan control tray submenu.");
-        }
-
-        AppendPopup(fanControlMenu, BuildPresetMenu(), LocalizationService.T("Tray.Presets"));
-        AppendPopup(fanControlMenu, BuildAllFanSpeedMenu(), LocalizationService.T("Tray.AllFanSpeeds"));
-        AppendCommand(fanControlMenu, RestoreDefaultCommand, LocalizationService.T("Tray.RestoreDefault"));
-        return fanControlMenu;
-    }
-
     private IntPtr BuildPresetMenu()
     {
         var presetMenu = CreatePopupMenu();
         if (presetMenu == IntPtr.Zero)
         {
-            throw new InvalidOperationException("Unable to create preset tray submenu.");
+            throw new InvalidOperationException("无法创建托盘预设子菜单。");
         }
 
         _presetCommands.Clear();
@@ -218,20 +238,6 @@ public sealed class TrayIconManager : IDisposable
         }
 
         return presetMenu;
-    }
-
-    private static IntPtr BuildAllFanSpeedMenu()
-    {
-        var speedMenu = CreatePopupMenu();
-        if (speedMenu == IntPtr.Zero)
-        {
-            throw new InvalidOperationException("Unable to create all-fan speed tray submenu.");
-        }
-
-        AppendCommand(speedMenu, Fans20Command, LocalizationService.T("Tray.AllFans20"));
-        AppendCommand(speedMenu, Fans35Command, LocalizationService.T("Tray.AllFans35"));
-        AppendCommand(speedMenu, Fans50Command, LocalizationService.T("Tray.AllFans50"));
-        return speedMenu;
     }
 
     private static string BuildPresetMenuLabel(FanPreset preset)
@@ -262,6 +268,24 @@ public sealed class TrayIconManager : IDisposable
             case RestoreCommand:
                 RestoreRequested?.Invoke(this, EventArgs.Empty);
                 break;
+            case OverviewCommand:
+                OverviewRequested?.Invoke(this, EventArgs.Empty);
+                break;
+            case ControlCommand:
+                ControlRequested?.Invoke(this, EventArgs.Empty);
+                break;
+            case SensorsCommand:
+                SensorsRequested?.Invoke(this, EventArgs.Empty);
+                break;
+            case RefreshSensorsCommand:
+                RefreshSensorsRequested?.Invoke(this, EventArgs.Empty);
+                break;
+            case OpenIdracCommand:
+                OpenIdracRequested?.Invoke(this, EventArgs.Empty);
+                break;
+            case OpenLogsCommand:
+                OpenLogsRequested?.Invoke(this, EventArgs.Empty);
+                break;
             case Fans20Command:
                 FanPercentRequested?.Invoke(this, 20);
                 break;
@@ -273,6 +297,9 @@ public sealed class TrayIconManager : IDisposable
                 break;
             case RestoreDefaultCommand:
                 RestoreDefaultRequested?.Invoke(this, EventArgs.Empty);
+                break;
+            case StopAutoCommand:
+                StopAutoRequested?.Invoke(this, EventArgs.Empty);
                 break;
             case SettingsCommand:
                 SettingsRequested?.Invoke(this, EventArgs.Empty);
@@ -287,7 +314,7 @@ public sealed class TrayIconManager : IDisposable
     {
         if (!AppendMenu(menu, MfString, new UIntPtr((uint)command), text))
         {
-            throw new InvalidOperationException($"Unable to append tray menu command: {text}");
+            throw new InvalidOperationException($"无法添加托盘菜单命令：{text}");
         }
     }
 
@@ -295,7 +322,7 @@ public sealed class TrayIconManager : IDisposable
     {
         if (!AppendMenu(menu, MfSeparator, UIntPtr.Zero, string.Empty))
         {
-            throw new InvalidOperationException("Unable to append tray menu separator.");
+            throw new InvalidOperationException("无法添加托盘菜单分隔线。");
         }
     }
 
@@ -304,7 +331,7 @@ public sealed class TrayIconManager : IDisposable
         var submenuHandle = new UIntPtr(unchecked((ulong)submenu.ToInt64()));
         if (!AppendMenu(menu, MfPopup, submenuHandle, text))
         {
-            throw new InvalidOperationException($"Unable to append tray menu group: {text}");
+            throw new InvalidOperationException($"无法添加托盘菜单分组：{text}");
         }
     }
 

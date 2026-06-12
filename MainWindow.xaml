@@ -6,7 +6,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:DellR730xdFanControlCenter"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Title="R730XD 智控风扇中心"
+    Title=""
     mc:Ignorable="d">
     <Window.SystemBackdrop>
         <MicaBackdrop />
@@ -18,7 +18,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar x:Name="AppTitleBar" Title="R730XD 智控风扇中心">
+        <TitleBar x:Name="AppTitleBar" Title="">
             <TitleBar.IconSource>
                 <ImageIconSource ImageSource="Assets/AppIcon.ico" />
             </TitleBar.IconSource>

@@ -15,4 +15,24 @@ public sealed class SensorReading
     public string Status { get; set; } = string.Empty;
 
     public double? NumericValue { get; set; }
+
+    public override string ToString()
+    {
+        var parts = new List<string>();
+        AddIfPresent(Key);
+        AddIfPresent(SensorId);
+        AddIfPresent(Entity);
+        AddIfPresent(Value);
+        AddIfPresent(Unit);
+        AddIfPresent(Status);
+        return string.Join(" / ", parts);
+
+        void AddIfPresent(string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                parts.Add(value);
+            }
+        }
+    }
 }

@@ -42,7 +42,7 @@ public sealed class AppLogOperation
     {
         if (_completed)
         {
-            throw new InvalidOperationException($"Operation log '{OperationId}' has already been completed.");
+            throw new InvalidOperationException($"操作日志 {OperationId} 已经完成，不能重复结束。");
         }
 
         _log.WriteOperationTerminalRecord(this, level, phase, succeeded, message, exception, properties);

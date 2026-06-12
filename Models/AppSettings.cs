@@ -45,13 +45,17 @@ public sealed class AppSettings
 
     public string Language { get; set; } = "zh-CN";
 
+    public string LastRunningPresetId { get; set; } = string.Empty;
+
+    public bool LastSmartAutoPolicyRunning { get; set; }
+
     public List<FanPreset> Presets { get; set; } = FanPreset.CreateDefaultPresets();
 
     public static void ValidatePercent(int percent, string fieldName)
     {
         if (percent is < 0 or > 100)
         {
-            throw new ArgumentOutOfRangeException(fieldName, percent, "Fan speed must be between 0 and 100 percent.");
+            throw new ArgumentOutOfRangeException(fieldName, percent, "风扇转速百分比必须在 0 到 100 之间。");
         }
     }
 

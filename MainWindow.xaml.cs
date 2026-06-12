@@ -47,9 +47,28 @@ public sealed partial class MainWindow : Window
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
         var trayIcon = new TrayIconManager(_windowHandle, iconPath);
         trayIcon.RestoreRequested += (_, _) => RestoreFromTray();
+        trayIcon.OverviewRequested += (_, _) =>
+        {
+            RestoreFromTray();
+            RunPageAction(page => page.ShowOverviewView());
+        };
+        trayIcon.ControlRequested += (_, _) =>
+        {
+            RestoreFromTray();
+            RunPageAction(page => page.ShowControlView());
+        };
+        trayIcon.SensorsRequested += (_, _) =>
+        {
+            RestoreFromTray();
+            RunPageAction(page => page.ShowSensorsView());
+        };
+        trayIcon.RefreshSensorsRequested += (_, _) => RunPageCommand(page => page.RefreshSensorsFromTrayAsync());
+        trayIcon.OpenIdracRequested += (_, _) => RunPageCommand(page => page.OpenIdracFromTrayAsync());
+        trayIcon.OpenLogsRequested += (_, _) => RunPageAction(page => page.OpenLogFolderFromTray());
         trayIcon.FanPercentRequested += (_, percent) => RunPageCommand(page => page.ApplyQuickFanSpeedAsync(percent));
         trayIcon.PresetRequested += (_, preset) => RunPageCommand(page => page.ApplyPresetFromTrayAsync(preset));
         trayIcon.RestoreDefaultRequested += (_, _) => RunPageCommand(page => page.RestoreDellFactoryFanSpeedFromTrayAsync());
+        trayIcon.StopAutoRequested += (_, _) => RunPageAction(page => page.StopAutoPolicyFromTray());
         trayIcon.SettingsRequested += (_, _) =>
         {
             RestoreFromTray();

@@ -20,6 +20,19 @@ public sealed record LogLevelStyle(
         };
     }
 
+    public static LogLevelStyle FromSemanticLevel(string level)
+    {
+        var token = Normalize(level);
+        return token switch
+        {
+            "info" => Info,
+            "warning" or "warn" => Warning,
+            "success" or "ok" => Success,
+            "error" or "fail" or "failed" => Error,
+            _ => throw new ArgumentException(LocalizationService.Format("Log.UnsupportedSemanticLevel", level), nameof(level)),
+        };
+    }
+
     private static string Normalize(string level)
     {
         return string.IsNullOrWhiteSpace(level)

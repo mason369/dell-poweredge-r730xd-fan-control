@@ -7,6 +7,7 @@
     xmlns:local="using:DellR730xdFanControlCenter"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Loaded="OnPageLoaded"
+    SizeChanged="OnPageSizeChanged"
     mc:Ignorable="d">
 
     <Page.Resources>
@@ -30,9 +31,8 @@
         </Style>
         <DataTemplate x:Key="HardwareTileTemplate">
             <Border
-                Width="226"
-                MinHeight="126"
-                Margin="0,0,10,10"
+                Width="250"
+                MinHeight="138"
                 Padding="14"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -64,21 +64,16 @@
                                     Opacity="0.55" />
                                 <Grid
                                     x:Name="FanTileRotor"
-                                    Width="21"
-                                    Height="21"
+                                    Width="24"
+                                    Height="24"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
                                     DataContextChanged="OnDashboardTileFanIconDataContextChanged"
                                     Loaded="OnDashboardTileFanIconLoaded"
-                                    RenderTransformOrigin="0.5,0.5">
+                                    RenderTransformOrigin="0.5,0.5"
+                                    Unloaded="OnDashboardTileFanIconUnloaded">
                                     <Path
-                                        Data="M11.2,2.2 C13.5,1.4 15.9,3.0 15.7,5.5 C15.6,7.6 14.0,9.0 12.5,10.0 C12.0,9.8 11.5,9.8 11.0,10.0 C10.4,8.1 9.5,5.4 11.2,2.2 Z M3.0,13.1 C1.8,10.9 3.1,8.3 5.6,7.9 C7.6,7.6 9.2,8.8 10.6,10.1 C10.3,10.6 10.2,11.1 10.3,11.6 C8.4,12.2 5.8,13.6 3.0,13.1 Z M12.7,21.8 C10.3,22.4 8.0,20.6 8.4,18.1 C8.7,16.1 10.3,14.8 11.9,13.9 C12.4,14.1 12.9,14.1 13.4,13.9 C13.8,15.9 14.5,18.6 12.7,21.8 Z M21.0,10.9 C22.2,13.1 20.9,15.7 18.4,16.1 C16.4,16.4 14.8,15.2 13.4,13.9 C13.7,13.4 13.8,12.9 13.7,12.4 C15.6,11.8 18.2,10.4 21.0,10.9 Z"
-                                        Fill="{Binding AccentBrush}" />
-                                    <Ellipse
-                                        Width="4.4"
-                                        Height="4.4"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
+                                        Data="M12,3 C13.8,3 15,4.2 15,6 C15,8.1 13.8,9.7 12.5,10.7 C12.2,10.5 11.8,10.5 11.5,10.7 C10.2,9.7 9,8.1 9,6 C9,4.2 10.2,3 12,3 Z M21,12 C21,13.8 19.8,15 18,15 C15.9,15 14.3,13.8 13.3,12.5 C13.5,12.2 13.5,11.8 13.3,11.5 C14.3,10.2 15.9,9 18,9 C19.8,9 21,10.2 21,12 Z M12,21 C10.2,21 9,19.8 9,18 C9,15.9 10.2,14.3 11.5,13.3 C11.8,13.5 12.2,13.5 12.5,13.3 C13.8,14.3 15,15.9 15,18 C15,19.8 13.8,21 12,21 Z M3,12 C3,10.2 4.2,9 6,9 C8.1,9 9.7,10.2 10.7,11.5 C10.5,11.8 10.5,12.2 10.7,12.5 C9.7,13.8 8.1,15 6,15 C4.2,15 3,13.8 3,12 Z M12,9.7 A2.3,2.3 0 1 1 12,14.3 A2.3,2.3 0 0 1 12,9.7 Z"
                                         Fill="{Binding AccentBrush}" />
                                 </Grid>
                             </Grid>
@@ -98,34 +93,60 @@
                                     Fill="{Binding AccentBrush}" />
                             </Grid>
                             <Grid
+                                x:Name="VoltageTilePulse"
                                 Opacity="{Binding VoltageIconOpacity}"
                                 DataContextChanged="OnDashboardTileElectricalIconDataContextChanged"
                                 Loaded="OnDashboardTileElectricalIconLoaded"
                                 RenderTransformOrigin="0.5,0.5">
+                                <Ellipse
+                                    Width="21"
+                                    Height="21"
+                                    Stroke="{Binding AccentBrush}"
+                                    StrokeThickness="1.8"
+                                    Opacity="0.6" />
                                 <Path
-                                    Data="M5,5 H19 V15 H5 Z M7,7 V13 H17 V7 Z M10,17 H14 V21 H10 Z"
-                                    Fill="{Binding AccentBrush}" />
+                                    Data="M7,15.8 C8.1,12.4 9.9,10.6 12,10.6 C14.1,10.6 15.9,12.4 17,15.8"
+                                    Stroke="{Binding AccentBrush}"
+                                    StrokeEndLineCap="Round"
+                                    StrokeStartLineCap="Round"
+                                    StrokeThickness="1.8" />
                                 <Path
-                                    Data="M12.6,8 L9.4,12 H12 L11.1,15 L15,10.5 H12.3 Z"
-                                    Fill="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                                    Data="M12,14.8 L15.8,9.2"
+                                    Stroke="{Binding AccentBrush}"
+                                    StrokeEndLineCap="Round"
+                                    StrokeStartLineCap="Round"
+                                    StrokeThickness="2.2" />
+                                <Path
+                                    Data="M8.5,17.8 H15.5"
+                                    Stroke="{Binding AccentBrush}"
+                                    StrokeEndLineCap="Round"
+                                    StrokeStartLineCap="Round"
+                                    StrokeThickness="1.8" />
                             </Grid>
                             <Grid
+                                x:Name="CurrentTilePulse"
                                 Opacity="{Binding CurrentIconOpacity}"
                                 DataContextChanged="OnDashboardTileElectricalIconDataContextChanged"
                                 Loaded="OnDashboardTileElectricalIconLoaded"
                                 RenderTransformOrigin="0.5,0.5">
+                                <Ellipse
+                                    Width="21"
+                                    Height="21"
+                                    Stroke="{Binding AccentBrush}"
+                                    StrokeThickness="1.8"
+                                    Opacity="0.6" />
                                 <Path
-                                    Data="M4,13 C6,7 10,7 12,13 C14,19 18,19 20,13"
+                                    Data="M6,12 C7.4,8.8 9.7,8.8 11.1,12 C12.5,15.2 14.8,15.2 16.2,12"
                                     Stroke="{Binding AccentBrush}"
                                     StrokeEndLineCap="Round"
                                     StrokeStartLineCap="Round"
-                                    StrokeThickness="2.4" />
+                                    StrokeThickness="2" />
                                 <Path
-                                    Data="M17,10 L20,13 L17,16"
+                                    Data="M15,9.4 L18,12 L15,14.6"
                                     Stroke="{Binding AccentBrush}"
                                     StrokeEndLineCap="Round"
                                     StrokeStartLineCap="Round"
-                                    StrokeThickness="2.4" />
+                                    StrokeThickness="2" />
                             </Grid>
                             <Grid Opacity="{Binding HealthIconOpacity}">
                                 <Ellipse
@@ -145,21 +166,28 @@
                     <StackPanel Grid.Column="1" Spacing="4">
                         <TextBlock
                             FontWeight="SemiBold"
+                            MaxLines="2"
                             Text="{Binding Title}"
                             TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Grid ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock
                                 Foreground="{Binding ValueBrush}"
-                                FontSize="26"
+                                FontSize="{Binding ValueFontSize}"
                                 FontWeight="SemiBold"
+                                MaxLines="{Binding ValueMaxLines}"
                                 Text="{Binding Value}"
-                                TextWrapping="Wrap" />
+                                TextWrapping="WrapWholeWords" />
                             <TextBlock
+                                Grid.Column="1"
                                 VerticalAlignment="Bottom"
                                 Style="{StaticResource MutedTextStyle}"
                                 Text="{Binding Unit}"
                                 TextWrapping="Wrap" />
-                        </StackPanel>
+                        </Grid>
                         <TextBlock
                             Style="{StaticResource MutedTextStyle}"
                             Text="{Binding Subtitle}"
@@ -313,7 +341,7 @@
                 Content="风扇控制"
                 Tag="Control">
                 <NavigationViewItem.Icon>
-                    <PathIcon Data="M12,2 C14.2,2 15.6,4.2 14.7,6.2 L13.2,9.4 C12.4,9.1 11.6,9.1 10.8,9.4 L9.3,6.2 C8.4,4.2 9.8,2 12,2 Z M3.9,7.4 C5.0,5.5 7.8,5.7 9.0,7.6 L10.8,10.4 C10.3,10.9 10,11.4 10,12.1 L6.7,12.2 C4.5,12.3 2.8,9.4 3.9,7.4 Z M20.1,16.6 C19.0,18.5 16.2,18.3 15.0,16.4 L13.2,13.6 C13.7,13.1 14,12.6 14,11.9 L17.3,11.8 C19.5,11.7 21.2,14.6 20.1,16.6 Z M12,10 A2,2 0 1 1 12,14 A2,2 0 0 1 12,10 Z" />
+                    <PathIcon Data="M12,9.7 A2.3,2.3 0 1 1 12,14.3 A2.3,2.3 0 0 1 12,9.7 Z M13.55,10.45 C14.75,8.05 16.9,5.65 19.15,4.85 C20.05,5.75 20.15,7.25 19.4,8.4 C18.15,10.3 15.7,10.95 13.55,10.45 Z M13.55,13.55 C15.95,14.75 18.35,16.9 19.15,19.15 C18.25,20.05 16.75,20.15 15.6,19.4 C13.7,18.15 13.05,15.7 13.55,13.55 Z M10.45,13.55 C9.25,15.95 7.1,18.35 4.85,19.15 C3.95,18.25 3.85,16.75 4.6,15.6 C5.85,13.7 8.3,13.05 10.45,13.55 Z M10.45,10.45 C8.05,9.25 5.65,7.1 4.85,4.85 C5.75,3.95 7.25,3.85 8.4,4.6 C10.3,5.85 10.95,8.3 10.45,10.45 Z" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem
@@ -321,7 +349,7 @@
                 Content="传感器"
                 Tag="Sensors">
                 <NavigationViewItem.Icon>
-                    <PathIcon Data="M6,4 H18 V16 H6 Z M8,6 V14 H16 V6 Z M3,7 H5 V9 H3 Z M3,11 H5 V13 H3 Z M19,7 H21 V9 H19 Z M19,11 H21 V13 H19 Z M9,1 H11 V3 H9 Z M13,1 H15 V3 H13 Z M9,17 H11 V20 H9 Z M13,17 H15 V20 H13 Z" />
+                    <FontIcon Glyph="&#xE950;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
             <NavigationViewItem
@@ -344,6 +372,7 @@
                 x:Name="StatusInfoBar"
                 Margin="24,12,24,0"
                 IsClosable="True"
+                IsIconVisible="False"
                 IsOpen="False"
                 Severity="Informational" />
 
@@ -354,11 +383,13 @@
                 HorizontalScrollBarVisibility="Disabled"
                 HorizontalScrollMode="Disabled">
                 <StackPanel
+                    x:Name="ContentPanel"
                     Width="{Binding ViewportWidth, ElementName=ContentScrollViewer}"
                     HorizontalAlignment="Left"
                     Padding="24"
                     Spacing="18">
                     <Border
+                        x:Name="HeroBannerCard"
                         MinHeight="202"
                         Padding="24"
                         CornerRadius="8">
@@ -370,19 +401,16 @@
                                 <GradientStop Color="#2F80ED" Offset="1" />
                             </LinearGradientBrush>
                         </Border.Background>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                        <Grid
+                            x:Name="HeroBannerLayout"
+                            RowSpacing="20">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
                             <Border
-                                Grid.ColumnSpan="2"
-                                Height="1"
-                                Margin="0,0,0,4"
-                                VerticalAlignment="Bottom"
-                                Background="#35FFFFFF" />
-                            <Border
-                                Grid.ColumnSpan="2"
+                                x:Name="HeroBannerGlow"
+                                Grid.RowSpan="2"
                                 Width="520"
                                 Height="176"
                                 HorizontalAlignment="Right"
@@ -395,6 +423,11 @@
                                     </LinearGradientBrush>
                                 </Border.Background>
                             </Border>
+                            <Grid x:Name="HeroBannerContent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <StackPanel Spacing="8">
                                 <TextBlock
                                     Foreground="White"
@@ -413,7 +446,44 @@
                                     Foreground="#DDEFFF"
                                     local:Localization.Key="Hero.Subtitle"
                                     Text="监控 BMC 传感器，控制全部或单个风扇，支持 Dell 自动模式与软件恒温策略。" />
+                                <Border
+                                    x:Name="HeroThermalModeBadge"
+                                    MaxWidth="780"
+                                    Margin="0,4,0,0"
+                                    Padding="10,7"
+                                    HorizontalAlignment="Left"
+                                    Background="#22FFFFFF"
+                                    BorderBrush="#45FFFFFF"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            Foreground="#CFFAFE"
+                                            FontSize="14"
+                                            Glyph="&#xE9D2;" />
+                                        <TextBlock
+                                            x:Name="HeroThermalModeLabelText"
+                                            Grid.Column="1"
+                                            Foreground="#D8F7FF"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            TextWrapping="Wrap" />
+                                        <TextBlock
+                                            x:Name="HeroThermalModeValueText"
+                                            Grid.Column="2"
+                                            Foreground="White"
+                                            FontSize="13"
+                                            FontWeight="SemiBold"
+                                            TextWrapping="Wrap" />
+                                    </Grid>
+                                </Border>
                                 <Grid
+                                    x:Name="HeroRealtimeMetricsPanel"
                                     MaxWidth="900"
                                     Margin="0,10,0,0"
                                     ColumnSpacing="8">
@@ -425,7 +495,7 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <Border
-                                        Height="124"
+                                        MinHeight="170"
                                         Padding="10,8"
                                         Background="#18FFFFFF"
                                         BorderBrush="#30FFFFFF"
@@ -437,26 +507,25 @@
                                                 FontSize="11"
                                                 local:Localization.Key="Hero.LiveTemperature"
                                                 Text="实时温度"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveTemperatureText"
                                                 Foreground="White"
                                                 FontSize="16"
                                                 FontWeight="SemiBold"
                                                 Text="--"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveTemperatureItemsText"
                                                 Foreground="#BDEAF4"
                                                 FontSize="11"
-                                                MaxLines="3"
                                                 Text="--"
-                                                TextWrapping="NoWrap" />
+                                                TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                     <Border
                                         Grid.Column="1"
-                                        Height="124"
+                                        MinHeight="170"
                                         Padding="10,8"
                                         Background="#18FFFFFF"
                                         BorderBrush="#30FFFFFF"
@@ -468,26 +537,25 @@
                                                 FontSize="11"
                                                 local:Localization.Key="Hero.LiveFanRpm"
                                                 Text="平均转速"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveFanRpmText"
                                                 Foreground="White"
                                                 FontSize="16"
                                                 FontWeight="SemiBold"
                                                 Text="--"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveFanItemsText"
                                                 Foreground="#BDEAF4"
                                                 FontSize="11"
-                                                MaxLines="3"
                                                 Text="--"
-                                                TextWrapping="NoWrap" />
+                                                TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                     <Border
                                         Grid.Column="2"
-                                        Height="124"
+                                        MinHeight="170"
                                         Padding="10,8"
                                         Background="#18FFFFFF"
                                         BorderBrush="#30FFFFFF"
@@ -499,26 +567,25 @@
                                                 FontSize="11"
                                                 local:Localization.Key="Hero.LivePower"
                                                 Text="实时功耗"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLivePowerText"
                                                 Foreground="White"
                                                 FontSize="16"
                                                 FontWeight="SemiBold"
                                                 Text="--"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLivePowerItemsText"
                                                 Foreground="#BDEAF4"
                                                 FontSize="11"
-                                                MaxLines="3"
                                                 Text="--"
-                                                TextWrapping="NoWrap" />
+                                                TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                     <Border
                                         Grid.Column="3"
-                                        Height="124"
+                                        MinHeight="170"
                                         Padding="10,8"
                                         Background="#18FFFFFF"
                                         BorderBrush="#30FFFFFF"
@@ -530,26 +597,25 @@
                                                 FontSize="11"
                                                 local:Localization.Key="Hero.LiveVoltage"
                                                 Text="平均电压"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveVoltageText"
                                                 Foreground="White"
                                                 FontSize="16"
                                                 FontWeight="SemiBold"
                                                 Text="--"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveVoltageItemsText"
                                                 Foreground="#BDEAF4"
                                                 FontSize="11"
-                                                MaxLines="3"
                                                 Text="--"
-                                                TextWrapping="NoWrap" />
+                                                TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                     <Border
                                         Grid.Column="4"
-                                        Height="124"
+                                        MinHeight="170"
                                         Padding="10,8"
                                         Background="#18FFFFFF"
                                         BorderBrush="#30FFFFFF"
@@ -561,21 +627,20 @@
                                                 FontSize="11"
                                                 local:Localization.Key="Hero.LiveCurrent"
                                                 Text="总电流"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveCurrentText"
                                                 Foreground="White"
                                                 FontSize="16"
                                                 FontWeight="SemiBold"
                                                 Text="--"
-                                                TextTrimming="CharacterEllipsis" />
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 x:Name="HeroLiveCurrentItemsText"
                                                 Foreground="#BDEAF4"
                                                 FontSize="11"
-                                                MaxLines="3"
                                                 Text="--"
-                                                TextWrapping="NoWrap" />
+                                                TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                 </Grid>
@@ -611,6 +676,7 @@
                                     <TextBlock
                                         x:Name="ConnectionStateText"
                                         Foreground="#CFFAFE"
+                                        local:Localization.Key="State.NotConnected"
                                         Text="未连接"
                                         TextWrapping="Wrap" />
                                     <TextBlock
@@ -621,6 +687,7 @@
                                     <TextBlock
                                         x:Name="HeroModeStateText"
                                         Foreground="#CFFAFE"
+                                        local:Localization.Key="Mode.Idle"
                                         Text="待机"
                                         TextWrapping="Wrap" />
                                     <TextBlock
@@ -633,16 +700,24 @@
                                         Foreground="White"
                                         FontSize="13"
                                         FontWeight="SemiBold"
+                                        local:Localization.Key="Hero.RequestIdle"
                                         Text="等待操作"
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         x:Name="HeroRequestUpdatedText"
                                         Foreground="#CFFAFE"
                                         FontSize="12"
+                                        local:Localization.Key="Hero.LastUpdateEmpty"
                                         Text="尚无请求记录"
                                         TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
+                            </Grid>
+                            <Border
+                                x:Name="HeroBannerDivider"
+                                Grid.Row="1"
+                                Height="1"
+                                Background="#35FFFFFF" />
                         </Grid>
                     </Border>
 
@@ -662,7 +737,11 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <Grid Grid.ColumnSpan="3" ColumnSpacing="12">
+                        <Grid
+                            x:Name="OverviewSummaryGrid"
+                            Grid.ColumnSpan="3"
+                            ColumnSpacing="12"
+                            RowSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
@@ -680,7 +759,7 @@
                                     <TextBlock
                                         x:Name="CpuTemperatureText"
                                         Style="{StaticResource MetricValueStyle}"
-                                        Text="-- °C"
+                                        Text=""
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         local:Localization.Key="Overview.FromSdrTemp"
@@ -698,10 +777,11 @@
                                     <TextBlock
                                         x:Name="FanSummaryText"
                                         Style="{StaticResource MetricValueStyle}"
-                                        Text="6 个风扇"
+                                        Text=""
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         x:Name="FanRpmSummaryText"
+                                        local:Localization.Key="State.WaitingRefresh"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="等待刷新"
                                         TextWrapping="Wrap" />
@@ -716,10 +796,11 @@
                                     <TextBlock
                                         x:Name="PowerSummaryText"
                                         Style="{StaticResource MetricValueStyle}"
-                                        Text="-- 瓦"
+                                        Text="--"
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         x:Name="PowerSummaryDetailText"
+                                        local:Localization.Key="Overview.NoPowerReading"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="等待刷新"
                                         TextWrapping="Wrap" />
@@ -734,10 +815,11 @@
                                     <TextBlock
                                         x:Name="VoltageSummaryText"
                                         Style="{StaticResource MetricValueStyle}"
-                                        Text="-- 伏"
+                                        Text="--"
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         x:Name="VoltageSummaryDetailText"
+                                        local:Localization.Key="Overview.NoVoltageReading"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="等待刷新"
                                         TextWrapping="Wrap" />
@@ -752,10 +834,11 @@
                                     <TextBlock
                                         x:Name="CurrentSummaryText"
                                         Style="{StaticResource MetricValueStyle}"
-                                        Text="-- 安"
+                                        Text="--"
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         x:Name="CurrentSummaryDetailText"
+                                        local:Localization.Key="Overview.NoCurrentReading"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="等待刷新"
                                         TextWrapping="Wrap" />
@@ -769,11 +852,13 @@
                                         Text="控制模式" />
                                     <TextBlock
                                         x:Name="ModeSummaryText"
+                                        local:Localization.Key="Mode.Idle"
                                         Style="{StaticResource MetricValueStyle}"
                                         Text="待机"
                                         TextWrapping="Wrap" />
                                     <TextBlock
                                         x:Name="AutoPolicySummaryText"
+                                        local:Localization.Key="Status.AutoStopped"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="软件自动策略未运行"
                                         TextWrapping="Wrap" />
@@ -781,7 +866,7 @@
                             </Border>
                         </Grid>
 
-                        <Border Grid.Row="1" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                        <Border Grid.Row="2" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -802,18 +887,19 @@
                                         x:Name="VisualizationStateText"
                                         Grid.Column="1"
                                         VerticalAlignment="Center"
+                                        local:Localization.Key="Dashboard.VisualizationLoading"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="等待图表加载" />
                                 </Grid>
                                 <WebView2
                                     x:Name="VisualizationWebView"
-                                    MinHeight="760"
+                                    MinHeight="1520"
                                     Loaded="OnVisualizationWebViewLoaded"
                                     NavigationCompleted="OnVisualizationNavigationCompleted" />
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Row="2" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                        <Border Grid.Row="3" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -834,36 +920,25 @@
                                         x:Name="LastPollText"
                                         Grid.Column="1"
                                         VerticalAlignment="Center"
+                                        local:Localization.Key="Overview.WaitingPoll"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="等待轮询" />
                                 </Grid>
                                 <GridView
+                                    x:Name="TemperatureGridView"
                                     MaxHeight="300"
                                     ItemTemplate="{StaticResource HardwareTileTemplate}"
                                     IsItemClickEnabled="False"
                                     ItemsSource="{x:Bind TemperatureTiles, Mode=OneWay}"
                                     SelectionMode="None">
-                                    <GridView.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <ItemsWrapGrid Orientation="Horizontal" />
-                                        </ItemsPanelTemplate>
-                                    </GridView.ItemsPanel>
-                                </GridView>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Grid.Row="3" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
-                            <StackPanel Spacing="12">
-                                <TextBlock
-                                    local:Localization.Key="Overview.FanBoard"
-                                    Style="{StaticResource SectionTitleStyle}"
-                                    Text="风扇 RPM 看板" />
-                                <GridView
-                                    MaxHeight="260"
-                                    ItemTemplate="{StaticResource HardwareTileTemplate}"
-                                    IsItemClickEnabled="False"
-                                    ItemsSource="{x:Bind FanTiles, Mode=OneWay}"
-                                    SelectionMode="None">
+                                    <GridView.ItemContainerStyle>
+                                        <Style TargetType="GridViewItem">
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Margin" Value="0,0,10,10" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                            <Setter Property="VerticalContentAlignment" Value="Top" />
+                                        </Style>
+                                    </GridView.ItemContainerStyle>
                                     <GridView.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <ItemsWrapGrid Orientation="Horizontal" />
@@ -876,27 +951,71 @@
                         <Border Grid.Row="4" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
                                 <TextBlock
-                                    local:Localization.Key="Overview.PowerHealth"
+                                    local:Localization.Key="Overview.FanBoard"
                                     Style="{StaticResource SectionTitleStyle}"
-                                    Text="功耗与状态" />
-                                <ListView
-                                    MaxHeight="340"
-                                    ItemTemplate="{StaticResource HardwareStatusRowTemplate}"
-                                    ItemsSource="{x:Bind PowerTiles, Mode=OneWay}"
+                                    Text="风扇 RPM 看板" />
+                                <GridView
+                                    x:Name="FanGridView"
+                                    MaxHeight="260"
+                                    ItemTemplate="{StaticResource HardwareTileTemplate}"
+                                    IsItemClickEnabled="False"
+                                    ItemsSource="{x:Bind FanTiles, Mode=OneWay}"
                                     SelectionMode="None">
-                                    <ListView.ItemContainerStyle>
-                                        <Style TargetType="ListViewItem">
-                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <GridView.ItemContainerStyle>
+                                        <Style TargetType="GridViewItem">
                                             <Setter Property="Padding" Value="0" />
-                                            <Setter Property="Margin" Value="0,0,0,8" />
+                                            <Setter Property="Margin" Value="0,0,10,10" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                            <Setter Property="VerticalContentAlignment" Value="Top" />
                                         </Style>
-                                    </ListView.ItemContainerStyle>
-                                </ListView>
+                                    </GridView.ItemContainerStyle>
+                                    <GridView.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <ItemsWrapGrid Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </GridView.ItemsPanel>
+                                </GridView>
                             </StackPanel>
                         </Border>
 
                         <Border Grid.Row="5" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
-                            <Grid ColumnSpacing="18">
+                            <StackPanel Spacing="12">
+                                <TextBlock
+                                    local:Localization.Key="Overview.PowerHealth"
+                                    Style="{StaticResource SectionTitleStyle}"
+                                    Text="功耗与状态" />
+                                <GridView
+                                    x:Name="PowerHealthGridView"
+                                    ItemTemplate="{StaticResource HardwareTileTemplate}"
+                                    IsItemClickEnabled="False"
+                                    ItemsSource="{x:Bind PowerTiles, Mode=OneWay}"
+                                    ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                    ScrollViewer.HorizontalScrollMode="Disabled"
+                                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                    ScrollViewer.VerticalScrollMode="Disabled"
+                                    SelectionMode="None">
+                                    <GridView.ItemContainerStyle>
+                                        <Style TargetType="GridViewItem">
+                                            <Setter Property="Padding" Value="0" />
+                                            <Setter Property="Margin" Value="0,0,10,10" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                            <Setter Property="VerticalContentAlignment" Value="Top" />
+                                        </Style>
+                                    </GridView.ItemContainerStyle>
+                                    <GridView.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <ItemsWrapGrid MaximumRowsOrColumns="6" Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </GridView.ItemsPanel>
+                                </GridView>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="1" Grid.ColumnSpan="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
+                            <Grid
+                                x:Name="OverviewQuickActionsGrid"
+                                ColumnSpacing="18"
+                                RowSpacing="14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="2*" />
                                     <ColumnDefinition Width="*" />
@@ -906,12 +1025,15 @@
                                         local:Localization.Key="Overview.QuickActions"
                                         Style="{StaticResource SectionTitleStyle}"
                                         Text="快速操作" />
-                                    <CommandBar DefaultLabelPosition="Right" IsOpen="False">
+                                    <CommandBar
+                                        x:Name="QuickActionsCommandBar"
+                                        DefaultLabelPosition="Right"
+                                        IsOpen="False">
                                         <AppBarButton
+                                            x:Name="QuickPollingButton"
                                             Click="OnTestConnectionClick"
                                             Icon="Contact"
-                                            local:Localization.Key="Action.Connect"
-                                            Label="连接" />
+                                            Label="" />
                                         <AppBarButton
                                             Click="OnRefreshSensorsClick"
                                             Icon="Refresh"
@@ -929,7 +1051,10 @@
                                             Label="打开 iDRAC" />
                                     </CommandBar>
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="8">
+                                <StackPanel
+                                    x:Name="OverviewAllFanPanel"
+                                    Grid.Column="1"
+                                    Spacing="8">
                                     <TextBlock
                                         local:Localization.Key="Overview.AllFans"
                                         Style="{StaticResource SectionTitleStyle}"
@@ -940,7 +1065,10 @@
                                         Minimum="0"
                                         StepFrequency="1"
                                         ValueChanged="OnAllFanSliderChanged" />
-                                    <Grid ColumnSpacing="10">
+                                    <Grid
+                                        x:Name="AllFanPercentGrid"
+                                        ColumnSpacing="10"
+                                        RowSpacing="8">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="120" />
@@ -954,7 +1082,10 @@
                                             SmallChange="1"
                                             SpinButtonPlacementMode="Inline"
                                             ValueChanged="OnAllFanNumberChanged" />
-                                        <Button Grid.Column="2" Click="OnSetAllFansClick">
+                                        <Button
+                                            x:Name="SetAllFansButton"
+                                            Grid.Column="2"
+                                            Click="OnSetAllFansClick">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <FontIcon FontSize="14" Glyph="&#xE74E;" />
                                                 <TextBlock local:Localization.Key="Action.Apply" Text="应用" />
@@ -1011,7 +1142,7 @@
                                                             FontWeight="SemiBold"
                                                             Text="{Binding Level}"
                                                             TextAlignment="Center"
-                                                            TextTrimming="CharacterEllipsis" />
+                                                            TextWrapping="Wrap" />
                                                     </Border>
                                                     <TextBlock Grid.Column="2" Text="{Binding Message}" TextWrapping="Wrap" />
                                                 </Grid>
@@ -1024,7 +1155,6 @@
 
                     <Grid x:Name="ControlView" Visibility="Collapsed">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -1045,7 +1175,7 @@
                                         <TextBlock
                                             x:Name="ControlCurrentModeText"
                                             Style="{StaticResource MutedTextStyle}"
-                                            Text="当前模式：待机" />
+                                            Text="" />
                                     </StackPanel>
                                     <TextBlock
                                         Grid.Column="1"
@@ -1056,6 +1186,7 @@
                                 </Grid>
 
                                 <GridView
+                                    x:Name="PresetGridView"
                                     Padding="0"
                                     IsItemClickEnabled="False"
                                     ItemsSource="{x:Bind Presets, Mode=OneWay}"
@@ -1063,7 +1194,7 @@
                                     <GridView.ItemContainerStyle>
                                         <Style TargetType="GridViewItem">
                                             <Setter Property="Margin" Value="0,0,12,12" />
-                                            <Setter Property="MinWidth" Value="300" />
+                                            <Setter Property="MinWidth" Value="260" />
                                             <Setter Property="MaxWidth" Value="340" />
                                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                         </Style>
@@ -1071,9 +1202,9 @@
                                     <GridView.ItemTemplate>
                                         <DataTemplate>
                                             <Border
-                                                Width="320"
                                                 MinHeight="360"
                                                 Padding="16"
+                                                HorizontalAlignment="Stretch"
                                                 Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
                                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                 BorderThickness="1"
@@ -1116,7 +1247,7 @@
                                                             <TextBlock
                                                                 Style="{StaticResource MutedTextStyle}"
                                                                 Text="{Binding ModeBadge}"
-                                                                TextTrimming="CharacterEllipsis" />
+                                                                TextWrapping="Wrap" />
                                                         </StackPanel>
                                                         <Border
                                                             Grid.Column="2"
@@ -1233,7 +1364,10 @@
                                     </GridView.ItemTemplate>
                                 </GridView>
 
-                                <Grid ColumnSpacing="10">
+                                <Grid
+                                    x:Name="NewPresetGrid"
+                                    ColumnSpacing="10"
+                                    RowSpacing="8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="2*" />
                                         <ColumnDefinition Width="150" />
@@ -1274,7 +1408,10 @@
                                         local:Localization.Key="Control.CurvePresetHelp"
                                         Style="{StaticResource MutedTextStyle}"
                                         Text="在曲线图上点击添加点位，或用右侧数值控件微调温度和风扇百分比；开启平滑后会按点位做平滑曲线过渡。" />
-                                    <Grid ColumnSpacing="14">
+                                    <Grid
+                                        x:Name="CurveEditorGrid"
+                                        ColumnSpacing="14"
+                                        RowSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="1.1*" />
                                             <ColumnDefinition Width="1.6*" />
@@ -1316,18 +1453,25 @@
                                                     x:Name="NewCurveCanvas"
                                                     MinHeight="196"
                                                     Background="Transparent"
+                                                    PointerCanceled="OnNewCurveCanvasPointerCanceled"
+                                                    PointerEntered="OnNewCurveCanvasPointerEntered"
+                                                    PointerExited="OnNewCurveCanvasPointerExited"
+                                                    PointerMoved="OnNewCurveCanvasPointerMoved"
                                                     PointerPressed="OnNewCurveCanvasPointerPressed"
+                                                    PointerReleased="OnNewCurveCanvasPointerReleased"
                                                     SizeChanged="OnNewCurveCanvasSizeChanged" />
                                                 <TextBlock
+                                                    x:Name="CurveMinAxisText"
                                                     HorizontalAlignment="Left"
                                                     VerticalAlignment="Bottom"
                                                     Style="{StaticResource MutedTextStyle}"
-                                                    Text="30°C" />
+                                                    Text="" />
                                                 <TextBlock
+                                                    x:Name="CurveMaxAxisText"
                                                     HorizontalAlignment="Right"
                                                     VerticalAlignment="Bottom"
                                                     Style="{StaticResource MutedTextStyle}"
-                                                    Text="95°C" />
+                                                    Text="" />
                                                 <TextBlock
                                                     HorizontalAlignment="Left"
                                                     VerticalAlignment="Top"
@@ -1424,12 +1568,180 @@
                                             </Button>
                                         </StackPanel>
                                     </Grid>
+
+                                    <StackPanel Margin="0,18,0,0" Spacing="10">
+                                        <TextBlock
+                                            x:Name="PowerCurveSectionTitleText"
+                                            Style="{StaticResource SectionTitleStyle}" />
+                                        <TextBlock
+                                            x:Name="PowerCurveHelpText"
+                                            Style="{StaticResource MutedTextStyle}"
+                                            TextWrapping="Wrap" />
+                                        <Grid
+                                            x:Name="PowerCurveEditorGrid"
+                                            ColumnSpacing="14"
+                                            RowSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="1.1*" />
+                                                <ColumnDefinition Width="1.6*" />
+                                                <ColumnDefinition Width="1.2*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="10">
+                                                <TextBox
+                                                    x:Name="NewPowerCurvePresetNameBox"
+                                                    local:Localization.Key="Control.CurvePresetName"
+                                                    Header="曲线预设名称" />
+                                                <ToggleSwitch
+                                                    x:Name="NewPowerCurveSmoothSwitch"
+                                                    Header="平滑曲线"
+                                                    local:Localization.Key="Preset.SmoothCurve"
+                                                    Toggled="OnNewPowerCurveSmoothToggled" />
+                                                <TextBlock
+                                                    x:Name="NewPowerCurveEditorModeText"
+                                                    Style="{StaticResource MutedTextStyle}" />
+                                                <Button Click="OnResetNewPowerCurveEditorClick">
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <FontIcon FontSize="14" Glyph="&#xE777;" />
+                                                        <TextBlock local:Localization.Key="Action.ResetEditor" Text="重置编辑器" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                            <Border
+                                                Grid.Column="1"
+                                                MinHeight="220"
+                                                Padding="12"
+                                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8">
+                                                <Grid>
+                                                    <Canvas
+                                                        x:Name="NewPowerCurveCanvas"
+                                                        MinHeight="196"
+                                                        Background="Transparent"
+                                                        PointerCanceled="OnNewPowerCurveCanvasPointerCanceled"
+                                                        PointerEntered="OnNewPowerCurveCanvasPointerEntered"
+                                                        PointerExited="OnNewPowerCurveCanvasPointerExited"
+                                                        PointerMoved="OnNewPowerCurveCanvasPointerMoved"
+                                                        PointerPressed="OnNewPowerCurveCanvasPointerPressed"
+                                                        PointerReleased="OnNewPowerCurveCanvasPointerReleased"
+                                                        SizeChanged="OnNewPowerCurveCanvasSizeChanged" />
+                                                    <TextBlock
+                                                        x:Name="PowerCurveMinAxisText"
+                                                        HorizontalAlignment="Left"
+                                                        VerticalAlignment="Bottom"
+                                                        Style="{StaticResource MutedTextStyle}" />
+                                                    <TextBlock
+                                                        x:Name="PowerCurveMaxAxisText"
+                                                        HorizontalAlignment="Right"
+                                                        VerticalAlignment="Bottom"
+                                                        Style="{StaticResource MutedTextStyle}" />
+                                                    <TextBlock
+                                                        HorizontalAlignment="Left"
+                                                        VerticalAlignment="Top"
+                                                        Style="{StaticResource MutedTextStyle}"
+                                                        Text="100%" />
+                                                </Grid>
+                                            </Border>
+                                            <StackPanel Grid.Column="2" Spacing="8">
+                                                <ListView
+                                                    MaxHeight="180"
+                                                    ItemsSource="{x:Bind NewPowerCurvePoints, Mode=OneWay}"
+                                                    SelectionMode="None">
+                                                    <ListView.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid ColumnSpacing="8" Padding="0,4">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <NumberBox
+                                                                    Header="功耗"
+                                                                    local:Localization.Key="SensorDisplay.PowerConsumption"
+                                                                    Maximum="1200"
+                                                                    Minimum="0"
+                                                                    SmallChange="10"
+                                                                    SpinButtonPlacementMode="Compact"
+                                                                    Tag="Power"
+                                                                    ValueChanged="OnNewPowerCurvePointValueChanged"
+                                                                    Value="{Binding PowerWatts, Mode=TwoWay}" />
+                                                                <NumberBox
+                                                                    Grid.Column="1"
+                                                                    Header="风扇 %"
+                                                                    local:Localization.Key="Field.CurveFanPercent"
+                                                                    Maximum="100"
+                                                                    Minimum="0"
+                                                                    SmallChange="1"
+                                                                    SpinButtonPlacementMode="Compact"
+                                                                    Tag="Percent"
+                                                                    ValueChanged="OnNewPowerCurvePointValueChanged"
+                                                                    Value="{Binding FanPercent, Mode=TwoWay}" />
+                                                                <Button
+                                                                    Grid.Column="2"
+                                                                    Click="OnDeleteNewPowerCurvePointClick"
+                                                                    DataContext="{Binding}">
+                                                                    <FontIcon FontSize="14" Glyph="&#xE74D;" />
+                                                                </Button>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ListView.ItemTemplate>
+                                                </ListView>
+                                                <Grid ColumnSpacing="8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <NumberBox
+                                                        x:Name="NewPowerCurveWattsBox"
+                                                        Header="功耗"
+                                                        local:Localization.Key="SensorDisplay.PowerConsumption"
+                                                        Maximum="1200"
+                                                        Minimum="0"
+                                                        SmallChange="10"
+                                                        SpinButtonPlacementMode="Compact"
+                                                        Value="500" />
+                                                    <NumberBox
+                                                        x:Name="NewPowerCurvePercentBox"
+                                                        Grid.Column="1"
+                                                        Header="风扇 %"
+                                                        local:Localization.Key="Field.CurveFanPercent"
+                                                        Maximum="100"
+                                                        Minimum="0"
+                                                        SmallChange="1"
+                                                        SpinButtonPlacementMode="Compact"
+                                                        Value="28" />
+                                                    <Button
+                                                        Grid.Column="2"
+                                                        VerticalAlignment="Bottom"
+                                                        Click="OnAddNewPowerCurvePointClick">
+                                                        <FontIcon FontSize="14" Glyph="&#xE710;" />
+                                                    </Button>
+                                                </Grid>
+                                                <TextBlock
+                                                    x:Name="NewPowerCurvePreviewText"
+                                                    FontFamily="Consolas"
+                                                    Style="{StaticResource MutedTextStyle}"
+                                                    TextWrapping="Wrap" />
+                                                <Button Click="OnAddPowerCurvePresetClick">
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <FontIcon FontSize="14" Glyph="&#xE710;" />
+                                                        <TextBlock x:Name="AddPowerCurvePresetButtonText" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
 
                         <Border Grid.Row="1" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
-                            <Grid ColumnSpacing="18">
+                            <Grid
+                                x:Name="SmartAutoGrid"
+                                ColumnSpacing="18"
+                                RowSpacing="12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="2*" />
                                     <ColumnDefinition Width="*" />
@@ -1445,7 +1757,12 @@
                                         Text="按 CPU 温度线性调整全部风扇；达到紧急温度时切回 Dell 自动模式。"
                                         TextWrapping="Wrap" />
                                 </StackPanel>
-                                <Grid Grid.Column="1" ColumnSpacing="10" VerticalAlignment="Center">
+                                <Grid
+                                    x:Name="SmartAutoButtonsGrid"
+                                    Grid.Column="1"
+                                    ColumnSpacing="10"
+                                    RowSpacing="8"
+                                    VerticalAlignment="Center">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="*" />
@@ -1478,6 +1795,8 @@
                                     Text="单风扇控制" />
                                 <InfoBar
                                     x:Name="IndividualFanInfoBar"
+                                    local:Localization.Key="Control.IndividualDisabledWarning"
+                                    IsIconVisible="False"
                                     IsOpen="True"
                                     Severity="Warning"
                                     Message="单风扇控制当前未启用。0x00 是目标编号，不是 0% 转速；需要控制单个风扇时，请先在设置中开启并保存。" />
@@ -1488,32 +1807,44 @@
                                 <ListView ItemsSource="{x:Bind FanChannels, Mode=OneWay}" SelectionMode="None">
                                     <ListView.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid Padding="0,8" ColumnSpacing="14">
+                                            <Grid Padding="0,8" ColumnSpacing="12" RowSpacing="8">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="140" />
                                                     <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="112" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <StackPanel>
-                                                    <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" />
-                                                    <TextBlock Style="{StaticResource MutedTextStyle}" Text="{Binding ChineseName}" />
+                                                <StackPanel Grid.ColumnSpan="3">
+                                                    <TextBlock
+                                                        FontWeight="SemiBold"
+                                                        Text="{Binding DisplayName}"
+                                                        TextWrapping="Wrap" />
+                                                    <TextBlock
+                                                        Style="{StaticResource MutedTextStyle}"
+                                                        Text="{Binding ChineseName}"
+                                                        TextWrapping="Wrap" />
                                                 </StackPanel>
                                                 <Slider
-                                                    Grid.Column="1"
+                                                    Grid.Row="1"
+                                                    Grid.Column="0"
                                                     Maximum="100"
                                                     Minimum="0"
                                                     StepFrequency="1"
                                                     Value="{Binding Percent, Mode=TwoWay}" />
                                                 <NumberBox
-                                                    Grid.Column="2"
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
                                                     Maximum="100"
                                                     Minimum="0"
                                                     SmallChange="1"
                                                     SpinButtonPlacementMode="Inline"
                                                     Value="{Binding Percent, Mode=TwoWay}" />
                                                 <Button
-                                                    Grid.Column="3"
+                                                    Grid.Row="1"
+                                                    Grid.Column="2"
                                                     Click="OnSetSingleFanClick"
                                                     Tag="{Binding Index}">
                                                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -1528,32 +1859,6 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Grid.Row="3" Margin="0,18,0,0" Style="{StaticResource CardBorderStyle}">
-                            <Grid ColumnSpacing="18">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Spacing="6">
-                                    <TextBlock local:Localization.Key="Control.TargetTemp" Text="目标温度" />
-                                    <NumberBox x:Name="TargetTempBox" Maximum="95" Minimum="30" SpinButtonPlacementMode="Inline" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="6">
-                                    <TextBlock local:Localization.Key="Control.HighTemp" Text="高温" />
-                                    <NumberBox x:Name="HighTempBox" Maximum="100" Minimum="40" SpinButtonPlacementMode="Inline" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" Spacing="6">
-                                    <TextBlock local:Localization.Key="Control.EmergencyAuto" Text="紧急自动" />
-                                    <NumberBox x:Name="EmergencyTempBox" Maximum="105" Minimum="45" SpinButtonPlacementMode="Inline" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="3" Spacing="6">
-                                    <TextBlock local:Localization.Key="Control.PollSeconds" Text="轮询秒数" />
-                                    <NumberBox x:Name="SensorRefreshSecondsBox" Maximum="300" Minimum="1" SpinButtonPlacementMode="Inline" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
                     </Grid>
 
                     <Grid x:Name="SensorsView" Visibility="Collapsed">
@@ -1592,32 +1897,38 @@
                                             <TextBlock
                                                 local:Localization.Key="Sensors.Key"
                                                 FontWeight="SemiBold"
-                                                Text="传感器" />
+                                                Text="传感器"
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 Grid.Column="1"
                                                 local:Localization.Key="Sensors.Id"
                                                 FontWeight="SemiBold"
-                                                Text="ID" />
+                                                Text="编号"
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 Grid.Column="2"
                                                 local:Localization.Key="Sensors.Entity"
                                                 FontWeight="SemiBold"
-                                                Text="实体" />
+                                                Text="实体"
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 Grid.Column="3"
                                                 local:Localization.Key="Sensors.Value"
                                                 FontWeight="SemiBold"
-                                                Text="读数" />
+                                                Text="读数"
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 Grid.Column="4"
                                                 local:Localization.Key="Sensors.Unit"
                                                 FontWeight="SemiBold"
-                                                Text="单位" />
+                                                Text="单位"
+                                                TextWrapping="Wrap" />
                                             <TextBlock
                                                 Grid.Column="5"
                                                 local:Localization.Key="Sensors.Status"
                                                 FontWeight="SemiBold"
-                                                Text="状态" />
+                                                Text="状态"
+                                                TextWrapping="Wrap" />
                                         </Grid>
                                     </ListView.Header>
                                     <ListView.ItemTemplate>
@@ -1631,12 +1942,12 @@
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Key}" />
-                                                <TextBlock Grid.Column="1" Text="{Binding SensorId}" />
-                                                <TextBlock Grid.Column="2" Text="{Binding Entity}" />
-                                                <TextBlock Grid.Column="3" Text="{Binding Value}" />
-                                                <TextBlock Grid.Column="4" Text="{Binding Unit}" />
-                                                <TextBlock Grid.Column="5" Text="{Binding Status}" />
+                                                <TextBlock Text="{Binding Key}" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="1" Text="{Binding SensorId}" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="2" Text="{Binding Entity}" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="3" Text="{Binding Value}" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="4" Text="{Binding Unit}" TextWrapping="Wrap" />
+                                                <TextBlock Grid.Column="5" Text="{Binding Status}" TextWrapping="Wrap" />
                                             </Grid>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
@@ -1645,12 +1956,48 @@
                         </Border>
                     </Grid>
 
-                    <Grid x:Name="SettingsView" Visibility="Collapsed">
+                    <Grid
+                        x:Name="SettingsView"
+                        RowSpacing="12"
+                        Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Margin="0,0,9,0" Style="{StaticResource CardBorderStyle}">
+                        <CommandBar
+                            x:Name="SettingsCommandBar"
+                            Grid.ColumnSpan="2"
+                            DefaultLabelPosition="Right"
+                            IsDynamicOverflowEnabled="True"
+                            IsOpen="False">
+                            <CommandBar.PrimaryCommands>
+                                <AppBarButton
+                                    local:Localization.Key="Action.Save"
+                                    Click="OnSaveSettingsClick"
+                                    Label="保存设置">
+                                    <AppBarButton.Icon>
+                                        <FontIcon Glyph="&#xE74E;" />
+                                    </AppBarButton.Icon>
+                                </AppBarButton>
+                                <AppBarButton
+                                    x:Name="SettingsPollingButton"
+                                    Click="OnTestConnectionClick"
+                                    Label="">
+                                    <AppBarButton.Icon>
+                                        <FontIcon Glyph="&#xE8FB;" />
+                                    </AppBarButton.Icon>
+                                </AppBarButton>
+                            </CommandBar.PrimaryCommands>
+                        </CommandBar>
+                        <Border
+                            x:Name="ConnectionSettingsCard"
+                            Grid.Row="1"
+                            Margin="0,0,9,0"
+                            Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
                                 <TextBlock
                                     local:Localization.Key="Settings.Connection"
@@ -1659,7 +2006,7 @@
                                 <TextBox
                                     x:Name="HostBox"
                                     local:Localization.Key="Settings.Host"
-                                    Header="BMC/iDRAC IP" />
+                                    Header="管理控制器地址" />
                                 <TextBox
                                     x:Name="UserNameBox"
                                     local:Localization.Key="Settings.UserName"
@@ -1678,27 +2025,14 @@
                                     local:Localization.Key="Settings.BundledIpmiPath"
                                     Header="内置 ipmitool 路径"
                                     IsReadOnly="True" />
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button Click="OnSaveSettingsClick">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon FontSize="14" Glyph="&#xE74E;" />
-                                            <TextBlock local:Localization.Key="Action.Save" Text="保存设置" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Grid.Column="1" Click="OnTestConnectionClick">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon FontSize="14" Glyph="&#xE8FB;" />
-                                            <TextBlock local:Localization.Key="Action.Connect" Text="连接" />
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
                             </StackPanel>
                         </Border>
-                        <Border Grid.Column="1" Margin="9,0,0,0" Style="{StaticResource CardBorderStyle}">
+                        <Border
+                            x:Name="ApplicationSettingsCard"
+                            Grid.Row="1"
+                            Grid.Column="1"
+                            Margin="9,0,0,0"
+                            Style="{StaticResource CardBorderStyle}">
                             <StackPanel Spacing="12">
                                 <TextBlock
                                     local:Localization.Key="Settings.Application"
@@ -1726,6 +2060,13 @@
                                     Header="命令超时秒数"
                                     Maximum="180"
                                     Minimum="5"
+                                    SpinButtonPlacementMode="Inline" />
+                                <NumberBox
+                                    x:Name="SensorRefreshSecondsBox"
+                                    local:Localization.Key="Settings.SensorRefreshSeconds"
+                                    Header="轮询秒数"
+                                    Maximum="300"
+                                    Minimum="1"
                                     SpinButtonPlacementMode="Inline" />
                                 <NumberBox
                                     x:Name="AutoMinFanBox"
@@ -1762,10 +2103,7 @@
                                     x:Name="LanguageComboBox"
                                     local:Localization.Key="Settings.Language"
                                     Header="界面语言"
-                                    SelectionChanged="OnLanguageSelectionChanged">
-                                    <ComboBoxItem Content="简体中文" Tag="zh-CN" />
-                                    <ComboBoxItem Content="English" Tag="en-US" />
-                                </ComboBox>
+                                    SelectionChanged="OnLanguageSelectionChanged" />
                             </StackPanel>
                         </Border>
                     </Grid>

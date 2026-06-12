@@ -23,7 +23,7 @@ public sealed class SettingsStore
     {
         if (string.IsNullOrWhiteSpace(settingsDirectory))
         {
-            throw new ArgumentException("Settings directory cannot be empty.", nameof(settingsDirectory));
+            throw new ArgumentException("设置目录不能为空。", nameof(settingsDirectory));
         }
 
         SettingsDirectory = settingsDirectory;
@@ -44,7 +44,7 @@ public sealed class SettingsStore
 
         var json = File.ReadAllText(SettingsPath, Encoding.UTF8);
         var settings = JsonSerializer.Deserialize<AppSettings>(json, _jsonOptions)
-            ?? throw new InvalidOperationException($"Settings file is empty or invalid: {SettingsPath}");
+            ?? throw new InvalidOperationException($"设置文件为空或格式无效：{SettingsPath}");
         Normalize(settings);
         return settings;
     }
@@ -72,6 +72,11 @@ public sealed class SettingsStore
         }
 
         settings.Presets = NormalizePresets(settings.Presets);
+        settings.LastRunningPresetId = (settings.LastRunningPresetId ?? string.Empty).Trim();
+        if (!string.IsNullOrWhiteSpace(settings.LastRunningPresetId))
+        {
+            settings.LastSmartAutoPolicyRunning = false;
+        }
     }
 
     private static List<FanPreset> NormalizePresets(List<FanPreset>? presets)
@@ -127,7 +132,7 @@ public sealed class SettingsStore
     {
         if (string.IsNullOrWhiteSpace(preset.Kind))
         {
-            throw new InvalidOperationException("Fan preset kind is empty.");
+            throw new InvalidOperationException("风扇预设类型为空。");
         }
 
         if (preset.Kind.Equals(FanPreset.ManualKind, StringComparison.OrdinalIgnoreCase))
@@ -155,14 +160,21 @@ public sealed class SettingsStore
             preset.ApplyCurvePointsText();
             preset.ValidateCurvePoints();
         }
+        else if (preset.Kind.Equals(FanPreset.PowerCurveKind, StringComparison.OrdinalIgnoreCase))
+        {
+            preset.Kind = FanPreset.PowerCurveKind;
+            preset.Percent = 0;
+            preset.ApplyCurvePointsText();
+            preset.ValidateCurvePoints();
+        }
         else
         {
-            throw new InvalidOperationException($"Unsupported fan preset kind: {preset.Kind}");
+            throw new InvalidOperationException($"不支持的风扇预设类型：{preset.Kind}");
         }
 
         if (string.IsNullOrWhiteSpace(preset.NameKey) && string.IsNullOrWhiteSpace(preset.Name))
         {
-            throw new InvalidOperationException("Fan preset name is required.");
+            throw new InvalidOperationException("风扇预设名称不能为空。");
         }
 
         preset.Name = (preset.Name ?? string.Empty).Trim();

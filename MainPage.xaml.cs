@@ -1,15 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -23,12 +26,33 @@ namespace DellR730xdFanControlCenter;
 
 public sealed partial class MainPage : Page
 {
-    private const int SensorHistoryLimit = 120;
+    private const int VisualizationHistoryRetentionDays = 7;
     private const string DefaultCurvePointsText = "45 = 18%" + "\r\n" + "68 = 28%" + "\r\n" + "78 = 42%";
+    private const string DefaultPowerCurvePointsText = "280W = 18%" + "\r\n" + "500W = 28%" + "\r\n" + "750W = 42%";
+    private const double TemperatureCurveCanvasMinCelsius = 30;
+    private const double TemperatureCurveCanvasMaxCelsius = 95;
+    private const double PowerCurveCanvasMinWatts = 0;
+    private const double PowerCurveCanvasMaxWatts = 1200;
+    private const double CurveCanvasPadding = 8;
+    private const double CurvePointHitRadius = 18;
+    private const string HeroThermalTemperatureCurveAutoChinese = "温度曲线自动";
+    private const string HeroThermalPowerCurveAutoChinese = "功耗曲线自动";
+    private const string HeroThermalSmartPolicyChinese = "软件恒温策略";
+    private const string HeroThermalDellAutoChinese = "Dell 自动温控";
+    private const string CurveHoverFanSpeedChineseLabel = "风扇速度";
     private static readonly JsonSerializerOptions VisualizationJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
+    private static readonly string[] PollingSkipStatusKeys =
+    [
+        "Status.PollingSkippedPreviousRunning",
+        "Status.PollingSkippedPreviousRunningNoSample",
+        "Status.PollingSkippedIpmiBusy",
+        "Status.PollingSkippedIpmiBusyNoSample",
+        "Status.AutoTickSkipped",
+        "Status.AutoTickSkippedIpmiBusy",
+    ];
 
     private readonly SettingsStore _settingsStore = new();
     private readonly AppLogService _appLog = new();
@@ -38,6 +62,7 @@ public sealed partial class MainPage : Page
     private readonly SemaphoreSlim _ipmiOperationLock = new(1, 1);
     private readonly PollingSkipLogGate _pollingSkipLogGate = new();
     private readonly List<SensorDashboardHistoryPoint> _sensorHistory = [];
+    private long _sensorHistorySequence;
     private AppSettings _settings = new();
     private bool _syncingAllFanControls;
     private bool _autoPolicyTickRunning;
@@ -48,10 +73,16 @@ public sealed partial class MainPage : Page
     private bool _hasDisconnected;
     private DateTime? _lastPollTime;
     private TimeSpan? _lastPollDuration;
+    private bool _localizedSensorsDirty = true;
     private DateTimeOffset _lastPollingWarningAt = DateTimeOffset.MinValue;
     private bool _pollingWasDegraded;
     private bool _visualizationInitialized;
     private bool _visualizationReady;
+    private bool _visualizationSnapshotUpdateScheduled;
+    private double _pendingVisualizationWheelDeltaY;
+    private bool _visualizationWheelScrollScheduled;
+    private VisualizationSnapshot? _latestVisualizationSnapshot;
+    private DateTime? _latestVisualizationSnapshotTime;
     private string? _activePresetId;
     private FanPreset? _activeCurvePreset;
     private string _heroRequestMessage = string.Empty;
@@ -60,6 +91,30 @@ public sealed partial class MainPage : Page
     private string _modeSummaryKey = "Mode.Idle";
     private object[] _modeSummaryArgs = Array.Empty<object>();
     private string? _editingCurvePresetId;
+    private string? _editingPowerCurvePresetId;
+    private FanCurvePoint? _draggingTemperatureCurvePoint;
+    private FanCurvePoint? _draggingPowerCurvePoint;
+    private bool _syncingTemperatureCurveInputsFromCanvas;
+    private bool _syncingPowerCurveInputsFromCanvas;
+    private Point? _temperatureCurveHoverPosition;
+    private Point? _powerCurveHoverPosition;
+    private ResponsiveLayoutSize? _activeResponsiveLayoutSize;
+
+    private enum ResponsiveLayoutSize
+    {
+        Small,
+        Medium,
+        Large,
+    }
+
+    private sealed class DashboardTileFanAnimationState
+    {
+        public Storyboard? Storyboard { get; set; }
+
+        public DashboardTileViewModel? Tile { get; set; }
+
+        public PropertyChangedEventHandler? TilePropertyChangedHandler { get; set; }
+    }
 
     public MainPage()
     {
@@ -75,6 +130,10 @@ public sealed partial class MainPage : Page
         StatusTiles = [];
         LocalizedSensors = [];
         NewCurvePoints = [];
+        NewPowerCurvePoints = [];
+
+        LanguageComboBox.ItemsSource = LocalizationService.SupportedLanguages;
+        LanguageComboBox.DisplayMemberPath = nameof(LanguageOption.DisplayName);
 
         _ipmi.CommandCompleted += OnCommandCompleted;
         _autoPolicyTimer.Tick += OnAutoPolicyTimerTick;
@@ -101,19 +160,24 @@ public sealed partial class MainPage : Page
 
     public ObservableCollection<FanCurvePoint> NewCurvePoints { get; }
 
+    public ObservableCollection<FanCurvePoint> NewPowerCurvePoints { get; }
+
     public bool MinimizeToTrayOnClose => MinimizeToTraySwitch?.IsOn ?? true;
 
     private void OnPageLoaded(object sender, RoutedEventArgs e)
     {
+        ApplyResponsiveLayout(ActualWidth);
         var shouldShowSettingsOnStart = !_settingsStore.SettingsFileExists;
         _settings = _settingsStore.Load();
         LocalizationService.SetLanguage(_settings.Language);
+        TryLoadVisualizationHistory();
         LoadSettingsToControls(_settings);
         ApplyTheme(_settings.Theme);
         RebuildFanChannels();
         RebuildPresets(_settings.Presets);
         ApplyLocalization();
         ResetNewCurveEditor();
+        ResetNewPowerCurveEditor();
         AddLog(T("Log.Info"), T("Status.Loaded"));
         AddLog(T("Log.Info"), F("Status.LogFileReady", _appLog.CurrentLogPath), "Application", "LogFileReady");
         shouldShowSettingsOnStart = shouldShowSettingsOnStart || string.IsNullOrWhiteSpace(PasswordBox.Password);
@@ -128,9 +192,198 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void OnPageSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ApplyResponsiveLayout(e.NewSize.Width);
+    }
+
     public void ShowSettingsView()
     {
         SelectView("Settings");
+    }
+
+    public void ShowOverviewView()
+    {
+        SelectView("Overview");
+    }
+
+    public void ShowControlView()
+    {
+        SelectView("Control");
+    }
+
+    public void ShowSensorsView()
+    {
+        SelectView("Sensors");
+    }
+
+    private void ApplyResponsiveLayout(double pageWidth)
+    {
+        if (!double.IsFinite(pageWidth) || pageWidth <= 0)
+        {
+            return;
+        }
+
+        var layoutSize = pageWidth < 641
+            ? ResponsiveLayoutSize.Small
+            : pageWidth < 1008
+                ? ResponsiveLayoutSize.Medium
+                : ResponsiveLayoutSize.Large;
+
+        if (_activeResponsiveLayoutSize == layoutSize)
+        {
+            ApplyResponsiveVisualizationHeight(layoutSize);
+            return;
+        }
+
+        _activeResponsiveLayoutSize = layoutSize;
+        var isSmall = layoutSize == ResponsiveLayoutSize.Small;
+        var isLarge = layoutSize == ResponsiveLayoutSize.Large;
+        var pagePadding = isSmall ? 12 : layoutSize == ResponsiveLayoutSize.Medium ? 18 : 24;
+
+        ShellNavigation.PaneDisplayMode = isSmall
+            ? NavigationViewPaneDisplayMode.Top
+            : NavigationViewPaneDisplayMode.LeftCompact;
+        ContentPanel.Padding = new Thickness(pagePadding);
+        StatusInfoBar.Margin = new Thickness(pagePadding, 12, pagePadding, 0);
+        HeroBannerCard.Padding = new Thickness(isSmall ? 16 : 24);
+        HeroBannerGlow.Visibility = isSmall ? Visibility.Collapsed : Visibility.Visible;
+
+        ApplyResponsiveHeroLayout(layoutSize);
+        ApplyResponsiveOverviewLayout(layoutSize);
+        ApplyResponsiveControlLayout(layoutSize);
+        ApplyResponsiveSettingsLayout(layoutSize);
+        ApplyResponsiveVisualizationHeight(layoutSize);
+    }
+
+    private void ApplyResponsiveHeroLayout(ResponsiveLayoutSize layoutSize)
+    {
+        var isLarge = layoutSize == ResponsiveLayoutSize.Large;
+        ReflowGridChildren(HeroBannerContent, isLarge ? 2 : 1, isLarge ? [new GridLength(1, GridUnitType.Star), GridLength.Auto] : [new GridLength(1, GridUnitType.Star)]);
+        HeroStatusCard.Width = isLarge ? 340 : double.NaN;
+        HeroStatusCard.MinWidth = isLarge ? 320 : 0;
+        HeroStatusCard.HorizontalAlignment = isLarge ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+        HeroStatusCard.Margin = isLarge ? new Thickness(18, 0, 0, 0) : new Thickness(0, 12, 0, 0);
+        HeroRealtimeMetricsPanel.MaxWidth = isLarge ? 900 : double.PositiveInfinity;
+        ReflowGridChildren(
+            HeroRealtimeMetricsPanel,
+            layoutSize == ResponsiveLayoutSize.Small ? 1 : layoutSize == ResponsiveLayoutSize.Medium ? 2 : 5);
+    }
+
+    private void ApplyResponsiveOverviewLayout(ResponsiveLayoutSize layoutSize)
+    {
+        ReflowGridChildren(
+            OverviewSummaryGrid,
+            layoutSize == ResponsiveLayoutSize.Small ? 1 : layoutSize == ResponsiveLayoutSize.Medium ? 3 : 6);
+        ReflowGridChildren(OverviewQuickActionsGrid, layoutSize == ResponsiveLayoutSize.Large ? 2 : 1);
+        QuickActionsCommandBar.DefaultLabelPosition = layoutSize == ResponsiveLayoutSize.Small
+            ? CommandBarDefaultLabelPosition.Collapsed
+            : CommandBarDefaultLabelPosition.Right;
+
+        if (layoutSize == ResponsiveLayoutSize.Large)
+        {
+            ConfigureGridColumns(AllFanPercentGrid, new GridLength(1, GridUnitType.Star), new GridLength(120), GridLength.Auto);
+            EnsureGridRows(AllFanPercentGrid, 1);
+            Grid.SetColumn(AllFanPercentBox, 1);
+            Grid.SetRow(AllFanPercentBox, 0);
+            Grid.SetColumn(SetAllFansButton, 2);
+            Grid.SetRow(SetAllFansButton, 0);
+        }
+        else
+        {
+            ConfigureGridColumns(AllFanPercentGrid, new GridLength(1, GridUnitType.Star), GridLength.Auto);
+            EnsureGridRows(AllFanPercentGrid, 1);
+            Grid.SetColumn(AllFanPercentBox, 0);
+            Grid.SetRow(AllFanPercentBox, 0);
+            Grid.SetColumn(SetAllFansButton, 1);
+            Grid.SetRow(SetAllFansButton, 0);
+        }
+
+        TemperatureGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 300 : double.PositiveInfinity;
+        FanGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 260 : double.PositiveInfinity;
+        PowerHealthGridView.MaxHeight = double.PositiveInfinity;
+    }
+
+    private void ApplyResponsiveControlLayout(ResponsiveLayoutSize layoutSize)
+    {
+        ReflowGridChildren(NewPresetGrid, layoutSize == ResponsiveLayoutSize.Large ? 3 : 1);
+        ReflowGridChildren(CurveEditorGrid, layoutSize == ResponsiveLayoutSize.Large ? 3 : 1);
+        ReflowGridChildren(PowerCurveEditorGrid, layoutSize == ResponsiveLayoutSize.Large ? 3 : 1);
+        ReflowGridChildren(SmartAutoGrid, layoutSize == ResponsiveLayoutSize.Large ? 2 : 1);
+        ReflowGridChildren(SmartAutoButtonsGrid, layoutSize == ResponsiveLayoutSize.Small ? 1 : 2);
+    }
+
+    private void ApplyResponsiveSettingsLayout(ResponsiveLayoutSize layoutSize)
+    {
+        var isLarge = layoutSize == ResponsiveLayoutSize.Large;
+        ConfigureGridColumns(SettingsView, isLarge ? [new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star)] : [new GridLength(1, GridUnitType.Star)]);
+        EnsureGridRows(SettingsView, isLarge ? 2 : 3);
+
+        Grid.SetRow(SettingsCommandBar, 0);
+        Grid.SetColumn(SettingsCommandBar, 0);
+        Grid.SetColumnSpan(SettingsCommandBar, isLarge ? 2 : 1);
+        SettingsCommandBar.DefaultLabelPosition = layoutSize == ResponsiveLayoutSize.Small
+            ? CommandBarDefaultLabelPosition.Collapsed
+            : CommandBarDefaultLabelPosition.Right;
+
+        Grid.SetRow(ConnectionSettingsCard, 1);
+        Grid.SetColumn(ConnectionSettingsCard, 0);
+        Grid.SetColumnSpan(ConnectionSettingsCard, 1);
+        ConnectionSettingsCard.Margin = isLarge ? new Thickness(0, 0, 9, 0) : new Thickness(0);
+
+        Grid.SetRow(ApplicationSettingsCard, isLarge ? 1 : 2);
+        Grid.SetColumn(ApplicationSettingsCard, isLarge ? 1 : 0);
+        Grid.SetColumnSpan(ApplicationSettingsCard, 1);
+        ApplicationSettingsCard.Margin = isLarge ? new Thickness(9, 0, 0, 0) : new Thickness(0, 12, 0, 0);
+    }
+
+    private void ApplyResponsiveVisualizationHeight(ResponsiveLayoutSize layoutSize)
+    {
+        VisualizationWebView.MinHeight = layoutSize == ResponsiveLayoutSize.Large ? 1520 : 3200;
+    }
+
+    private static void ReflowGridChildren(Grid grid, int columns, params GridLength[] columnWidths)
+    {
+        var safeColumns = Math.Max(1, columns);
+        if (columnWidths.Length == 0)
+        {
+            columnWidths = Enumerable.Repeat(new GridLength(1, GridUnitType.Star), safeColumns).ToArray();
+        }
+
+        ConfigureGridColumns(grid, columnWidths);
+        EnsureGridRows(grid, (int)Math.Ceiling(grid.Children.Count / (double)safeColumns));
+
+        for (var index = 0; index < grid.Children.Count; index++)
+        {
+            if (grid.Children[index] is not FrameworkElement child)
+            {
+                continue;
+            }
+
+            Grid.SetColumn(child, index % safeColumns);
+            Grid.SetRow(child, index / safeColumns);
+            Grid.SetColumnSpan(child, 1);
+            Grid.SetRowSpan(child, 1);
+        }
+    }
+
+    private static void ConfigureGridColumns(Grid grid, params GridLength[] columnWidths)
+    {
+        grid.ColumnDefinitions.Clear();
+        foreach (var width in columnWidths)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width });
+        }
+    }
+
+    private static void EnsureGridRows(Grid grid, int rowCount)
+    {
+        var safeRows = Math.Max(1, rowCount);
+        grid.RowDefinitions.Clear();
+        for (var i = 0; i < safeRows; i++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
     }
 
     private async void OnVisualizationWebViewLoaded(object sender, RoutedEventArgs e)
@@ -155,7 +408,7 @@ public sealed partial class MainPage : Page
         var dashboardPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Charts", "dashboard.html");
         if (!File.Exists(dashboardPath))
         {
-            throw new FileNotFoundException("Visualization dashboard asset was not found.", dashboardPath);
+            throw new FileNotFoundException(T("Dashboard.VisualizationAssetMissing"), dashboardPath);
         }
 
         await VisualizationWebView.EnsureCoreWebView2Async();
@@ -178,7 +431,7 @@ public sealed partial class MainPage : Page
 
         _visualizationReady = true;
         VisualizationStateText.Text = T("Dashboard.VisualizationReady");
-        SendVisualizationSnapshot();
+        ScheduleVisualizationSnapshot();
     }
 
     private void OnVisualizationWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
@@ -200,11 +453,40 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        ScheduleVisualizationWheelScroll(deltaY);
+    }
+
+    private void ScheduleVisualizationWheelScroll(double deltaY)
+    {
+        _pendingVisualizationWheelDeltaY += deltaY;
+        if (_visualizationWheelScrollScheduled)
+        {
+            return;
+        }
+
+        _visualizationWheelScrollScheduled = true;
+        if (!DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Normal, ApplyPendingVisualizationWheelScroll))
+        {
+            _visualizationWheelScrollScheduled = false;
+            ShowFailure(new InvalidOperationException("Unable to schedule forwarded chart scrolling on the UI dispatcher."));
+        }
+    }
+
+    private void ApplyPendingVisualizationWheelScroll()
+    {
+        _visualizationWheelScrollScheduled = false;
+        var deltaY = _pendingVisualizationWheelDeltaY;
+        _pendingVisualizationWheelDeltaY = 0;
+        if (Math.Abs(deltaY) < 0.01)
+        {
+            return;
+        }
+
         var nextOffset = Math.Clamp(
             ContentScrollViewer.VerticalOffset + deltaY,
             0,
             ContentScrollViewer.ScrollableHeight);
-        ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: false);
+        ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: true);
     }
 
     public Task ApplyQuickFanSpeedAsync(int percent)
@@ -212,6 +494,11 @@ public sealed partial class MainPage : Page
         AllFanSlider.Value = percent;
         AllFanPercentBox.Value = percent;
         return ApplyAllFansAsync(percent);
+    }
+
+    public Task RefreshSensorsFromTrayAsync()
+    {
+        return RefreshSensorsAsync();
     }
 
     public Task RestoreDellFactoryFanSpeedFromTrayAsync()
@@ -222,6 +509,29 @@ public sealed partial class MainPage : Page
     public Task ApplyPresetFromTrayAsync(FanPreset preset)
     {
         return ApplyPresetAsync(preset);
+    }
+
+    public void StopAutoPolicyFromTray()
+    {
+        try
+        {
+            StopAutoPolicy();
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
+    public Task OpenIdracFromTrayAsync()
+    {
+        OpenIdrac();
+        return Task.CompletedTask;
+    }
+
+    public void OpenLogFolderFromTray()
+    {
+        OpenLogFolder();
     }
 
     private void LoadSettingsToControls(AppSettings settings)
@@ -239,9 +549,6 @@ public sealed partial class MainPage : Page
             SensorRefreshSecondsBox.Value = settings.SensorRefreshSeconds;
             MinimizeToTraySwitch.IsOn = settings.MinimizeToTrayOnClose;
             IndividualFanSwitch.IsOn = settings.EnableIndividualFanTargets;
-            TargetTempBox.Value = settings.TargetCpuTemperatureCelsius;
-            HighTempBox.Value = settings.HighCpuTemperatureCelsius;
-            EmergencyTempBox.Value = settings.EmergencyCpuTemperatureCelsius;
             AutoMinFanBox.Value = settings.AutoMinimumFanPercent;
             AutoMaxFanBox.Value = settings.AutoMaximumFanPercent;
             AllFanSlider.Value = settings.DefaultAllFanPercent;
@@ -256,7 +563,7 @@ public sealed partial class MainPage : Page
                 _ => 0,
             };
 
-            LanguageComboBox.SelectedIndex = settings.Language.Equals("en-US", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+            SelectLanguage(settings.Language);
         }
         finally
         {
@@ -280,9 +587,6 @@ public sealed partial class MainPage : Page
         _settings.SensorRefreshSeconds = Math.Max(1, ReadInt(SensorRefreshSecondsBox, T("Field.SensorRefreshSeconds")));
         _settings.MinimizeToTrayOnClose = MinimizeToTraySwitch.IsOn;
         _settings.EnableIndividualFanTargets = IndividualFanSwitch.IsOn;
-        _settings.TargetCpuTemperatureCelsius = ReadDouble(TargetTempBox, T("Field.TargetTemperature"));
-        _settings.HighCpuTemperatureCelsius = ReadDouble(HighTempBox, T("Field.HighTemperature"));
-        _settings.EmergencyCpuTemperatureCelsius = ReadDouble(EmergencyTempBox, T("Field.EmergencyTemperature"));
         _settings.AutoMinimumFanPercent = ReadInt(AutoMinFanBox, T("Field.AutoMinimumFanPercent"));
         _settings.AutoMaximumFanPercent = ReadInt(AutoMaxFanBox, T("Field.AutoMaximumFanPercent"));
         _settings.Theme = GetSelectedTheme();
@@ -339,7 +643,20 @@ public sealed partial class MainPage : Page
 
     private async void OnTestConnectionClick(object sender, RoutedEventArgs e)
     {
+        if (_sensorPollingTimer.IsEnabled)
+        {
+            CancelSensorPollingFromUser();
+            return;
+        }
+
         await ConnectAndStartPollingAsync();
+    }
+
+    private void CancelSensorPollingFromUser()
+    {
+        var reason = T("Action.CancelPolling");
+        StopSensorPolling(reason);
+        ShowStatus(F("Status.PollingStopped", reason), InfoBarSeverity.Informational);
     }
 
     private async void OnRefreshSensorsClick(object sender, RoutedEventArgs e)
@@ -356,10 +673,34 @@ public sealed partial class MainPage : Page
         });
     }
 
+    private async Task RefreshSensorsAfterFanCommandAsync()
+    {
+        await RunUiCommandAsync(T("Status.RefreshingSensorsAfterFanCommand"), async token =>
+        {
+            var elapsed = await RefreshSensorsCoreAsync(ReadProfile(), token);
+            CheckSensorPollingLatency(elapsed);
+            RestartSensorPollingAfterImmediateRefresh();
+            ShowStatus(F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds), InfoBarSeverity.Success);
+        });
+    }
+
+    private void RestartSensorPollingAfterImmediateRefresh()
+    {
+        if (!_sensorPollingTimer.IsEnabled)
+        {
+            return;
+        }
+
+        _sensorPollingTimer.Stop();
+        _sensorPollingTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
+        _sensorPollingTimer.Start();
+        UpdatePollingStatusTexts();
+    }
+
     private async Task ConnectAndStartPollingAsync()
     {
         SetConnectingState();
-        await RunUiCommandAsync(T("Status.Connecting"), async token =>
+        var connected = await RunUiCommandAsync(T("Status.Connecting"), async token =>
         {
             var profile = ReadProfile();
             await _ipmi.TestConnectionAsync(profile, token);
@@ -368,6 +709,18 @@ public sealed partial class MainPage : Page
             ShowStatus(T("Status.ConnectedPolling"), InfoBarSeverity.Success);
             CheckSensorPollingLatency(elapsed);
         });
+        if (connected)
+        {
+            try
+            {
+                await RestoreLastRunningStateAsync();
+            }
+            catch (Exception ex)
+            {
+                StopSensorPolling(ex.Message);
+                ShowFailure(ex);
+            }
+        }
     }
 
     private void StartSensorPolling()
@@ -393,9 +746,33 @@ public sealed partial class MainPage : Page
         AddLog(T("Log.Warn"), F("Status.PollingStopped", reason));
     }
 
+    private async Task RestoreLastRunningStateAsync()
+    {
+        if (_settings.LastSmartAutoPolicyRunning)
+        {
+            await StartSmartAutoPolicyAsync(persistControls: false);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.LastRunningPresetId))
+        {
+            return;
+        }
+
+        var presetId = _settings.LastRunningPresetId.Trim();
+        var preset = Presets.FirstOrDefault(item => item.Id.Equals(presetId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException(F("Validation.PresetNotFound", presetId));
+        await ApplyPresetAsync(preset);
+    }
+
     private async void OnSensorPollingTimerTick(object? sender, object e)
     {
         var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
+        if (_autoPolicyRunning)
+        {
+            return;
+        }
+
         if (_sensorPollingTickRunning)
         {
             LogPollingSkip(
@@ -452,9 +829,10 @@ public sealed partial class MainPage : Page
             stopwatch.Stop();
             ReplaceSensors(readings);
             UpdateMetricSummaries();
-            RecordVisualizationHistoryPoint();
-            SendVisualizationSnapshot();
-            _lastPollTime = DateTime.Now;
+            var snapshotTime = DateTime.Now;
+            _lastPollTime = snapshotTime;
+            RecordVisualizationHistoryPoint(snapshotTime);
+            ScheduleVisualizationSnapshot();
             _lastPollDuration = stopwatch.Elapsed;
             UpdatePollingStatusTexts();
             SetHeroRequestStatus(F("Hero.SensorRefreshSucceeded", Sensors.Count, stopwatch.Elapsed.TotalSeconds));
@@ -491,14 +869,19 @@ public sealed partial class MainPage : Page
 
     private async Task ApplyAllFansAsync(int percent)
     {
-        await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
+        var succeeded = await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
         {
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
             _activeCurvePreset = null;
             SetModeSummary("Mode.Manual");
-            MarkActivePreset(null);
+            MarkActivePreset(null, persistRunningState: true);
             ShowStatus(F("Status.AllFansSet", percent), InfoBarSeverity.Success);
         });
+
+        if (succeeded)
+        {
+            await RefreshSensorsAfterFanCommandAsync();
+        }
     }
 
     private async void OnSetSingleFanClick(object sender, RoutedEventArgs e)
@@ -518,14 +901,19 @@ public sealed partial class MainPage : Page
         var channel = FanChannels.First(fan => fan.Index == fanIndex);
         var percent = CheckedPercent(channel.Percent, F("Field.SingleFanPercent", fanIndex));
 
-        await RunUiCommandAsync(F("Status.FanSet", fanIndex, percent), async token =>
+        var succeeded = await RunUiCommandAsync(F("Status.FanSet", fanIndex, percent), async token =>
         {
             await _ipmi.SetSingleFanManualSpeedAsync(ReadProfile(), fanIndex, percent, token);
             _activeCurvePreset = null;
             SetModeSummary("Mode.Manual");
-            MarkActivePreset(null);
+            MarkActivePreset(null, persistRunningState: true);
             ShowStatus(F("Status.FanSet", fanIndex, percent), InfoBarSeverity.Success);
         });
+
+        if (succeeded)
+        {
+            await RefreshSensorsAfterFanCommandAsync();
+        }
     }
 
     private async void OnApplyPresetClick(object sender, RoutedEventArgs e)
@@ -540,11 +928,12 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnSavePresetClick(object sender, RoutedEventArgs e)
+    private async void OnSavePresetClick(object sender, RoutedEventArgs e)
     {
         try
         {
             var preset = ReadPresetFromSender(sender);
+            var shouldReapply = _activePresetId?.Equals(preset.Id, StringComparison.OrdinalIgnoreCase) == true;
             _settings.Presets = Presets.Select(ValidateAndClonePreset).ToList();
             if (_activeCurvePreset?.Id.Equals(preset.Id, StringComparison.OrdinalIgnoreCase) == true)
             {
@@ -555,6 +944,12 @@ public sealed partial class MainPage : Page
             RefreshPresetRows();
             ShowStatus(F("Status.PresetSaved", preset.DisplayName), InfoBarSeverity.Success);
             AddLog(T("Log.Info"), F("Status.PresetSaved", preset.DisplayName));
+            if (shouldReapply)
+            {
+                var savedPreset = Presets.FirstOrDefault(item => item.Id.Equals(preset.Id, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException(F("Validation.PresetNotFound", preset.Id));
+                await ApplyPresetAsync(savedPreset);
+            }
         }
         catch (Exception ex)
         {
@@ -576,6 +971,7 @@ public sealed partial class MainPage : Page
             if (_activePresetId?.Equals(preset.Id, StringComparison.OrdinalIgnoreCase) == true)
             {
                 _activePresetId = null;
+                ClearPersistedRunningState();
             }
 
             if (_activeCurvePreset?.Id.Equals(preset.Id, StringComparison.OrdinalIgnoreCase) == true)
@@ -632,7 +1028,7 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnAddCurvePresetClick(object sender, RoutedEventArgs e)
+    private async void OnAddCurvePresetClick(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -656,7 +1052,10 @@ public sealed partial class MainPage : Page
             var existing = string.IsNullOrWhiteSpace(_editingCurvePresetId)
                 ? null
                 : Presets.FirstOrDefault(item => item.Id.Equals(_editingCurvePresetId, StringComparison.OrdinalIgnoreCase));
+            var savedPresetId = existing?.Id ?? preset.Id;
             var statusKey = "Status.CurvePresetAdded";
+            var shouldReapply = existing is not null &&
+                _activePresetId?.Equals(existing.Id, StringComparison.OrdinalIgnoreCase) == true;
             if (existing is null)
             {
                 Presets.Add(preset);
@@ -679,8 +1078,80 @@ public sealed partial class MainPage : Page
             _settingsStore.Save(_settings);
             ResetNewCurveEditor();
             RefreshPresetRows();
+            ScrollPresetIntoView(savedPresetId);
             ShowStatus(F(statusKey, name), InfoBarSeverity.Success);
             AddLog(T("Log.Info"), F(statusKey, name));
+            if (shouldReapply)
+            {
+                var savedPreset = Presets.FirstOrDefault(item => item.Id.Equals(savedPresetId, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException(F("Validation.PresetNotFound", savedPresetId));
+                await ApplyPresetAsync(savedPreset);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
+    private async void OnAddPowerCurvePresetClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var name = NewPowerCurvePresetNameBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidOperationException(T("Validation.PresetNameRequired"));
+            }
+
+            var preset = new FanPreset
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Kind = FanPreset.PowerCurveKind,
+                Name = name,
+                CurvePoints = ReadNewPowerCurvePoints(),
+                SmoothCurve = NewPowerCurveSmoothSwitch.IsOn,
+            };
+            preset.ValidateCurvePoints();
+
+            var existing = string.IsNullOrWhiteSpace(_editingPowerCurvePresetId)
+                ? null
+                : Presets.FirstOrDefault(item => item.Id.Equals(_editingPowerCurvePresetId, StringComparison.OrdinalIgnoreCase));
+            var savedPresetId = existing?.Id ?? preset.Id;
+            var statusKey = "Status.CurvePresetAdded";
+            var shouldReapply = existing is not null &&
+                _activePresetId?.Equals(existing.Id, StringComparison.OrdinalIgnoreCase) == true;
+            if (existing is null)
+            {
+                Presets.Add(preset);
+            }
+            else
+            {
+                existing.EditableName = name;
+                existing.CurvePoints = preset.CurvePoints.Select(point => point.Clone()).ToList();
+                existing.SmoothCurve = preset.SmoothCurve;
+                statusKey = "Status.CurvePresetSaved";
+            }
+
+            _settings.Presets = Presets.Select(ValidateAndClonePreset).ToList();
+            if (existing is not null &&
+                _activeCurvePreset?.Id.Equals(existing.Id, StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _activeCurvePreset = ValidateAndClonePreset(existing);
+            }
+
+            _settingsStore.Save(_settings);
+            ResetNewPowerCurveEditor();
+            RefreshPresetRows();
+            ScrollPresetIntoView(savedPresetId);
+            ShowStatus(F(statusKey, name), InfoBarSeverity.Success);
+            AddLog(T("Log.Info"), F(statusKey, name));
+            if (shouldReapply)
+            {
+                var savedPreset = Presets.FirstOrDefault(item => item.Id.Equals(savedPresetId, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException(F("Validation.PresetNotFound", savedPresetId));
+                await ApplyPresetAsync(savedPreset);
+            }
         }
         catch (Exception ex)
         {
@@ -705,6 +1176,23 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void OnAddNewPowerCurvePointClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            NewPowerCurvePoints.Add(new FanCurvePoint
+            {
+                PowerWatts = ReadDouble(NewPowerCurveWattsBox, T("SensorDisplay.PowerConsumption")),
+                FanPercent = CheckedPercent(NewPowerCurvePercentBox.Value, T("Field.CurveFanPercent")),
+            });
+            NormalizeNewPowerCurveEditorPoints();
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
+    }
+
     private void OnDeleteNewCurvePointClick(object sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: FanCurvePoint point })
@@ -714,8 +1202,22 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void OnDeleteNewPowerCurvePointClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: FanCurvePoint point })
+        {
+            NewPowerCurvePoints.Remove(point);
+            UpdateNewPowerCurvePreview();
+        }
+    }
+
     private void OnNewCurvePointValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
+        if (_syncingTemperatureCurveInputsFromCanvas || _draggingTemperatureCurvePoint is not null)
+        {
+            return;
+        }
+
         if (sender.DataContext is FanCurvePoint point && !double.IsNaN(sender.Value))
         {
             if (string.Equals(sender.Tag as string, "Temperature", StringComparison.OrdinalIgnoreCase))
@@ -731,6 +1233,28 @@ public sealed partial class MainPage : Page
         UpdateNewCurvePreview();
     }
 
+    private void OnNewPowerCurvePointValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_syncingPowerCurveInputsFromCanvas || _draggingPowerCurvePoint is not null)
+        {
+            return;
+        }
+
+        if (sender.DataContext is FanCurvePoint point && !double.IsNaN(sender.Value))
+        {
+            if (string.Equals(sender.Tag as string, "Power", StringComparison.OrdinalIgnoreCase))
+            {
+                point.PowerWatts = sender.Value;
+            }
+            else
+            {
+                point.FanPercent = sender.Value;
+            }
+        }
+
+        UpdateNewPowerCurvePreview();
+    }
+
     private void OnNewCurveCanvasPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (NewCurveCanvas.ActualWidth <= 0 || NewCurveCanvas.ActualHeight <= 0)
@@ -739,14 +1263,68 @@ public sealed partial class MainPage : Page
         }
 
         var position = e.GetCurrentPoint(NewCurveCanvas).Position;
-        var temperature = 30 + (Math.Clamp(position.X / NewCurveCanvas.ActualWidth, 0, 1) * 65);
-        var percent = 100 - (Math.Clamp(position.Y / NewCurveCanvas.ActualHeight, 0, 1) * 100);
-        NewCurvePoints.Add(new FanCurvePoint
+        _temperatureCurveHoverPosition = position;
+        var point = FindNearestTemperatureCurvePoint(position);
+        if (point is null)
         {
-            TemperatureCelsius = Math.Round(temperature, 1),
-            FanPercent = Math.Round(percent, 0),
-        });
-        NormalizeNewCurveEditorPoints();
+            point = new FanCurvePoint();
+            NewCurvePoints.Add(point);
+        }
+
+        _draggingTemperatureCurvePoint = point;
+        NewCurveCanvas.CapturePointer(e.Pointer);
+        UpdateTemperatureCurvePointFromCanvasInput(point, position);
+        DrawNewCurveCanvas(BuildTemperatureCurveCanvasPreviewPoints(), useSmoothPreview: false);
+        e.Handled = true;
+    }
+
+    private void OnNewCurveCanvasPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        var currentPoint = e.GetCurrentPoint(NewCurveCanvas);
+        _temperatureCurveHoverPosition = currentPoint.Position;
+        if (_draggingTemperatureCurvePoint is null)
+        {
+            DrawNewCurveCanvas(BuildTemperatureCurveCanvasPreviewPoints(), useSmoothPreview: false);
+            e.Handled = true;
+            return;
+        }
+
+        if (!currentPoint.Properties.IsLeftButtonPressed)
+        {
+            FinishTemperatureCurveDrag();
+            return;
+        }
+
+        UpdateTemperatureCurvePointFromCanvasInput(_draggingTemperatureCurvePoint, currentPoint.Position);
+        DrawNewCurveCanvas(BuildTemperatureCurveCanvasPreviewPoints(), useSmoothPreview: false);
+        e.Handled = true;
+    }
+
+    private void OnNewCurveCanvasPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _temperatureCurveHoverPosition = e.GetCurrentPoint(NewCurveCanvas).Position;
+        FinishTemperatureCurveDrag();
+        e.Handled = true;
+    }
+
+    private void OnNewCurveCanvasPointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        FinishTemperatureCurveDrag();
+        e.Handled = true;
+    }
+
+    private void OnNewCurveCanvasPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        _temperatureCurveHoverPosition = e.GetCurrentPoint(NewCurveCanvas).Position;
+        DrawNewCurveCanvas(BuildTemperatureCurveCanvasPreviewPoints(), useSmoothPreview: false);
+        e.Handled = true;
+    }
+
+    private void OnNewCurveCanvasPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        _temperatureCurveHoverPosition = null;
+        UpdateNewCurvePreview();
+        e.Handled = true;
     }
 
     private void OnNewCurveCanvasSizeChanged(object sender, SizeChangedEventArgs e)
@@ -759,9 +1337,96 @@ public sealed partial class MainPage : Page
         UpdateNewCurvePreview();
     }
 
+    private void OnNewPowerCurveCanvasPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (NewPowerCurveCanvas.ActualWidth <= 0 || NewPowerCurveCanvas.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var position = e.GetCurrentPoint(NewPowerCurveCanvas).Position;
+        _powerCurveHoverPosition = position;
+        var point = FindNearestPowerCurvePoint(position);
+        if (point is null)
+        {
+            point = new FanCurvePoint();
+            NewPowerCurvePoints.Add(point);
+        }
+
+        _draggingPowerCurvePoint = point;
+        NewPowerCurveCanvas.CapturePointer(e.Pointer);
+        UpdatePowerCurvePointFromCanvasInput(point, position);
+        DrawNewPowerCurveCanvas(BuildPowerCurveCanvasPreviewPoints(), useSmoothPreview: false);
+        e.Handled = true;
+    }
+
+    private void OnNewPowerCurveCanvasPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        var currentPoint = e.GetCurrentPoint(NewPowerCurveCanvas);
+        _powerCurveHoverPosition = currentPoint.Position;
+        if (_draggingPowerCurvePoint is null)
+        {
+            DrawNewPowerCurveCanvas(BuildPowerCurveCanvasPreviewPoints(), useSmoothPreview: false);
+            e.Handled = true;
+            return;
+        }
+
+        if (!currentPoint.Properties.IsLeftButtonPressed)
+        {
+            FinishPowerCurveDrag();
+            return;
+        }
+
+        UpdatePowerCurvePointFromCanvasInput(_draggingPowerCurvePoint, currentPoint.Position);
+        DrawNewPowerCurveCanvas(BuildPowerCurveCanvasPreviewPoints(), useSmoothPreview: false);
+        e.Handled = true;
+    }
+
+    private void OnNewPowerCurveCanvasPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _powerCurveHoverPosition = e.GetCurrentPoint(NewPowerCurveCanvas).Position;
+        FinishPowerCurveDrag();
+        e.Handled = true;
+    }
+
+    private void OnNewPowerCurveCanvasPointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        FinishPowerCurveDrag();
+        e.Handled = true;
+    }
+
+    private void OnNewPowerCurveCanvasPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        _powerCurveHoverPosition = e.GetCurrentPoint(NewPowerCurveCanvas).Position;
+        DrawNewPowerCurveCanvas(BuildPowerCurveCanvasPreviewPoints(), useSmoothPreview: false);
+        e.Handled = true;
+    }
+
+    private void OnNewPowerCurveCanvasPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        _powerCurveHoverPosition = null;
+        UpdateNewPowerCurvePreview();
+        e.Handled = true;
+    }
+
+    private void OnNewPowerCurveCanvasSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateNewPowerCurvePreview();
+    }
+
+    private void OnNewPowerCurveSmoothToggled(object sender, RoutedEventArgs e)
+    {
+        UpdateNewPowerCurvePreview();
+    }
+
     private void OnResetNewCurveEditorClick(object sender, RoutedEventArgs e)
     {
         ResetNewCurveEditor();
+    }
+
+    private void OnResetNewPowerCurveEditorClick(object sender, RoutedEventArgs e)
+    {
+        ResetNewPowerCurveEditor();
     }
 
     private void OnEditCurvePresetClick(object sender, RoutedEventArgs e)
@@ -769,7 +1434,19 @@ public sealed partial class MainPage : Page
         try
         {
             var preset = ReadPresetFromSender(sender);
-            if (!preset.IsCurvePreset)
+            if (preset.IsPowerCurvePreset)
+            {
+                _editingPowerCurvePresetId = preset.Id;
+                NewPowerCurvePresetNameBox.Text = preset.DisplayName;
+                NewPowerCurveSmoothSwitch.IsOn = preset.SmoothCurve;
+                ReplaceNewPowerCurvePoints(preset.CurvePoints);
+                UpdateNewPowerCurveEditorModeText();
+                UpdateNewPowerCurvePreview();
+                ScrollEditorIntoView(PowerCurveEditorGrid);
+                return;
+            }
+
+            if (!preset.IsTemperatureCurvePreset)
             {
                 return;
             }
@@ -780,11 +1457,73 @@ public sealed partial class MainPage : Page
             ReplaceNewCurvePoints(preset.CurvePoints);
             UpdateNewCurveEditorModeText();
             UpdateNewCurvePreview();
+            ScrollEditorIntoView(CurveEditorGrid);
         }
         catch (Exception ex)
         {
             ShowFailure(ex);
         }
+    }
+
+    private void ScrollEditorIntoView(FrameworkElement editorElement)
+    {
+        editorElement.StartBringIntoView(new BringIntoViewOptions
+        {
+            AnimationDesired = true,
+            VerticalAlignmentRatio = 0.08,
+            VerticalOffset = -12,
+        });
+    }
+
+    private void ScrollPresetIntoView(string presetId)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                var preset = Presets.FirstOrDefault(item => item.Id.Equals(presetId, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException(F("Validation.PresetNotFound", presetId));
+                PresetGridView.ScrollIntoView(preset, ScrollIntoViewAlignment.Leading);
+                PresetGridView.UpdateLayout();
+                if (PresetGridView.ContainerFromItem(preset) is FrameworkElement presetContainer)
+                {
+                    presetContainer.StartBringIntoView(new BringIntoViewOptions
+                    {
+                        AnimationDesired = true,
+                        VerticalAlignmentRatio = 0.08,
+                        VerticalOffset = -12,
+                    });
+                    return;
+                }
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    try
+                    {
+                        if (PresetGridView.ContainerFromItem(preset) is FrameworkElement delayedPresetContainer)
+                        {
+                            delayedPresetContainer.StartBringIntoView(new BringIntoViewOptions
+                            {
+                                AnimationDesired = true,
+                                VerticalAlignmentRatio = 0.08,
+                                VerticalOffset = -12,
+                            });
+                            return;
+                        }
+
+                        throw new InvalidOperationException(F("Validation.PresetNotFound", preset.DisplayName));
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowFailure(ex);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                ShowFailure(ex);
+            }
+        });
     }
 
     private async void OnResetAutoClick(object sender, RoutedEventArgs e)
@@ -814,33 +1553,38 @@ public sealed partial class MainPage : Page
             return ResetDellAutomaticModeAsync(preset.Id);
         }
 
-        if (string.Equals(preset.Kind, FanPreset.CurveKind, StringComparison.OrdinalIgnoreCase))
+        if (preset.IsCurvePreset)
         {
             return ApplyCurvePresetAsync(preset);
         }
 
-        throw new InvalidOperationException($"Unsupported fan preset kind: {preset.Kind}");
+        throw new InvalidOperationException(F("Validation.UnsupportedPresetKind", preset.Kind));
     }
 
     private async Task ApplyManualPresetAsync(FanPreset preset)
     {
         var percent = CheckedPercent(preset.Percent, T("Field.AllFanPercent"));
-        await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
+        var succeeded = await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
         {
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
             AllFanSlider.Value = percent;
             AllFanPercentBox.Value = percent;
             _activeCurvePreset = null;
             SetModeSummary("Mode.PresetManual", preset.DisplayName, percent);
-            MarkActivePreset(preset.Id);
+            MarkActivePreset(preset.Id, persistRunningState: true);
             ShowStatus(F("Status.PresetApplied", preset.DisplayName), InfoBarSeverity.Success);
         });
+
+        if (succeeded)
+        {
+            await RefreshSensorsAfterFanCommandAsync();
+        }
     }
 
     private async Task RestoreDefaultManualAsync(string? activePresetId = "restore-manual", int? percentOverride = null)
     {
         var percent = percentOverride ?? AppSettings.LocalDefaultManualFanPercent;
-        await RunUiCommandAsync(F("Status.RestoringDefault", percent), async token =>
+        var succeeded = await RunUiCommandAsync(F("Status.RestoringDefault", percent), async token =>
         {
             PersistSettingsFromControls();
             AllFanSlider.Value = percent;
@@ -848,81 +1592,117 @@ public sealed partial class MainPage : Page
             await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
             _activeCurvePreset = null;
             SetModeSummary("Mode.ManualPercent", percent);
-            MarkActivePreset(activePresetId);
+            MarkActivePreset(activePresetId, persistRunningState: true);
             ShowStatus(F("Status.RestoredDefault", percent), InfoBarSeverity.Success);
         });
+
+        if (succeeded)
+        {
+            await RefreshSensorsAfterFanCommandAsync();
+        }
     }
 
     private async Task ResetDellAutomaticModeAsync(string? activePresetId = "dell-auto")
     {
-        await RunUiCommandAsync(T("Status.ResettingDellAuto"), async token =>
+        var succeeded = await RunUiCommandAsync(T("Status.ResettingDellAuto"), async token =>
         {
             await _ipmi.SetDellAutomaticModeAsync(ReadProfile(), token);
             _activeCurvePreset = null;
             SetModeSummary("Mode.DellAuto");
-            MarkActivePreset(activePresetId);
+            MarkActivePreset(activePresetId, persistRunningState: true);
             ShowStatus(T("Status.DellAutoRestored"), InfoBarSeverity.Success);
         });
+
+        if (succeeded)
+        {
+            await RefreshSensorsAfterFanCommandAsync();
+        }
     }
 
     private async Task ApplyCurvePresetAsync(FanPreset preset)
     {
         var curvePreset = ValidateAndClonePreset(preset);
-        await RunUiCommandAsync(F("Status.CurvePresetStarted", curvePreset.DisplayName), async token =>
-        {
-            PersistSettingsFromControls();
-            _activeCurvePreset = curvePreset;
-            _autoPolicyTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
-            _autoPolicyTimer.Start();
-            StartAutoButton.IsEnabled = false;
-            StopAutoButton.IsEnabled = true;
-            SetAutoPolicySummary(true);
-            SetModeSummary("Mode.CurveAuto", curvePreset.DisplayName);
-            MarkActivePreset(curvePreset.Id);
-            AddLog(T("Log.Info"), F("Status.CurvePresetStarted", curvePreset.DisplayName));
-            try
+        var started = await RunUiCommandAsync(
+            F("Status.CurvePresetStarted", curvePreset.DisplayName),
+            async token =>
             {
-                await RunAutoPolicyOnceAsync(token);
-            }
-            catch
-            {
-                _autoPolicyTimer.Stop();
-                _activeCurvePreset = null;
-                StartAutoButton.IsEnabled = true;
-                StopAutoButton.IsEnabled = false;
-                SetAutoPolicySummary(false);
-                throw;
-            }
+                PersistSettingsFromControls();
+                _activeCurvePreset = curvePreset;
+                PrepareAutoPolicyRunningState();
+                SetModeSummary("Mode.CurveAuto", curvePreset.DisplayName);
+                MarkActivePreset(curvePreset.Id);
+                AddLog(T("Log.Info"), F("Status.CurvePresetStarted", curvePreset.DisplayName));
+                try
+                {
+                    await RunAutoPolicyOnceCoreAsync(token);
+                    PersistRunningPresetState(curvePreset.Id);
+                }
+                catch
+                {
+                    StopAutoPolicyAfterFailure();
+                    throw;
+                }
+            });
 
+        if (started)
+        {
+            StartAutoPolicyTimer();
             ShowStatus(F("Status.CurvePresetStarted", curvePreset.DisplayName), InfoBarSeverity.Success);
-        });
+        }
+        else
+        {
+            StopAutoPolicyAfterFailure();
+        }
     }
 
     private async void OnStartAutoPolicyClick(object sender, RoutedEventArgs e)
     {
         try
         {
+            await StartSmartAutoPolicyAsync(persistControls: true);
+        }
+        catch (Exception ex)
+        {
+            StopAutoPolicyAfterFailure();
+            ShowFailure(ex);
+        }
+    }
+
+    private async Task StartSmartAutoPolicyAsync(bool persistControls)
+    {
+        if (persistControls)
+        {
             PersistSettingsFromControls();
-            _activeCurvePreset = null;
-            _autoPolicyTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
-            _autoPolicyTimer.Start();
-            StartAutoButton.IsEnabled = false;
-            StopAutoButton.IsEnabled = true;
-            SetAutoPolicySummary(true);
-            SetModeSummary("Mode.SmartAuto");
-            AddLog(T("Log.Info"), T("Status.AutoStarted"));
-            try
+        }
+
+        _activeCurvePreset = null;
+        PrepareAutoPolicyRunningState();
+        SetModeSummary("Mode.SmartAuto");
+        AddLog(T("Log.Info"), T("Status.AutoStarted"));
+
+        var started = await RunUiCommandAsync(
+            T("Status.AutoStarted"),
+            async token =>
             {
-                await RunAutoPolicyOnceAsync(CancellationToken.None);
-            }
-            catch
-            {
-                _autoPolicyTimer.Stop();
-                StartAutoButton.IsEnabled = true;
-                StopAutoButton.IsEnabled = false;
-                SetAutoPolicySummary(false);
-                throw;
-            }
+                await RunAutoPolicyOnceCoreAsync(token);
+                PersistSmartAutoRunningState();
+            });
+
+        if (started)
+        {
+            StartAutoPolicyTimer();
+        }
+        else
+        {
+            StopAutoPolicyAfterFailure();
+        }
+    }
+
+    private void OnStopAutoPolicyClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            StopAutoPolicy();
         }
         catch (Exception ex)
         {
@@ -930,14 +1710,40 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void OnStopAutoPolicyClick(object sender, RoutedEventArgs e)
+    private void StopAutoPolicy()
     {
         _autoPolicyTimer.Stop();
         _activeCurvePreset = null;
         StartAutoButton.IsEnabled = true;
         StopAutoButton.IsEnabled = false;
         SetAutoPolicySummary(false);
+        MarkActivePreset(null);
+        ClearPersistedRunningState();
         AddLog(T("Log.Info"), T("Status.AutoStopped"));
+    }
+
+    private void PrepareAutoPolicyRunningState()
+    {
+        StartAutoButton.IsEnabled = false;
+        StopAutoButton.IsEnabled = true;
+        SetAutoPolicySummary(true);
+    }
+
+    private void StartAutoPolicyTimer()
+    {
+        _autoPolicyTimer.Interval = TimeSpan.FromSeconds(Math.Max(1, _settings.SensorRefreshSeconds));
+        _autoPolicyTimer.Start();
+    }
+
+    private void StopAutoPolicyAfterFailure()
+    {
+        _autoPolicyTimer.Stop();
+        _activeCurvePreset = null;
+        StartAutoButton.IsEnabled = true;
+        StopAutoButton.IsEnabled = false;
+        SetAutoPolicySummary(false);
+        MarkActivePreset(null);
+        ClearPersistedRunningState();
     }
 
     private async void OnAutoPolicyTimerTick(object? sender, object e)
@@ -949,21 +1755,37 @@ public sealed partial class MainPage : Page
         }
 
         _autoPolicyTickRunning = true;
+        var lockTaken = false;
         try
         {
-            await RunAutoPolicyOnceAsync(CancellationToken.None);
+            if (!await _ipmiOperationLock.WaitAsync(0))
+            {
+                var message = T("Status.AutoTickSkippedIpmiBusy");
+                SetHeroRequestStatus(message, InfoBarSeverity.Warning);
+                AddLog(T("Log.Warn"), message);
+                return;
+            }
+
+            lockTaken = true;
+            await RunAutoPolicyOnceCoreAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
+            StopAutoPolicyAfterFailure();
             ShowFailure(ex);
         }
         finally
         {
+            if (lockTaken)
+            {
+                _ipmiOperationLock.Release();
+            }
+
             _autoPolicyTickRunning = false;
         }
     }
 
-    private async Task RunAutoPolicyOnceAsync(CancellationToken cancellationToken)
+    private async Task RunAutoPolicyOnceCoreAsync(CancellationToken cancellationToken)
     {
         var activeCurvePreset = _activeCurvePreset?.Clone();
         SetHeroRequestStatus(activeCurvePreset is null ? T("Status.AutoStarted") : F("Status.CurvePresetStarted", activeCurvePreset.DisplayName));
@@ -977,6 +1799,7 @@ public sealed partial class MainPage : Page
         {
             operationProperties["curvePresetId"] = activeCurvePreset.Id;
             operationProperties["curvePresetName"] = activeCurvePreset.DisplayName;
+            operationProperties["curvePresetKind"] = activeCurvePreset.Kind;
             operationProperties["curvePoints"] = activeCurvePreset.CurvePointsText;
         }
 
@@ -987,18 +1810,16 @@ public sealed partial class MainPage : Page
 
         try
         {
-            var profile = ReadProfile();
+            var profile = BuildProfileFromSettings();
             var readings = await _ipmi.ReadSensorsAsync(profile, cancellationToken);
             ReplaceSensors(readings);
             UpdateMetricSummaries();
-            RecordVisualizationHistoryPoint();
-            SendVisualizationSnapshot();
+            var snapshotTime = DateTime.Now;
+            _lastPollTime = snapshotTime;
+            RecordVisualizationHistoryPoint(snapshotTime);
+            ScheduleVisualizationSnapshot();
 
             var cpuTemp = IpmiCommandService.FindCpuTemperatureCelsius(readings);
-            var percent = activeCurvePreset is null
-                ? CalculateAutoFanPercent(cpuTemp)
-                : activeCurvePreset.CalculateFanPercent(cpuTemp);
-
             if (cpuTemp >= _settings.EmergencyCpuTemperatureCelsius)
             {
                 await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);
@@ -1016,10 +1837,15 @@ public sealed partial class MainPage : Page
                 return;
             }
 
+            double? powerWatts = null;
+            var percent = CalculateFanPercentForAutoTick(activeCurvePreset, cpuTemp, readings, out powerWatts);
+
             await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);
             var message = activeCurvePreset is null
                 ? F("Status.SmartFanApplied", cpuTemp, percent)
-                : F("Status.CurveFanApplied", activeCurvePreset.DisplayName, cpuTemp, percent);
+                : activeCurvePreset.IsPowerCurvePreset
+                    ? FormatPowerCurveFanApplied(activeCurvePreset.DisplayName, powerWatts!.Value, percent)
+                    : F("Status.CurveFanApplied", activeCurvePreset.DisplayName, cpuTemp, percent);
             if (activeCurvePreset is null)
             {
                 SetModeSummary("Mode.SmartPercent", percent);
@@ -1031,14 +1857,18 @@ public sealed partial class MainPage : Page
 
             AddLog(T("Log.Info"), message);
             SetHeroRequestStatus(message);
-            operation.Succeed(
-                message,
-                new Dictionary<string, string>
-                {
-                    ["cpuTemperatureCelsius"] = cpuTemp.ToString("0.0", CultureInfo.InvariantCulture),
-                    ["fanPercent"] = percent.ToString(CultureInfo.InvariantCulture),
-                    ["action"] = "SetAllFansManualSpeed",
-                });
+            var successProperties = new Dictionary<string, string>
+            {
+                ["cpuTemperatureCelsius"] = cpuTemp.ToString("0.0", CultureInfo.InvariantCulture),
+                ["fanPercent"] = percent.ToString(CultureInfo.InvariantCulture),
+                ["action"] = "SetAllFansManualSpeed",
+            };
+            if (powerWatts.HasValue)
+            {
+                successProperties["powerWatts"] = powerWatts.Value.ToString("0.0", CultureInfo.InvariantCulture);
+            }
+
+            operation.Succeed(message, successProperties);
         }
         catch (Exception ex)
         {
@@ -1075,7 +1905,50 @@ public sealed partial class MainPage : Page
         return (int)Math.Round(_settings.AutoMinimumFanPercent + fanSpan * progress, MidpointRounding.AwayFromZero);
     }
 
+    private int CalculateFanPercentForAutoTick(
+        FanPreset? activeCurvePreset,
+        double cpuTemp,
+        IReadOnlyList<SensorReading> readings,
+        out double? powerWatts)
+    {
+        powerWatts = null;
+        if (activeCurvePreset is null)
+        {
+            return CalculateAutoFanPercent(cpuTemp);
+        }
+
+        if (activeCurvePreset.IsPowerCurvePreset)
+        {
+            powerWatts = FindPowerWatts(readings);
+            return activeCurvePreset.CalculateFanPercentForPower(powerWatts.Value);
+        }
+
+        return activeCurvePreset.CalculateFanPercent(cpuTemp);
+    }
+
+    private static double FindPowerWatts(IEnumerable<SensorReading> readings)
+    {
+        var powerSensor = readings.FirstOrDefault(IsPowerWattsSensor);
+        if (powerSensor?.NumericValue is { } watts)
+        {
+            return Math.Round(watts, 1);
+        }
+
+        throw new InvalidOperationException(T("Status.PowerCurveNoPowerReading"));
+    }
+
+    private string FormatPowerCurveFanApplied(string presetName, double powerWatts, int percent)
+    {
+        return F("Status.PowerCurveFanApplied", presetName, powerWatts, T("SensorUnit.Watts"), percent);
+    }
+
     private async void OnVisitIdracClick(object sender, RoutedEventArgs e)
+    {
+        OpenIdrac();
+        await Task.CompletedTask;
+    }
+
+    private void OpenIdrac()
     {
         try
         {
@@ -1088,11 +1961,14 @@ public sealed partial class MainPage : Page
         {
             ShowFailure(ex);
         }
-
-        await Task.CompletedTask;
     }
 
     private void OnOpenLogFolderClick(object sender, RoutedEventArgs e)
+    {
+        OpenLogFolder();
+    }
+
+    private void OpenLogFolder()
     {
         try
         {
@@ -1212,9 +2088,17 @@ public sealed partial class MainPage : Page
         {
             item.IsSelected = item.Tag is string itemTag && itemTag == tag;
         }
+
+        if (tag == "Sensors")
+        {
+            RefreshLocalizedSensorRowsIfVisible();
+        }
     }
 
-    private async Task RunUiCommandAsync(string description, Func<CancellationToken, Task> command)
+    private async Task<bool> RunUiCommandAsync(
+        string description,
+        Func<CancellationToken, Task> command,
+        bool waitForIpmiLock = true)
     {
         var lockTaken = false;
         AppLogOperation? operation = null;
@@ -1231,7 +2115,15 @@ public sealed partial class MainPage : Page
             SetHeroRequestStatus(runningMessage);
             AddVolatileLog(T("Log.Info"), description);
             using var cancellation = new CancellationTokenSource();
-            await _ipmiOperationLock.WaitAsync(cancellation.Token);
+            if (waitForIpmiLock)
+            {
+                await _ipmiOperationLock.WaitAsync(cancellation.Token);
+            }
+            else if (!await _ipmiOperationLock.WaitAsync(0, cancellation.Token))
+            {
+                throw new InvalidOperationException(T("Status.IpmiCommandBusy"));
+            }
+
             lockTaken = true;
             await command(cancellation.Token);
             if (string.Equals(_heroRequestMessage, runningMessage, StringComparison.Ordinal))
@@ -1240,6 +2132,7 @@ public sealed partial class MainPage : Page
             }
 
             operation.Succeed(description);
+            return true;
         }
         catch (Exception ex)
         {
@@ -1261,11 +2154,12 @@ public sealed partial class MainPage : Page
                     ShowFailure(new InvalidOperationException(
                         $"{ex.Message}{Environment.NewLine}{F("Status.LogWriteFailed", logException.Message)}",
                         ex));
-                    return;
+                    return false;
                 }
             }
 
             ShowFailure(ex);
+            return false;
         }
         finally
         {
@@ -1284,7 +2178,7 @@ public sealed partial class MainPage : Page
             Sensors.Add(reading);
         }
 
-        RefreshLocalizedSensorRows();
+        MarkLocalizedSensorRowsDirty();
     }
 
     private void UpdateMetricSummaries()
@@ -1294,8 +2188,10 @@ public sealed partial class MainPage : Page
             .Where(sensor => sensor.NumericValue.HasValue)
             .ToList();
 
-        var cpuTemp = IpmiCommandService.FindCpuTemperatureCelsius(temperatureReadings);
-        CpuTemperatureText.Text = $"{cpuTemp:0.0} °C";
+        var cpuTemp = IpmiCommandService.TryFindCpuTemperatureCelsius(temperatureReadings);
+        CpuTemperatureText.Text = cpuTemp.HasValue
+            ? $"{cpuTemp.Value:0.0} {T("SensorUnit.Celsius")}"
+            : T("State.WaitingRefresh");
         ReplaceTiles(
             TemperatureTiles,
             temperatureReadings.Select(BuildDashboardTile));
@@ -1323,7 +2219,6 @@ public sealed partial class MainPage : Page
 
         var powerAndHealth = Sensors
             .Where(sensor => IsPowerSensor(sensor) || IsHealthSensor(sensor))
-            .Take(14)
             .Select(BuildDashboardTile);
         ReplaceTiles(PowerTiles, powerAndHealth);
         UpdateHeroRealtimeMetrics();
@@ -1334,8 +2229,11 @@ public sealed partial class MainPage : Page
         var style = GetDashboardTileStyle(sensor);
         return new DashboardTileViewModel
         {
+            Id = BuildSensorStableId(sensor),
             Title = BuildVisualizationSensorName(sensor),
             Value = BuildDashboardTileValue(sensor),
+            ValueFontSize = sensor.NumericValue.HasValue ? 26 : 22,
+            ValueMaxLines = sensor.NumericValue.HasValue ? 1 : 2,
             Unit = sensor.NumericValue.HasValue ? BuildLocalizedSensorUnit(sensor) : string.Empty,
             Subtitle = BuildSensorSubtitle(sensor),
             Status = BuildLocalizedSensorStatus(sensor.Status),
@@ -1404,13 +2302,20 @@ public sealed partial class MainPage : Page
 
     private static double CalculateFanRotationSeconds(double? rpm)
     {
+        const double MaximumFanAnimationRpm = 18000;
+        const double SlowestFanRotationSeconds = 5.2;
+        const double FastestFanRotationSeconds = 0.11;
+
         if (!rpm.HasValue || rpm.Value <= 0)
         {
-            return 5.2;
+            return SlowestFanRotationSeconds;
         }
 
-        var normalized = Math.Clamp((rpm.Value - 1000) / 17000, 0, 1);
-        return Math.Round(3.2 - (normalized * 2.4), 2);
+        var normalized = Math.Clamp(rpm.Value / MaximumFanAnimationRpm, 0, 1);
+        var slowestRotationsPerSecond = 1 / SlowestFanRotationSeconds;
+        var fastestRotationsPerSecond = 1 / FastestFanRotationSeconds;
+        var rotationsPerSecond = slowestRotationsPerSecond + (normalized * (fastestRotationsPerSecond - slowestRotationsPerSecond));
+        return Math.Round(1 / rotationsPerSecond, 2);
     }
 
     private static double CalculateElectricalPulseSeconds(double? value)
@@ -1437,7 +2342,7 @@ public sealed partial class MainPage : Page
             return T(emptyKey);
         }
 
-        return FormatHeroRealtimeItems(items.Take(2).ToList(), numberFormat);
+        return FormatHeroRealtimeItems(items, numberFormat);
     }
 
     private void OnDashboardTileFanIconLoaded(object sender, RoutedEventArgs e)
@@ -1453,15 +2358,25 @@ public sealed partial class MainPage : Page
         StartDashboardTileFanAnimation(sender);
     }
 
+    private void OnDashboardTileFanIconUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement element)
+        {
+            StopDashboardTileFanAnimation(element, detachTile: true, clearTransform: true);
+        }
+    }
+
     private void StartDashboardTileFanAnimation(FrameworkElement element)
     {
-        if (element.Tag is Storyboard previousStoryboard)
-        {
-            previousStoryboard.Stop();
-            element.Tag = null;
-        }
+        var state = GetDashboardTileFanAnimationState(element);
+        var tile = element.DataContext as DashboardTileViewModel;
+        AttachDashboardTileFanAnimationObserver(element, state, tile);
 
-        if (element.DataContext is not DashboardTileViewModel tile ||
+        var currentAngle = GetDashboardTileRotationAngle(element);
+        state.Storyboard?.Stop();
+        state.Storyboard = null;
+
+        if (tile is null ||
             !tile.IsFanAnimated ||
             tile.FanIconOpacity <= 0)
         {
@@ -1469,9 +2384,6 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        var currentAngle = element.RenderTransform is RotateTransform currentTransform
-            ? currentTransform.Angle % 360
-            : 0;
         var rotateTransform = new RotateTransform { Angle = currentAngle };
         element.RenderTransform = rotateTransform;
         element.RenderTransformOrigin = new Point(0.5, 0.5);
@@ -1490,8 +2402,110 @@ public sealed partial class MainPage : Page
 
         var storyboard = new Storyboard();
         storyboard.Children.Add(rotation);
-        element.Tag = storyboard;
+        state.Storyboard = storyboard;
+        element.Tag = state;
         storyboard.Begin();
+    }
+
+    private DashboardTileFanAnimationState GetDashboardTileFanAnimationState(FrameworkElement element)
+    {
+        if (element.Tag is DashboardTileFanAnimationState state)
+        {
+            return state;
+        }
+
+        if (element.Tag is Storyboard legacyStoryboard)
+        {
+            legacyStoryboard.Stop();
+        }
+
+        state = new DashboardTileFanAnimationState();
+        element.Tag = state;
+        return state;
+    }
+
+    private void AttachDashboardTileFanAnimationObserver(
+        FrameworkElement element,
+        DashboardTileFanAnimationState state,
+        DashboardTileViewModel? tile)
+    {
+        if (ReferenceEquals(state.Tile, tile))
+        {
+            return;
+        }
+
+        DetachDashboardTileFanAnimationObserver(state);
+        state.Tile = tile;
+
+        if (tile is null)
+        {
+            return;
+        }
+
+        state.TilePropertyChangedHandler = (_, args) =>
+        {
+            if (string.IsNullOrEmpty(args.PropertyName) ||
+                args.PropertyName == nameof(DashboardTileViewModel.FanRotationSeconds) ||
+                args.PropertyName == nameof(DashboardTileViewModel.IsFanAnimated) ||
+                args.PropertyName == nameof(DashboardTileViewModel.FanIconOpacity))
+            {
+                StartDashboardTileFanAnimation(element);
+            }
+        };
+        tile.PropertyChanged += state.TilePropertyChangedHandler;
+    }
+
+    private static void DetachDashboardTileFanAnimationObserver(DashboardTileFanAnimationState state)
+    {
+        if (state.Tile is not null && state.TilePropertyChangedHandler is not null)
+        {
+            state.Tile.PropertyChanged -= state.TilePropertyChangedHandler;
+        }
+
+        state.Tile = null;
+        state.TilePropertyChangedHandler = null;
+    }
+
+    private static void StopDashboardTileFanAnimation(
+        FrameworkElement element,
+        bool detachTile,
+        bool clearTransform)
+    {
+        if (element.Tag is DashboardTileFanAnimationState state)
+        {
+            state.Storyboard?.Stop();
+            state.Storyboard = null;
+
+            if (detachTile)
+            {
+                DetachDashboardTileFanAnimationObserver(state);
+            }
+
+            element.Tag = null;
+        }
+        else if (element.Tag is Storyboard legacyStoryboard)
+        {
+            legacyStoryboard.Stop();
+            element.Tag = null;
+        }
+
+        if (clearTransform)
+        {
+            element.RenderTransform = null;
+        }
+    }
+
+    private static double GetDashboardTileRotationAngle(FrameworkElement element)
+    {
+        if (element.RenderTransform is not RotateTransform rotateTransform ||
+            double.IsNaN(rotateTransform.Angle) ||
+            double.IsInfinity(rotateTransform.Angle))
+        {
+            return 0;
+        }
+
+        var angle = rotateTransform.Angle % 360;
+        return angle < 0 ? angle + 360 : angle;
     }
 
     private void OnDashboardTileElectricalIconLoaded(object sender, RoutedEventArgs e)
@@ -1523,14 +2537,14 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        var scaleTransform = new ScaleTransform { ScaleX = 0.94, ScaleY = 0.94 };
+        var scaleTransform = new ScaleTransform { ScaleX = 0.98, ScaleY = 0.98 };
         element.RenderTransform = scaleTransform;
         element.RenderTransformOrigin = new Point(0.5, 0.5);
 
         var scaleX = new DoubleAnimation
         {
-            From = 0.94,
-            To = 1.14,
+            From = 0.98,
+            To = 1.06,
             AutoReverse = true,
             Duration = new Duration(TimeSpan.FromSeconds(tile.ElectricalPulseSeconds)),
             RepeatBehavior = RepeatBehavior.Forever,
@@ -1538,8 +2552,8 @@ public sealed partial class MainPage : Page
         };
         var scaleY = new DoubleAnimation
         {
-            From = 0.94,
-            To = 1.14,
+            From = 0.98,
+            To = 1.06,
             AutoReverse = true,
             Duration = new Duration(TimeSpan.FromSeconds(tile.ElectricalPulseSeconds)),
             RepeatBehavior = RepeatBehavior.Forever,
@@ -1648,7 +2662,7 @@ public sealed partial class MainPage : Page
     {
         if (hex.Length != 9 || hex[0] != '#')
         {
-            throw new InvalidOperationException($"Invalid metric color value: {hex}");
+            throw new InvalidOperationException(LocalizationService.Format("Dashboard.MetricColorInvalid", hex));
         }
 
         var alpha = Convert.ToByte(hex.Substring(1, 2), 16);
@@ -1658,33 +2672,209 @@ public sealed partial class MainPage : Page
         return new SolidColorBrush(Color.FromArgb(alpha, red, green, blue));
     }
 
-    private void RecordVisualizationHistoryPoint()
+    private void TryLoadVisualizationHistory()
     {
-        var temperatures = Sensors
-            .Where(IsTemperatureSensor)
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .ToList();
-        var fans = Sensors
-            .Where(IsFanSensor)
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .ToList();
-
-        _sensorHistory.Add(new SensorDashboardHistoryPoint
+        try
         {
-            Time = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-            MaxTemperature = temperatures.Count == 0 ? null : Math.Round(temperatures.Max(sensor => sensor.NumericValue!.Value), 1),
-            AverageFanRpm = fans.Count == 0 ? null : Math.Round(fans.Average(sensor => sensor.NumericValue!.Value), 0),
-            CpuUsage = FindNumericSensorValue("CPU Usage"),
-            MemUsage = FindNumericSensorValue("MEM Usage"),
-            IoUsage = FindNumericSensorValue("IO Usage"),
-            SysUsage = FindNumericSensorValue("SYS Usage"),
-            PowerWatts = Sensors.FirstOrDefault(IsPowerWattsSensor)?.NumericValue,
-        });
-
-        while (_sensorHistory.Count > SensorHistoryLimit)
-        {
-            _sensorHistory.RemoveAt(0);
+            LoadVisualizationHistory();
         }
+        catch (Exception ex)
+        {
+            ReportVisualizationHistoryFailure("Dashboard.HistoryLoadFailed", ex);
+        }
+    }
+
+    private void LoadVisualizationHistory()
+    {
+        _sensorHistory.Clear();
+        _sensorHistorySequence = 0;
+
+        var historyDirectory = VisualizationHistoryDirectory;
+        Directory.CreateDirectory(historyDirectory);
+        var now = DateTimeOffset.Now;
+        PruneVisualizationHistoryFiles(now);
+        var cutoff = now.AddDays(-VisualizationHistoryRetentionDays);
+
+        foreach (var historyPath in Directory.EnumerateFiles(historyDirectory, "chart-history-*.jsonl").OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            var lineNumber = 0;
+            foreach (var line in File.ReadLines(historyPath, Encoding.UTF8))
+            {
+                lineNumber++;
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                var point = JsonSerializer.Deserialize<SensorDashboardHistoryPoint>(line, VisualizationJsonOptions)
+                    ?? throw new InvalidOperationException(F("Dashboard.HistoryRowEmpty", historyPath, lineNumber));
+                var timestamp = GetVisualizationHistoryTimestamp(point, historyPath, lineNumber);
+                if (timestamp < cutoff)
+                {
+                    continue;
+                }
+
+                _sensorHistory.Add(point);
+                if (long.TryParse(point.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var sequence))
+                {
+                    _sensorHistorySequence = Math.Max(_sensorHistorySequence, sequence);
+                }
+            }
+        }
+
+        _sensorHistory.Sort((left, right) => left.UnixMilliseconds.CompareTo(right.UnixMilliseconds));
+    }
+
+    private void PruneVisualizationHistoryFiles(DateTimeOffset now)
+    {
+        var historyDirectory = VisualizationHistoryDirectory;
+        if (!Directory.Exists(historyDirectory))
+        {
+            return;
+        }
+
+        var cutoffDate = now.AddDays(-VisualizationHistoryRetentionDays).Date;
+        foreach (var historyPath in Directory.EnumerateFiles(historyDirectory, "chart-history-*.jsonl"))
+        {
+            var name = System.IO.Path.GetFileNameWithoutExtension(historyPath);
+            var dateText = name["chart-history-".Length..];
+            if (!DateTime.TryParseExact(dateText, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var fileDate))
+            {
+                throw new InvalidOperationException(F("Dashboard.HistoryFilenameInvalid", historyPath));
+            }
+
+            if (fileDate.Date < cutoffDate)
+            {
+                File.Delete(historyPath);
+            }
+        }
+    }
+
+    private void RecordVisualizationHistoryPoint(DateTime snapshotTime)
+    {
+        var snapshot = BuildVisualizationSnapshot(snapshotTime);
+        _latestVisualizationSnapshot = snapshot;
+        _latestVisualizationSnapshotTime = snapshotTime;
+        var timestamp = new DateTimeOffset(snapshotTime);
+
+        var historyPoint = new SensorDashboardHistoryPoint
+        {
+            Id = (++_sensorHistorySequence).ToString(CultureInfo.InvariantCulture),
+            Time = snapshotTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+            Timestamp = timestamp.ToString("O", CultureInfo.InvariantCulture),
+            UnixMilliseconds = timestamp.ToUnixTimeMilliseconds(),
+            Summary = snapshot.Summary,
+            Current = snapshot.Current,
+            TypeCounts = snapshot.TypeCounts,
+            SensorTree = snapshot.SensorTree,
+            MaxTemperature = snapshot.Summary.MaxTemperature,
+            AverageFanRpm = snapshot.Summary.AverageFanRpm,
+            CpuUsage = snapshot.Summary.CpuUsage,
+            MemUsage = snapshot.Summary.MemUsage,
+            IoUsage = snapshot.Summary.IoUsage,
+            SysUsage = snapshot.Summary.SysUsage,
+            PowerWatts = snapshot.Summary.PowerWatts,
+        };
+
+        _sensorHistory.Add(historyPoint);
+        PruneVisualizationHistoryMemory(timestamp);
+        QueueVisualizationHistoryPersistence(historyPoint, timestamp);
+    }
+
+    private void PruneVisualizationHistoryMemory(DateTimeOffset now)
+    {
+        var cutoff = now.AddDays(-VisualizationHistoryRetentionDays).ToUnixTimeMilliseconds();
+        _sensorHistory.RemoveAll(point => point.UnixMilliseconds > 0 && point.UnixMilliseconds < cutoff);
+    }
+
+    private void QueueVisualizationHistoryPersistence(SensorDashboardHistoryPoint historyPoint, DateTimeOffset timestamp)
+    {
+        _ = Task.Run(() => PersistVisualizationHistoryPoint(historyPoint, timestamp))
+            .ContinueWith(
+                task =>
+                {
+                    var exception = task.Exception?.GetBaseException();
+                    if (exception is null)
+                    {
+                        return;
+                    }
+
+                    DispatcherQueue.TryEnqueue(() =>
+                        ReportVisualizationHistoryFailure("Dashboard.HistoryWriteFailed", exception));
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
+    }
+
+    private void PersistVisualizationHistoryPoint(SensorDashboardHistoryPoint historyPoint, DateTimeOffset timestamp)
+    {
+        Directory.CreateDirectory(VisualizationHistoryDirectory);
+        var json = JsonSerializer.Serialize(historyPoint, VisualizationJsonOptions);
+        File.AppendAllText(BuildVisualizationHistoryPath(timestamp), json + Environment.NewLine, Encoding.UTF8);
+        PruneVisualizationHistoryFiles(DateTimeOffset.Now);
+    }
+
+    private void ReportVisualizationHistoryFailure(string key, Exception ex)
+    {
+        var message = F(key, ex.Message);
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => ReportVisualizationHistoryFailure(key, ex));
+            return;
+        }
+
+        AddLog(T("Log.Error"), message, "Visualization", "HistoryPersistence");
+        ShowStatus(message, InfoBarSeverity.Error);
+    }
+
+    private string VisualizationHistoryDirectory => System.IO.Path.Combine(_settingsStore.SettingsDirectory, "chart-history");
+
+    private string BuildVisualizationHistoryPath(DateTimeOffset timestamp)
+    {
+        return System.IO.Path.Combine(VisualizationHistoryDirectory, $"chart-history-{timestamp.LocalDateTime:yyyyMMdd}.jsonl");
+    }
+
+    private static DateTimeOffset GetVisualizationHistoryTimestamp(SensorDashboardHistoryPoint point, string historyPath, int lineNumber)
+    {
+        if (point.UnixMilliseconds > 0)
+        {
+            return DateTimeOffset.FromUnixTimeMilliseconds(point.UnixMilliseconds).ToLocalTime();
+        }
+
+        if (DateTimeOffset.TryParse(point.Timestamp, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var timestamp))
+        {
+            point.UnixMilliseconds = timestamp.ToUnixTimeMilliseconds();
+            return timestamp;
+        }
+
+        throw new InvalidOperationException(LocalizationService.Format("Dashboard.HistoryTimestampInvalid", historyPath, lineNumber));
+    }
+
+    private void ScheduleVisualizationSnapshot()
+    {
+        if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        if (_visualizationSnapshotUpdateScheduled)
+        {
+            return;
+        }
+
+        _visualizationSnapshotUpdateScheduled = true;
+        if (!DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, SendScheduledVisualizationSnapshot))
+        {
+            _visualizationSnapshotUpdateScheduled = false;
+            ShowFailure(new InvalidOperationException("Unable to schedule chart update on the UI dispatcher."));
+        }
+    }
+
+    private void SendScheduledVisualizationSnapshot()
+    {
+        _visualizationSnapshotUpdateScheduled = false;
+        SendVisualizationSnapshot();
     }
 
     private void SendVisualizationSnapshot()
@@ -1697,11 +2887,15 @@ public sealed partial class MainPage : Page
         try
         {
             var payload = BuildVisualizationPayload();
-            var json = JsonSerializer.Serialize(payload, VisualizationJsonOptions);
-            VisualizationWebView.CoreWebView2.PostWebMessageAsJson(json);
-            VisualizationStateText.Text = _lastPollTime.HasValue
-                ? F("Dashboard.VisualizationUpdated", _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
-                : T("Dashboard.VisualizationReady");
+            _ = Task.Run(() => JsonSerializer.Serialize(payload, VisualizationJsonOptions))
+                .ContinueWith(
+                    task =>
+                    {
+                        DispatcherQueue.TryEnqueue(() => CompleteVisualizationSnapshotSend(task));
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default);
         }
         catch (Exception ex)
         {
@@ -1709,45 +2903,37 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void CompleteVisualizationSnapshotSend(Task<string> serializationTask)
+    {
+        if (serializationTask.IsFaulted)
+        {
+            ShowFailure(serializationTask.Exception?.GetBaseException() ?? new InvalidOperationException("Chart payload serialization failed."));
+            return;
+        }
+
+        if (serializationTask.IsCanceled)
+        {
+            ShowFailure(new OperationCanceledException("Chart payload serialization was canceled."));
+            return;
+        }
+
+        if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        VisualizationWebView.CoreWebView2.PostWebMessageAsJson(serializationTask.Result);
+        VisualizationStateText.Text = _lastPollTime.HasValue
+            ? F("Dashboard.VisualizationUpdated", _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
+            : T("Dashboard.VisualizationReady");
+    }
+
     private object BuildVisualizationPayload()
     {
-        var temperatures = Sensors
-            .Where(IsTemperatureSensor)
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeTemperature")))
-            .ToList();
-        var fans = Sensors
-            .Where(IsFanSensor)
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeFan")))
-            .ToList();
-        var power = Sensors
-            .Where(IsPowerSensor)
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypePower")))
-            .ToList();
-        var performance = Sensors
-            .Where(IsPerformanceSensor)
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypePerformance")))
-            .ToList();
-        var electrical = Sensors
-            .Where(sensor => IsPowerWattsSensor(sensor) || IsVoltageSensor(sensor) || IsCurrentSensor(sensor))
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
-            .ToList();
-        var allNumeric = Sensors
-            .Where(sensor => sensor.NumericValue.HasValue)
-            .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
-            .ToList();
-        var statusSensors = Sensors
-            .Where(sensor => !sensor.NumericValue.HasValue)
-            .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
-            .ToList();
-        var health = Sensors
-            .Where(IsHealthSensor)
-            .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeStatus")))
-            .ToList();
+        var snapshotTime = _lastPollTime ?? DateTime.Now;
+        var currentSnapshot = _latestVisualizationSnapshot is not null && _latestVisualizationSnapshotTime == snapshotTime
+            ? _latestVisualizationSnapshot
+            : BuildVisualizationSnapshot(snapshotTime);
 
         return new
         {
@@ -1755,21 +2941,67 @@ public sealed partial class MainPage : Page
             Language = _settings.Language,
             Theme = ActualTheme == ElementTheme.Dark ? "Dark" : "Light",
             Labels = BuildVisualizationLabels(),
-            Summary = BuildVisualizationSummary(),
-            Current = new
-            {
-                Temperatures = temperatures,
-                Fans = fans,
-                Power = power,
-                Performance = performance,
-                Electrical = electrical,
-                AllNumeric = allNumeric,
-                StatusSensors = statusSensors,
-                Health = health,
-            },
-            History = _sensorHistory,
-            TypeCounts = BuildTypeCounts(),
-            SensorTree = BuildSensorTree(),
+            Summary = currentSnapshot.Summary,
+            Current = currentSnapshot.Current,
+            History = _sensorHistory.ToArray(),
+            TypeCounts = currentSnapshot.TypeCounts,
+            SensorTree = currentSnapshot.SensorTree,
+        };
+    }
+
+    private VisualizationSnapshot BuildVisualizationSnapshot(DateTime timestamp)
+    {
+        var sensors = Sensors.ToList();
+        return new VisualizationSnapshot
+        {
+            Summary = BuildVisualizationSummary(sensors, timestamp),
+            Current = BuildVisualizationCurrent(sensors),
+            TypeCounts = BuildTypeCounts(sensors),
+            SensorTree = BuildSensorTree(sensors),
+        };
+    }
+
+    private VisualizationCurrent BuildVisualizationCurrent(IReadOnlyList<SensorReading> sensors)
+    {
+        return new VisualizationCurrent
+        {
+            Temperatures = sensors
+                .Where(IsTemperatureSensor)
+                .Where(sensor => sensor.NumericValue.HasValue)
+                .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeTemperature")))
+                .ToList(),
+            Fans = sensors
+                .Where(IsFanSensor)
+                .Where(sensor => sensor.NumericValue.HasValue)
+                .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeFan")))
+                .ToList(),
+            Power = sensors
+                .Where(IsPowerSensor)
+                .Where(sensor => sensor.NumericValue.HasValue)
+                .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypePower")))
+                .ToList(),
+            Performance = sensors
+                .Where(IsPerformanceSensor)
+                .Where(sensor => sensor.NumericValue.HasValue)
+                .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypePerformance")))
+                .ToList(),
+            Electrical = sensors
+                .Where(sensor => IsPowerWattsSensor(sensor) || IsVoltageSensor(sensor) || IsCurrentSensor(sensor))
+                .Where(sensor => sensor.NumericValue.HasValue)
+                .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
+                .ToList(),
+            AllNumeric = sensors
+                .Where(sensor => sensor.NumericValue.HasValue)
+                .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
+                .ToList(),
+            StatusSensors = sensors
+                .Where(sensor => !sensor.NumericValue.HasValue)
+                .Select(sensor => BuildVisualizationPoint(sensor, GetHardwareTypeName(sensor)))
+                .ToList(),
+            Health = sensors
+                .Where(IsHealthSensor)
+                .Select(sensor => BuildVisualizationPoint(sensor, T("Dashboard.TypeStatus")))
+                .ToList(),
         };
     }
 
@@ -1800,12 +3032,32 @@ public sealed partial class MainPage : Page
             CurrentUnit = T("SensorUnit.Amps"),
             TrendTitle = T("Dashboard.TrendTitle"),
             TrendSubtitle = T("Dashboard.TrendSubtitle"),
-            TempUnit = "°C",
+            TempUnit = T("SensorUnit.Celsius"),
             CpuUsage = T("Dashboard.CpuUsage"),
             MemoryUsage = T("Dashboard.MemoryUsage"),
             IoUsage = T("Dashboard.IoUsage"),
             SystemUsage = T("Dashboard.SystemUsage"),
+            CpuUsageShort = T("Dashboard.CpuUsageShort"),
+            MemoryUsageShort = T("Dashboard.MemoryUsageShort"),
+            IoUsageShort = T("Dashboard.IoUsageShort"),
+            SystemUsageShort = T("Dashboard.SystemUsageShort"),
+            FanShortLabel = T("Dashboard.FanShortLabel"),
             CurrentSnapshot = T("Dashboard.CurrentSnapshot"),
+            HistoryRange = T("Dashboard.HistoryRange"),
+            RangeLive = T("Dashboard.RangeLive"),
+            Range6Hours = T("Dashboard.Range6Hours"),
+            Range1Day = T("Dashboard.Range1Day"),
+            Range3Days = T("Dashboard.Range3Days"),
+            Range7Days = T("Dashboard.Range7Days"),
+            RangeCustom = T("Dashboard.RangeCustom"),
+            RangeStart = T("Dashboard.RangeStart"),
+            RangeEnd = T("Dashboard.RangeEnd"),
+            RangeAverage = T("Dashboard.RangeAverage"),
+            RangePeak = T("Dashboard.RangePeak"),
+            RangeLatest = T("Dashboard.RangeLatest"),
+            NoHistoryData = T("Dashboard.NoHistoryData"),
+            TempPercentUnit = T("Dashboard.TempPercentUnit"),
+            CountUnit = T("Dashboard.CountUnit"),
             OverallTitle = T("Dashboard.OverallTitle"),
             OverallSubtitle = T("Dashboard.OverallSubtitle"),
             TemperatureTitle = T("Dashboard.TemperatureTitle"),
@@ -1822,42 +3074,44 @@ public sealed partial class MainPage : Page
             TypePower = T("Dashboard.TypePower"),
             TypeVoltage = T("Dashboard.TypeVoltage"),
             TypeCurrent = T("Dashboard.TypeCurrent"),
+            StatusOk = T("Dashboard.StatusOk"),
+            StatusWarning = T("Dashboard.StatusWarning"),
             Value = T("Dashboard.Value"),
             Status = T("Dashboard.Status"),
             Unit = T("Dashboard.Unit"),
         };
     }
 
-    private object BuildVisualizationSummary()
+    private VisualizationSummary BuildVisualizationSummary(IReadOnlyList<SensorReading> sensors, DateTime timestamp)
     {
-        var temperatureValues = Sensors
+        var temperatureValues = sensors
             .Where(IsTemperatureSensor)
             .Where(sensor => sensor.NumericValue.HasValue)
             .Select(sensor => sensor.NumericValue!.Value)
             .ToList();
-        var fanValues = Sensors
+        var fanValues = sensors
             .Where(IsFanSensor)
             .Where(sensor => sensor.NumericValue.HasValue)
             .Select(sensor => sensor.NumericValue!.Value)
             .ToList();
-        var performanceValues = Sensors
+        var performanceValues = sensors
             .Where(IsPerformanceSensor)
             .Where(sensor => sensor.NumericValue.HasValue)
             .Select(sensor => sensor.NumericValue!.Value)
             .ToList();
-        var electricalValues = Sensors
+        var electricalValues = sensors
             .Where(sensor => IsPowerWattsSensor(sensor) || IsVoltageSensor(sensor) || IsCurrentSensor(sensor))
             .Where(sensor => sensor.NumericValue.HasValue)
             .ToList();
 
-        var okCount = Sensors.Count(IsOkStatus);
-        var warningCount = Sensors.Count - okCount;
-        var powerWatts = Sensors.FirstOrDefault(IsPowerWattsSensor)?.NumericValue;
-        var voltageValues = Sensors.Where(IsVoltageSensor).Where(sensor => sensor.NumericValue.HasValue).Select(sensor => sensor.NumericValue!.Value).ToList();
-        var currentValues = Sensors.Where(IsCurrentSensor).Where(sensor => sensor.NumericValue.HasValue).Select(sensor => sensor.NumericValue!.Value).ToList();
-        return new
+        var okCount = sensors.Count(IsOkStatus);
+        var warningCount = sensors.Count - okCount;
+        var powerWatts = sensors.FirstOrDefault(IsPowerWattsSensor)?.NumericValue;
+        var voltageValues = sensors.Where(IsVoltageSensor).Where(sensor => sensor.NumericValue.HasValue).Select(sensor => sensor.NumericValue!.Value).ToList();
+        var currentValues = sensors.Where(IsCurrentSensor).Where(sensor => sensor.NumericValue.HasValue).Select(sensor => sensor.NumericValue!.Value).ToList();
+        return new VisualizationSummary
         {
-            SensorCount = Sensors.Count,
+            SensorCount = sensors.Count,
             TemperatureCount = temperatureValues.Count,
             FanCount = fanValues.Count,
             PerformanceCount = performanceValues.Count,
@@ -1873,19 +3127,19 @@ public sealed partial class MainPage : Page
             AverageVoltage = voltageValues.Count == 0 ? (double?)null : Math.Round(voltageValues.Average(), 1),
             CurrentCount = currentValues.Count,
             TotalCurrent = currentValues.Count == 0 ? (double?)null : Math.Round(currentValues.Sum(), 2),
-            CpuUsage = FindNumericSensorValue("CPU Usage"),
-            MemUsage = FindNumericSensorValue("MEM Usage"),
-            IoUsage = FindNumericSensorValue("IO Usage"),
-            SysUsage = FindNumericSensorValue("SYS Usage"),
+            CpuUsage = FindNumericSensorValue(sensors, "CPU Usage"),
+            MemUsage = FindNumericSensorValue(sensors, "MEM Usage"),
+            IoUsage = FindNumericSensorValue(sensors, "IO Usage"),
+            SysUsage = FindNumericSensorValue(sensors, "SYS Usage"),
             OkCount = okCount,
             WarningCount = warningCount,
-            LastUpdated = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+            LastUpdated = timestamp.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
         };
     }
 
-    private object BuildVisualizationPoint(SensorReading sensor, string type)
+    private VisualizationPoint BuildVisualizationPoint(SensorReading sensor, string type)
     {
-        return new
+        return new VisualizationPoint
         {
             Id = BuildSensorStableId(sensor),
             Name = BuildVisualizationSensorName(sensor),
@@ -1897,9 +3151,9 @@ public sealed partial class MainPage : Page
         };
     }
 
-    private object[] BuildTypeCounts()
+    private object[] BuildTypeCounts(IReadOnlyList<SensorReading> sensors)
     {
-        return Sensors
+        return sensors
             .GroupBy(GetHardwareTypeName)
             .OrderByDescending(group => group.Count())
             .Select(group => new { Name = group.Key, Value = group.Count() })
@@ -1907,9 +3161,9 @@ public sealed partial class MainPage : Page
             .ToArray();
     }
 
-    private object[] BuildSensorTree()
+    private object[] BuildSensorTree(IReadOnlyList<SensorReading> sensors)
     {
-        return Sensors
+        return sensors
             .GroupBy(GetHardwareTypeName)
             .OrderByDescending(group => group.Count())
             .Select(group => new
@@ -1935,9 +3189,9 @@ public sealed partial class MainPage : Page
             .ToArray();
     }
 
-    private double? FindNumericSensorValue(string key)
+    private static double? FindNumericSensorValue(IEnumerable<SensorReading> sensors, string key)
     {
-        return Sensors.FirstOrDefault(sensor => sensor.Key.Equals(key, StringComparison.OrdinalIgnoreCase))?.NumericValue;
+        return sensors.FirstOrDefault(sensor => sensor.Key.Equals(key, StringComparison.OrdinalIgnoreCase))?.NumericValue;
     }
 
     private string GetHardwareTypeName(SensorReading sensor)
@@ -1999,6 +3253,7 @@ public sealed partial class MainPage : Page
 
     private void RefreshLocalizedSensorRows()
     {
+        _localizedSensorsDirty = false;
         LocalizedSensors.Clear();
         foreach (var sensor in Sensors)
         {
@@ -2012,6 +3267,25 @@ public sealed partial class MainPage : Page
                 Status = BuildLocalizedSensorStatus(sensor.Status),
                 NumericValue = sensor.NumericValue,
             });
+        }
+    }
+
+    private void MarkLocalizedSensorRowsDirty()
+    {
+        _localizedSensorsDirty = true;
+        RefreshLocalizedSensorRowsIfVisible();
+    }
+
+    private void RefreshLocalizedSensorRowsIfVisible()
+    {
+        if (!_localizedSensorsDirty)
+        {
+            return;
+        }
+
+        if (SensorsView.Visibility == Visibility.Visible)
+        {
+            RefreshLocalizedSensorRows();
         }
     }
 
@@ -2084,45 +3358,9 @@ public sealed partial class MainPage : Page
         return string.IsNullOrWhiteSpace(key) ? status : T(key);
     }
 
-    private string TranslateSensorValue(string value)
+    private static string TranslateSensorValue(string value)
     {
-        var key = NormalizeSensorToken(value) switch
-        {
-            "no reading" => "SensorValue.NoReading",
-            "general chassis intrusion" => "SensorValue.GeneralChassisIntrusion",
-            "fully redundant" => "SensorValue.FullyRedundant",
-            "not redundant" => "SensorValue.NotRedundant",
-            "redundancy lost" => "SensorValue.RedundancyLost",
-            "redundancy degraded" => "SensorValue.RedundancyDegraded",
-            "oem specific" => "SensorValue.OemSpecific",
-            "presence detected" => "SensorValue.PresenceDetected",
-            "present" => "SensorValue.Present",
-            "not present" => "SensorValue.NotPresent",
-            "absent" => "SensorValue.Absent",
-            "enabled" => "SensorValue.Enabled",
-            "disabled" => "SensorValue.Disabled",
-            "active" => "SensorValue.Active",
-            "inactive" => "SensorValue.Inactive",
-            "good" => "SensorValue.Good",
-            "ok" => "SensorStatus.Ok",
-            "fault" => "SensorValue.Fault",
-            "open" => "SensorValue.Open",
-            "closed" => "SensorValue.Closed",
-            "connected" => "SensorValue.Connected",
-            "disconnected" => "SensorValue.Disconnected",
-            "state asserted" => "SensorValue.StateAsserted",
-            "state deasserted" => "SensorValue.StateDeasserted",
-            "asserted" => "SensorValue.Asserted",
-            "deasserted" => "SensorValue.Deasserted",
-            "detected" => "SensorValue.Detected",
-            "not detected" => "SensorValue.NotDetected",
-            "device present" => "SensorValue.Present",
-            "device absent" => "SensorValue.Absent",
-            "unknown" => "SensorValue.Unknown",
-            _ => string.Empty,
-        };
-
-        return string.IsNullOrWhiteSpace(key) ? value : T(key);
+        return LocalizationService.TranslateSensorValue(value);
     }
 
     private static string NormalizeSensorToken(string value)
@@ -2138,6 +3376,11 @@ public sealed partial class MainPage : Page
     private string BuildVisualizationSensorName(SensorReading sensor)
     {
         var key = BuildSensorTitle(sensor).Trim();
+        var normalizedDisplayName = NormalizeSensorToken(key);
+        if (LocalizationService.SensorDisplayNameTranslationKeys.ContainsKey(normalizedDisplayName))
+        {
+            return LocalizationService.TranslateSensorDisplayName(key);
+        }
 
         if (key.Equals("CPU Usage", StringComparison.OrdinalIgnoreCase))
         {
@@ -2226,18 +3469,70 @@ public sealed partial class MainPage : Page
             return F("SensorDisplay.TemperatureIndexed", tempMatch.Groups[1].Value);
         }
 
+        if (ShouldUseGenericHardwareEventTitle(sensor, key))
+        {
+            var recordId = string.IsNullOrWhiteSpace(sensor.SensorId)
+                ? "SDR"
+                : SensorSubtitleFormatter.FormatRecordId(sensor.SensorId);
+            return F("SensorDisplay.HardwareEvent", recordId);
+        }
+
         return key;
+    }
+
+    private static bool ShouldUseGenericHardwareEventTitle(SensorReading sensor, string displayName)
+    {
+        return ContainsAsciiLetter(displayName) &&
+               (!sensor.NumericValue.HasValue || string.IsNullOrWhiteSpace(sensor.Unit));
+    }
+
+    private static bool ContainsAsciiLetter(string value)
+    {
+        return value.Any(character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
     }
 
     private static void ReplaceTiles(
         ObservableCollection<DashboardTileViewModel> target,
         System.Collections.Generic.IEnumerable<DashboardTileViewModel> tiles)
     {
-        target.Clear();
-        foreach (var tile in tiles)
+        var nextTiles = tiles.ToList();
+        for (var nextIndex = 0; nextIndex < nextTiles.Count; nextIndex++)
         {
-            target.Add(tile);
+            var nextTile = nextTiles[nextIndex];
+            var existingIndex = FindTileIndex(target, nextTile.Id);
+            if (existingIndex < 0)
+            {
+                target.Insert(nextIndex, nextTile);
+                continue;
+            }
+
+            var existingTile = target[existingIndex];
+            existingTile.UpdateFrom(nextTile);
+            if (existingIndex != nextIndex)
+            {
+                target.Move(existingIndex, nextIndex);
+            }
         }
+
+        for (var index = target.Count - 1; index >= nextTiles.Count; index--)
+        {
+            target.RemoveAt(index);
+        }
+    }
+
+    private static int FindTileIndex(
+        ObservableCollection<DashboardTileViewModel> target,
+        string id)
+    {
+        for (var index = 0; index < target.Count; index++)
+        {
+            if (string.Equals(target[index].Id, id, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     private static bool IsTemperatureSensor(SensorReading sensor)
@@ -2306,10 +3601,7 @@ public sealed partial class MainPage : Page
 
     private static string BuildSensorSubtitle(SensorReading sensor)
     {
-        var parts = new[] { sensor.SensorId, sensor.Entity }
-            .Where(part => !string.IsNullOrWhiteSpace(part));
-        var subtitle = string.Join(" · ", parts);
-        return string.IsNullOrWhiteSpace(subtitle) ? "SDR" : subtitle;
+        return SensorSubtitleFormatter.Format(sensor);
     }
 
     private void RebuildFanChannels()
@@ -2339,10 +3631,35 @@ public sealed partial class MainPage : Page
         RebuildPresets(Presets.Select(preset => preset.Clone()).ToList());
     }
 
-    private void MarkActivePreset(string? presetId)
+    private void MarkActivePreset(string? presetId, bool persistRunningState = false)
     {
         _activePresetId = presetId;
         RefreshPresetRows();
+        if (persistRunningState)
+        {
+            PersistRunningPresetState(presetId);
+        }
+    }
+
+    private void PersistRunningPresetState(string? presetId)
+    {
+        _settings.LastRunningPresetId = presetId ?? string.Empty;
+        _settings.LastSmartAutoPolicyRunning = false;
+        _settingsStore.Save(_settings);
+    }
+
+    private void PersistSmartAutoRunningState()
+    {
+        _settings.LastRunningPresetId = string.Empty;
+        _settings.LastSmartAutoPolicyRunning = true;
+        _settingsStore.Save(_settings);
+    }
+
+    private void ClearPersistedRunningState()
+    {
+        _settings.LastRunningPresetId = string.Empty;
+        _settings.LastSmartAutoPolicyRunning = false;
+        _settingsStore.Save(_settings);
     }
 
     private void ResetNewCurveEditor()
@@ -2396,6 +3713,11 @@ public sealed partial class MainPage : Page
         UpdateNewCurvePreview();
     }
 
+    private void SortNewCurvePointsInPlace()
+    {
+        SortCurvePointsInPlace(NewCurvePoints, point => point.TemperatureCelsius);
+    }
+
     private void ReplaceNewCurvePoints(IEnumerable<FanCurvePoint> points)
     {
         NewCurvePoints.Clear();
@@ -2425,7 +3747,53 @@ public sealed partial class MainPage : Page
         AddCurvePresetButtonText.Text = T("Control.SaveCurvePreset");
     }
 
-    private void DrawNewCurveCanvas(List<FanCurvePoint>? validPoints = null)
+    private void UpdateTemperatureCurvePointFromCanvas(FanCurvePoint point, Point position)
+    {
+        point.TemperatureCelsius = Math.Round(
+            FromCanvasX(position.X, NewCurveCanvas.ActualWidth, TemperatureCurveCanvasMinCelsius, TemperatureCurveCanvasMaxCelsius),
+            1);
+        point.FanPercent = Math.Round(FromCanvasY(position.Y, NewCurveCanvas.ActualHeight), 0);
+    }
+
+    private void UpdateTemperatureCurvePointFromCanvasInput(FanCurvePoint point, Point position)
+    {
+        _syncingTemperatureCurveInputsFromCanvas = true;
+        try
+        {
+            UpdateTemperatureCurvePointFromCanvas(point, position);
+        }
+        finally
+        {
+            _syncingTemperatureCurveInputsFromCanvas = false;
+        }
+    }
+
+    private FanCurvePoint? FindNearestTemperatureCurvePoint(Point position)
+    {
+        return FindNearestCurvePoint(
+            NewCurvePoints,
+            position,
+            point => ToCanvasX(point.TemperatureCelsius, NewCurveCanvas.ActualWidth, TemperatureCurveCanvasMinCelsius, TemperatureCurveCanvasMaxCelsius),
+            point => ToCanvasY(point.FanPercent, NewCurveCanvas.ActualHeight));
+    }
+
+    private void FinishTemperatureCurveDrag()
+    {
+        _draggingTemperatureCurvePoint = null;
+        NewCurveCanvas.ReleasePointerCaptures();
+        SortNewCurvePointsInPlace();
+        UpdateNewCurvePreview();
+    }
+
+    private List<FanCurvePoint> BuildTemperatureCurveCanvasPreviewPoints()
+    {
+        return NewCurvePoints
+            .Select(point => point.Clone())
+            .OrderBy(point => point.TemperatureCelsius)
+            .ToList();
+    }
+
+    private void DrawNewCurveCanvas(List<FanCurvePoint>? validPoints = null, bool useSmoothPreview = true)
     {
         if (NewCurveCanvas is null)
         {
@@ -2440,21 +3808,14 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        const double minTemperature = 30;
-        const double maxTemperature = 95;
-        const double minPercent = 0;
-        const double maxPercent = 100;
-
         double ToX(double temperature)
         {
-            var ratio = Math.Clamp((temperature - minTemperature) / (maxTemperature - minTemperature), 0, 1);
-            return 8 + ((width - 16) * ratio);
+            return ToCanvasX(temperature, width, TemperatureCurveCanvasMinCelsius, TemperatureCurveCanvasMaxCelsius);
         }
 
         double ToY(double percent)
         {
-            var ratio = Math.Clamp((percent - minPercent) / (maxPercent - minPercent), 0, 1);
-            return 8 + ((height - 16) * (1 - ratio));
+            return ToCanvasY(percent, height);
         }
 
         var gridBrush = ToBrush("#220F766E");
@@ -2508,13 +3869,14 @@ public sealed partial class MainPage : Page
             .ToList();
         if (points.Count == 0)
         {
+            DrawTemperatureCurveHoverOverlay(width, height);
             return;
         }
 
         if (validPoints is not null && validPoints.Count >= 2)
         {
             var linePoints = new PointCollection();
-            if (NewCurveSmoothSwitch.IsOn)
+            if (useSmoothPreview && NewCurveSmoothSwitch.IsOn)
             {
                 var previewPreset = new FanPreset
                 {
@@ -2563,6 +3925,449 @@ public sealed partial class MainPage : Page
             Canvas.SetTop(marker, ToY(point.FanPercent) - 6);
             NewCurveCanvas.Children.Add(marker);
         }
+
+        DrawTemperatureCurveHoverOverlay(width, height);
+    }
+
+    private void ResetNewPowerCurveEditor()
+    {
+        _editingPowerCurvePresetId = null;
+        NewPowerCurvePresetNameBox.Text = string.Empty;
+        NewPowerCurveSmoothSwitch.IsOn = false;
+        ReplaceNewPowerCurvePoints(FanPreset.ParsePowerCurvePoints(DefaultPowerCurvePointsText));
+        UpdateNewPowerCurveEditorModeText();
+        AddPowerCurvePresetButtonText.Text = T("Control.AddCurvePreset");
+        UpdateNewPowerCurvePreview();
+    }
+
+    private void UpdateNewPowerCurvePreview()
+    {
+        if (NewPowerCurvePreviewText is null)
+        {
+            return;
+        }
+
+        List<FanCurvePoint>? validPoints = null;
+        try
+        {
+            validPoints = ReadNewPowerCurvePoints();
+            NewPowerCurvePreviewText.Text = FanPreset.BuildPowerCurveChartText(validPoints, NewPowerCurveSmoothSwitch.IsOn);
+        }
+        catch (Exception ex)
+        {
+            NewPowerCurvePreviewText.Text = F("Status.CurvePreviewInvalid", ex.Message);
+        }
+
+        DrawNewPowerCurveCanvas(validPoints);
+    }
+
+    private List<FanCurvePoint> ReadNewPowerCurvePoints()
+    {
+        var preset = new FanPreset
+        {
+            Kind = FanPreset.PowerCurveKind,
+            Name = NewPowerCurvePresetNameBox.Text.Trim(),
+            CurvePoints = NewPowerCurvePoints.Select(point => point.Clone()).ToList(),
+            SmoothCurve = NewPowerCurveSmoothSwitch.IsOn,
+        };
+        preset.ValidateCurvePoints();
+        return preset.CurvePoints.Select(point => point.Clone()).ToList();
+    }
+
+    private void NormalizeNewPowerCurveEditorPoints()
+    {
+        ReplaceNewPowerCurvePoints(NewPowerCurvePoints.OrderBy(point => point.PowerWatts).Select(point => point.Clone()));
+        UpdateNewPowerCurvePreview();
+    }
+
+    private void SortNewPowerCurvePointsInPlace()
+    {
+        SortCurvePointsInPlace(NewPowerCurvePoints, point => point.PowerWatts);
+    }
+
+    private void ReplaceNewPowerCurvePoints(IEnumerable<FanCurvePoint> points)
+    {
+        NewPowerCurvePoints.Clear();
+        foreach (var point in points.OrderBy(point => point.PowerWatts))
+        {
+            NewPowerCurvePoints.Add(point.Clone());
+        }
+    }
+
+    private void UpdateNewPowerCurveEditorModeText()
+    {
+        if (NewPowerCurveEditorModeText is null || AddPowerCurvePresetButtonText is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_editingPowerCurvePresetId))
+        {
+            NewPowerCurveEditorModeText.Text = T("Control.NewCurveEditor");
+            AddPowerCurvePresetButtonText.Text = T("Control.AddCurvePreset");
+            return;
+        }
+
+        var preset = Presets.FirstOrDefault(item => item.Id.Equals(_editingPowerCurvePresetId, StringComparison.OrdinalIgnoreCase));
+        var presetName = preset?.DisplayName ?? NewPowerCurvePresetNameBox.Text.Trim();
+        NewPowerCurveEditorModeText.Text = F("Control.EditingCurvePreset", presetName);
+        AddPowerCurvePresetButtonText.Text = T("Control.SaveCurvePreset");
+    }
+
+    private void UpdatePowerCurvePointFromCanvas(FanCurvePoint point, Point position)
+    {
+        point.PowerWatts = Math.Round(
+            FromCanvasX(position.X, NewPowerCurveCanvas.ActualWidth, PowerCurveCanvasMinWatts, PowerCurveCanvasMaxWatts),
+            0);
+        point.FanPercent = Math.Round(FromCanvasY(position.Y, NewPowerCurveCanvas.ActualHeight), 0);
+    }
+
+    private void UpdatePowerCurvePointFromCanvasInput(FanCurvePoint point, Point position)
+    {
+        _syncingPowerCurveInputsFromCanvas = true;
+        try
+        {
+            UpdatePowerCurvePointFromCanvas(point, position);
+        }
+        finally
+        {
+            _syncingPowerCurveInputsFromCanvas = false;
+        }
+    }
+
+    private FanCurvePoint? FindNearestPowerCurvePoint(Point position)
+    {
+        return FindNearestCurvePoint(
+            NewPowerCurvePoints,
+            position,
+            point => ToCanvasX(point.PowerWatts, NewPowerCurveCanvas.ActualWidth, PowerCurveCanvasMinWatts, PowerCurveCanvasMaxWatts),
+            point => ToCanvasY(point.FanPercent, NewPowerCurveCanvas.ActualHeight));
+    }
+
+    private void FinishPowerCurveDrag()
+    {
+        _draggingPowerCurvePoint = null;
+        NewPowerCurveCanvas.ReleasePointerCaptures();
+        SortNewPowerCurvePointsInPlace();
+        UpdateNewPowerCurvePreview();
+    }
+
+    private List<FanCurvePoint> BuildPowerCurveCanvasPreviewPoints()
+    {
+        return NewPowerCurvePoints
+            .Select(point => point.Clone())
+            .OrderBy(point => point.PowerWatts)
+            .ToList();
+    }
+
+    private static void SortCurvePointsInPlace(ObservableCollection<FanCurvePoint> points, Func<FanCurvePoint, double> keySelector)
+    {
+        var ordered = points.OrderBy(keySelector).ToList();
+        for (var targetIndex = 0; targetIndex < ordered.Count; targetIndex++)
+        {
+            var currentIndex = points.IndexOf(ordered[targetIndex]);
+            if (currentIndex >= 0 && currentIndex != targetIndex)
+            {
+                points.Move(currentIndex, targetIndex);
+            }
+        }
+    }
+
+    private static FanCurvePoint? FindNearestCurvePoint(
+        IEnumerable<FanCurvePoint> points,
+        Point position,
+        Func<FanCurvePoint, double> toX,
+        Func<FanCurvePoint, double> toY)
+    {
+        FanCurvePoint? nearest = null;
+        var nearestDistanceSquared = CurvePointHitRadius * CurvePointHitRadius;
+        foreach (var point in points)
+        {
+            var dx = position.X - toX(point);
+            var dy = position.Y - toY(point);
+            var distanceSquared = (dx * dx) + (dy * dy);
+            if (distanceSquared <= nearestDistanceSquared)
+            {
+                nearest = point;
+                nearestDistanceSquared = distanceSquared;
+            }
+        }
+
+        return nearest;
+    }
+
+    private static double ToCanvasX(double value, double width, double minValue, double maxValue)
+    {
+        var drawableWidth = Math.Max(1, width - (CurveCanvasPadding * 2));
+        var ratio = Math.Clamp((value - minValue) / (maxValue - minValue), 0, 1);
+        return CurveCanvasPadding + (drawableWidth * ratio);
+    }
+
+    private static double ToCanvasY(double percent, double height)
+    {
+        var drawableHeight = Math.Max(1, height - (CurveCanvasPadding * 2));
+        var ratio = Math.Clamp(percent / 100, 0, 1);
+        return CurveCanvasPadding + (drawableHeight * (1 - ratio));
+    }
+
+    private static double FromCanvasX(double x, double width, double minValue, double maxValue)
+    {
+        var drawableWidth = Math.Max(1, width - (CurveCanvasPadding * 2));
+        var ratio = Math.Clamp((x - CurveCanvasPadding) / drawableWidth, 0, 1);
+        return minValue + ((maxValue - minValue) * ratio);
+    }
+
+    private static double FromCanvasY(double y, double height)
+    {
+        var drawableHeight = Math.Max(1, height - (CurveCanvasPadding * 2));
+        var ratio = Math.Clamp((y - CurveCanvasPadding) / drawableHeight, 0, 1);
+        return Math.Clamp(100 - (ratio * 100), 0, 100);
+    }
+
+    private void DrawNewPowerCurveCanvas(List<FanCurvePoint>? validPoints = null, bool useSmoothPreview = true)
+    {
+        if (NewPowerCurveCanvas is null)
+        {
+            return;
+        }
+
+        var width = NewPowerCurveCanvas.ActualWidth;
+        var height = NewPowerCurveCanvas.ActualHeight;
+        NewPowerCurveCanvas.Children.Clear();
+        if (width <= 8 || height <= 8)
+        {
+            return;
+        }
+
+        double ToX(double powerWatts)
+        {
+            return ToCanvasX(powerWatts, width, PowerCurveCanvasMinWatts, PowerCurveCanvasMaxWatts);
+        }
+
+        double ToY(double percent)
+        {
+            return ToCanvasY(percent, height);
+        }
+
+        var gridBrush = ToBrush("#223B82F6");
+        var axisBrush = ToBrush("#663B82F6");
+        for (var index = 0; index <= 4; index++)
+        {
+            var x = 8 + ((width - 16) * index / 4);
+            var y = 8 + ((height - 16) * index / 4);
+            NewPowerCurveCanvas.Children.Add(new Line
+            {
+                X1 = x,
+                X2 = x,
+                Y1 = 8,
+                Y2 = height - 8,
+                Stroke = gridBrush,
+                StrokeThickness = 1,
+            });
+            NewPowerCurveCanvas.Children.Add(new Line
+            {
+                X1 = 8,
+                X2 = width - 8,
+                Y1 = y,
+                Y2 = y,
+                Stroke = gridBrush,
+                StrokeThickness = 1,
+            });
+        }
+
+        NewPowerCurveCanvas.Children.Add(new Line
+        {
+            X1 = 8,
+            X2 = width - 8,
+            Y1 = height - 8,
+            Y2 = height - 8,
+            Stroke = axisBrush,
+            StrokeThickness = 1.4,
+        });
+        NewPowerCurveCanvas.Children.Add(new Line
+        {
+            X1 = 8,
+            X2 = 8,
+            Y1 = 8,
+            Y2 = height - 8,
+            Stroke = axisBrush,
+            StrokeThickness = 1.4,
+        });
+
+        var points = NewPowerCurvePoints
+            .Select(point => point.Clone())
+            .OrderBy(point => point.PowerWatts)
+            .ToList();
+        if (points.Count == 0)
+        {
+            DrawPowerCurveHoverOverlay(width, height);
+            return;
+        }
+
+        if (validPoints is not null && validPoints.Count >= 2)
+        {
+            var linePoints = new PointCollection();
+            if (useSmoothPreview && NewPowerCurveSmoothSwitch.IsOn)
+            {
+                var previewPreset = new FanPreset
+                {
+                    Kind = FanPreset.PowerCurveKind,
+                    CurvePoints = validPoints.Select(point => point.Clone()).ToList(),
+                    SmoothCurve = true,
+                };
+
+                var first = validPoints[0].PowerWatts;
+                var last = validPoints[^1].PowerWatts;
+                const int samples = 48;
+                for (var index = 0; index < samples; index++)
+                {
+                    var ratio = index / (double)(samples - 1);
+                    var powerWatts = first + ((last - first) * ratio);
+                    linePoints.Add(new Point(ToX(powerWatts), ToY(previewPreset.CalculateFanPercentForPower(powerWatts))));
+                }
+            }
+            else
+            {
+                foreach (var point in validPoints)
+                {
+                    linePoints.Add(new Point(ToX(point.PowerWatts), ToY(point.FanPercent)));
+                }
+            }
+
+            NewPowerCurveCanvas.Children.Add(new Polyline
+            {
+                Points = linePoints,
+                Stroke = ToBrush("#FF2563EB"),
+                StrokeThickness = 3,
+            });
+        }
+
+        foreach (var point in points)
+        {
+            var marker = new Ellipse
+            {
+                Width = 12,
+                Height = 12,
+                Fill = ToBrush("#FF3B82F6"),
+                Stroke = ToBrush("#FFFFFFFF"),
+                StrokeThickness = 2,
+            };
+            Canvas.SetLeft(marker, ToX(point.PowerWatts) - 6);
+            Canvas.SetTop(marker, ToY(point.FanPercent) - 6);
+            NewPowerCurveCanvas.Children.Add(marker);
+        }
+
+        DrawPowerCurveHoverOverlay(width, height);
+    }
+
+    private void DrawTemperatureCurveHoverOverlay(double width, double height)
+    {
+        if (_temperatureCurveHoverPosition is not { } position)
+        {
+            return;
+        }
+
+        var temperature = FromCanvasX(position.X, width, TemperatureCurveCanvasMinCelsius, TemperatureCurveCanvasMaxCelsius);
+        var percent = FromCanvasY(position.Y, height);
+        var fanSpeedLabel = GetCurveHoverFanSpeedLabel();
+        DrawCurveHoverOverlay(
+            NewCurveCanvas,
+            position,
+            width,
+            height,
+            $"{T("Dashboard.TypeTemperature")} {temperature:0.0} {T("SensorUnit.Celsius")}\n{fanSpeedLabel} {percent:0}%",
+            "#FF0F766E");
+    }
+
+    private void DrawPowerCurveHoverOverlay(double width, double height)
+    {
+        if (_powerCurveHoverPosition is not { } position)
+        {
+            return;
+        }
+
+        var powerWatts = FromCanvasX(position.X, width, PowerCurveCanvasMinWatts, PowerCurveCanvasMaxWatts);
+        var percent = FromCanvasY(position.Y, height);
+        var fanSpeedLabel = GetCurveHoverFanSpeedLabel();
+        DrawCurveHoverOverlay(
+            NewPowerCurveCanvas,
+            position,
+            width,
+            height,
+            $"{T("SensorDisplay.PowerConsumption")} {powerWatts:0} {T("SensorUnit.Watts")}\n{fanSpeedLabel} {percent:0}%",
+            "#FF2563EB");
+    }
+
+    private static string GetCurveHoverFanSpeedLabel()
+    {
+        return string.Equals(LocalizationService.CurrentLanguage, "zh-CN", StringComparison.OrdinalIgnoreCase)
+            ? CurveHoverFanSpeedChineseLabel
+            : LocalizationService.T("Preset.Percent");
+    }
+
+    private static void DrawCurveHoverOverlay(
+        Canvas canvas,
+        Point position,
+        double width,
+        double height,
+        string label,
+        string accentHex)
+    {
+        var x = Math.Clamp(position.X, CurveCanvasPadding, Math.Max(CurveCanvasPadding, width - CurveCanvasPadding));
+        var y = Math.Clamp(position.Y, CurveCanvasPadding, Math.Max(CurveCanvasPadding, height - CurveCanvasPadding));
+        var guideBrush = ToBrush(accentHex);
+        var dash = new DoubleCollection { 3, 3 };
+        canvas.Children.Add(new Line
+        {
+            X1 = x,
+            X2 = x,
+            Y1 = CurveCanvasPadding,
+            Y2 = height - CurveCanvasPadding,
+            Stroke = guideBrush,
+            StrokeDashArray = dash,
+            StrokeThickness = 1.2,
+        });
+        canvas.Children.Add(new Line
+        {
+            X1 = CurveCanvasPadding,
+            X2 = width - CurveCanvasPadding,
+            Y1 = y,
+            Y2 = y,
+            Stroke = guideBrush,
+            StrokeDashArray = new DoubleCollection { 3, 3 },
+            StrokeThickness = 1.2,
+        });
+        var marker = new Ellipse
+        {
+            Width = 8,
+            Height = 8,
+            Fill = guideBrush,
+            Stroke = ToBrush("#FFFFFFFF"),
+            StrokeThickness = 1.5,
+        };
+        Canvas.SetLeft(marker, x - 4);
+        Canvas.SetTop(marker, y - 4);
+        canvas.Children.Add(marker);
+
+        var labelBorder = new Border
+        {
+            MaxWidth = 160,
+            Padding = new Thickness(8, 5, 8, 5),
+            Background = ToBrush("#EE0F172A"),
+            BorderBrush = guideBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Child = new TextBlock
+            {
+                Foreground = ToBrush("#FFFFFFFF"),
+                FontSize = 12,
+                Text = label,
+                TextWrapping = TextWrapping.Wrap,
+            },
+        };
+        Canvas.SetLeft(labelBorder, Math.Clamp(x + 12, CurveCanvasPadding, Math.Max(CurveCanvasPadding, width - 160)));
+        Canvas.SetTop(labelBorder, Math.Clamp(y - 58, CurveCanvasPadding, Math.Max(CurveCanvasPadding, height - 58)));
+        canvas.Children.Add(labelBorder);
     }
 
     private FanPreset ReadPresetFromSender(object sender)
@@ -2580,7 +4385,7 @@ public sealed partial class MainPage : Page
     {
         if (string.IsNullOrWhiteSpace(preset.Kind))
         {
-            throw new InvalidOperationException("Fan preset kind is empty.");
+            throw new InvalidOperationException(T("Validation.PresetKindRequired"));
         }
 
         var clone = preset.Clone();
@@ -2609,9 +4414,16 @@ public sealed partial class MainPage : Page
             clone.ApplyCurvePointsText();
             clone.ValidateCurvePoints();
         }
+        else if (clone.Kind.Equals(FanPreset.PowerCurveKind, StringComparison.OrdinalIgnoreCase))
+        {
+            clone.Kind = FanPreset.PowerCurveKind;
+            clone.Percent = 0;
+            clone.ApplyCurvePointsText();
+            clone.ValidateCurvePoints();
+        }
         else
         {
-            throw new InvalidOperationException($"Unsupported fan preset kind: {clone.Kind}");
+            throw new InvalidOperationException(F("Validation.UnsupportedPresetKind", clone.Kind));
         }
 
         if (string.IsNullOrWhiteSpace(clone.NameKey) && string.IsNullOrWhiteSpace(clone.Name))
@@ -2699,8 +4511,7 @@ public sealed partial class MainPage : Page
 
         if (message.Contains(T("Status.RefreshingSensors"), StringComparison.OrdinalIgnoreCase) ||
             message.Contains(T("Status.Connecting"), StringComparison.OrdinalIgnoreCase) ||
-            message.Contains(T("Hero.RequestRunning").Split('{')[0], StringComparison.OrdinalIgnoreCase) ||
-            message.Contains("Requesting", StringComparison.OrdinalIgnoreCase))
+            MessageMatchesLocalizedTemplate(message, "Hero.RequestRunning"))
         {
             return T("Hero.RequestShortRunning");
         }
@@ -2711,19 +4522,19 @@ public sealed partial class MainPage : Page
         }
 
         if (message.Contains(T("Status.AutoStarted"), StringComparison.OrdinalIgnoreCase) ||
-            message.Contains(T("Status.CurvePresetStarted").Split('{')[0], StringComparison.OrdinalIgnoreCase))
+            MessageMatchesLocalizedTemplate(message, "Status.CurvePresetStarted"))
         {
             return T("Hero.RequestShortRunning");
         }
 
         if (message.Contains(T("Status.DellAutoRestored"), StringComparison.OrdinalIgnoreCase) ||
-            message.Contains(T("Status.EmergencyAuto").Split('{')[0], StringComparison.OrdinalIgnoreCase))
+            MessageMatchesLocalizedTemplate(message, "Status.EmergencyAuto"))
         {
             return T("Hero.RequestShortAuto");
         }
 
-        if (message.Contains(T("Status.SmartFanApplied").Split('{')[0], StringComparison.OrdinalIgnoreCase) ||
-            message.Contains(T("Status.CurveFanApplied").Split('{')[0], StringComparison.OrdinalIgnoreCase))
+        if (MessageMatchesLocalizedTemplate(message, "Status.SmartFanApplied") ||
+            MessageMatchesLocalizedTemplate(message, "Status.CurveFanApplied"))
         {
             return T("Hero.RequestShortApplied");
         }
@@ -2733,8 +4544,15 @@ public sealed partial class MainPage : Page
 
     private bool IsPollingSkipMessage(string message)
     {
-        return message.Contains("跳过", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("skipped", StringComparison.OrdinalIgnoreCase);
+        return PollingSkipStatusKeys.Any(key => MessageMatchesLocalizedTemplate(message, key));
+    }
+
+    private bool MessageMatchesLocalizedTemplate(string message, string resourceKey)
+    {
+        var template = T(resourceKey);
+        var marker = template.Split('{')[0].Trim();
+        return !string.IsNullOrWhiteSpace(marker) &&
+               message.Contains(marker, StringComparison.OrdinalIgnoreCase);
     }
 
     private void ShowFailure(Exception ex)
@@ -2806,7 +4624,12 @@ public sealed partial class MainPage : Page
 
     private void AddVolatileLog(string level, string message)
     {
-        Logs.Insert(0, new LogEntry { Level = level, Message = message });
+        Logs.Insert(0, new LogEntry
+        {
+            Level = level,
+            SemanticLevel = GetDisplayLogSemanticLevel(level),
+            Message = message,
+        });
         while (Logs.Count > 80)
         {
             Logs.RemoveAt(Logs.Count - 1);
@@ -2835,6 +4658,16 @@ public sealed partial class MainPage : Page
 
     private static string NormalizeLogLevel(string level)
     {
+        return GetDisplayLogSemanticLevel(level) switch
+        {
+            "Error" => "Error",
+            "Warning" => "Warning",
+            _ => "Info",
+        };
+    }
+
+    private static string GetDisplayLogSemanticLevel(string level)
+    {
         if (level.Equals(T("Log.Error"), StringComparison.OrdinalIgnoreCase) ||
             level.Equals(T("Log.Fail"), StringComparison.OrdinalIgnoreCase))
         {
@@ -2844,6 +4677,11 @@ public sealed partial class MainPage : Page
         if (level.Equals(T("Log.Warn"), StringComparison.OrdinalIgnoreCase))
         {
             return "Warning";
+        }
+
+        if (level.Equals(T("Log.Ok"), StringComparison.OrdinalIgnoreCase))
+        {
+            return "Success";
         }
 
         return "Info";
@@ -2898,14 +4736,19 @@ public sealed partial class MainPage : Page
 
     private string GetSelectedLanguage()
     {
-        return LanguageComboBox.SelectedItem is ComboBoxItem item && item.Tag is string tag
-            ? tag
+        return LanguageComboBox.SelectedItem is LanguageOption option
+            ? option.Code
             : LocalizationService.DefaultLanguage;
     }
 
     private static string GetSelectedLanguageDisplayName(string language)
     {
         return LocalizationService.SupportedLanguages.First(option => option.Code == language).DisplayName;
+    }
+
+    private void SelectLanguage(string language)
+    {
+        LanguageComboBox.SelectedItem = LocalizationService.SupportedLanguages.First(option => option.Code == language);
     }
 
     private void ApplyTheme(string theme)
@@ -2925,14 +4768,24 @@ public sealed partial class MainPage : Page
         CurrentTargetText.Text = _settings.Host;
         NewPresetNameBox.PlaceholderText = T("Preset.NewNamePlaceholder");
         NewCurvePresetNameBox.PlaceholderText = T("Preset.CurveNewNamePlaceholder");
+        NewPowerCurvePresetNameBox.PlaceholderText = T("Preset.PowerCurveNewNamePlaceholder");
+        CurveMinAxisText.Text = $"{TemperatureCurveCanvasMinCelsius:0} {T("SensorUnit.Celsius")}";
+        CurveMaxAxisText.Text = $"{TemperatureCurveCanvasMaxCelsius:0} {T("SensorUnit.Celsius")}";
+        PowerCurveSectionTitleText.Text = T("Control.PowerCurvePresetPoints");
+        PowerCurveHelpText.Text = T("Control.PowerCurvePresetHelp");
+        PowerCurveMinAxisText.Text = $"{PowerCurveCanvasMinWatts:0} {T("SensorUnit.Watts")}";
+        PowerCurveMaxAxisText.Text = $"{PowerCurveCanvasMaxWatts:0} {T("SensorUnit.Watts")}";
         UpdateNewCurveEditorModeText();
         UpdateNewCurvePreview();
+        UpdateNewPowerCurveEditorModeText();
+        UpdateNewPowerCurvePreview();
         VisualizationStateText.Text = _visualizationReady
             ? T("Dashboard.VisualizationReady")
             : T("Dashboard.VisualizationLoading");
         FanSummaryText.Text = F("Overview.FansCount", _settings.FanCount);
         if (Sensors.Count == 0)
         {
+            CpuTemperatureText.Text = T("Hero.LiveWaiting");
             FanRpmSummaryText.Text = T("State.WaitingRefresh");
             PowerSummaryText.Text = T("Hero.LiveWaiting");
             PowerSummaryDetailText.Text = T("Overview.NoPowerReading");
@@ -2947,14 +4800,15 @@ public sealed partial class MainPage : Page
         }
 
         UpdateHeroRealtimeMetrics();
+        UpdateHeroThermalModeTexts();
         SetModeSummary(_modeSummaryKey, _modeSummaryArgs);
         SetAutoPolicySummary(_autoPolicyRunning);
         UpdateHeroRequestStatusTexts();
         UpdatePollingStatusTexts();
         UpdateIndividualFanWarning();
-        RefreshLocalizedSensorRows();
+        MarkLocalizedSensorRowsDirty();
         RefreshPresetRows();
-        SendVisualizationSnapshot();
+        ScheduleVisualizationSnapshot();
 
         foreach (var fanChannel in FanChannels)
         {
@@ -2966,10 +4820,68 @@ public sealed partial class MainPage : Page
     {
         _modeSummaryKey = key;
         _modeSummaryArgs = args;
-        var modeText = args.Length == 0 ? T(key) : F(key, args);
+        var modeText = FormatLocalizedModeSummary(key, args);
         ModeSummaryText.Text = modeText;
         HeroModeStateText.Text = modeText;
+        UpdateHeroThermalModeTexts();
         ControlCurrentModeText.Text = F("Control.CurrentMode", modeText);
+    }
+
+    private string FormatLocalizedModeSummary(string key, object[] args)
+    {
+        return args.Length == 0 ? T(key) : F(key, args);
+    }
+
+    private void UpdateHeroThermalModeTexts()
+    {
+        if (HeroThermalModeLabelText is null || HeroThermalModeValueText is null)
+        {
+            return;
+        }
+
+        HeroThermalModeLabelText.Text = T("Hero.ModeStatus");
+        HeroThermalModeValueText.Text = FormatHeroThermalModeText(_modeSummaryKey, _modeSummaryArgs);
+    }
+
+    private string FormatHeroThermalModeText(string key, IReadOnlyList<object> args)
+    {
+        var isSimplifiedChinese = string.Equals(LocalizationService.CurrentLanguage, "zh-CN", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(key, "Mode.DellAuto", StringComparison.Ordinal))
+        {
+            return isSimplifiedChinese ? HeroThermalDellAutoChinese : T("Control.DellAuto");
+        }
+
+        if (string.Equals(key, "Mode.SmartAuto", StringComparison.Ordinal) ||
+            string.Equals(key, "Mode.SmartPercent", StringComparison.Ordinal))
+        {
+            var modeName = isSimplifiedChinese ? HeroThermalSmartPolicyChinese : T("Control.SmartAutoPolicy");
+            return args.Count > 0 ? $"{modeName} ({args[0]}%)" : modeName;
+        }
+
+        if (string.Equals(key, "Mode.CurveAuto", StringComparison.Ordinal) ||
+            string.Equals(key, "Mode.CurvePercent", StringComparison.Ordinal))
+        {
+            return FormatHeroCurveThermalModeText(args, isSimplifiedChinese);
+        }
+
+        return FormatLocalizedModeSummary(key, args.ToArray());
+    }
+
+    private string FormatHeroCurveThermalModeText(IReadOnlyList<object> args, bool isSimplifiedChinese)
+    {
+        var presetName = args.Count > 0
+            ? Convert.ToString(args[0], CultureInfo.CurrentCulture) ?? string.Empty
+            : _activeCurvePreset?.DisplayName ?? string.Empty;
+        var modeName = _activeCurvePreset?.IsPowerCurvePreset == true
+            ? isSimplifiedChinese ? HeroThermalPowerCurveAutoChinese : $"{T("Preset.PowerCurveBadge")} {T("Hero.RequestShortAuto")}"
+            : isSimplifiedChinese ? HeroThermalTemperatureCurveAutoChinese : $"{T("Preset.CurveBadge")} {T("Hero.RequestShortAuto")}";
+
+        if (args.Count > 1)
+        {
+            return $"{modeName}: {presetName} ({args[1]}%)";
+        }
+
+        return string.IsNullOrWhiteSpace(presetName) ? modeName : $"{modeName}: {presetName}";
     }
 
     private void SetAutoPolicySummary(bool running)
@@ -2995,6 +4907,7 @@ public sealed partial class MainPage : Page
         if (_isConnecting)
         {
             ConnectionStateText.Text = T("State.Connecting");
+            UpdatePollingActionButtonLabels();
             return;
         }
 
@@ -3004,10 +4917,30 @@ public sealed partial class MainPage : Page
             ConnectionStateText.Text = _lastPollTime.HasValue
                 ? F("State.ConnectedPollingTime", intervalSeconds, _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
                 : F("State.ConnectedPolling", intervalSeconds);
+            UpdatePollingActionButtonLabels();
             return;
         }
 
         ConnectionStateText.Text = _hasDisconnected ? T("State.Disconnected") : T("State.NotConnected");
+        UpdatePollingActionButtonLabels();
+    }
+
+    private void UpdatePollingActionButtonLabels()
+    {
+        var isPolling = _sensorPollingTimer.IsEnabled;
+        var label = isPolling
+            ? T("Action.CancelPolling")
+            : T("Action.StartPolling");
+        foreach (var button in new[] { QuickPollingButton, SettingsPollingButton })
+        {
+            if (button is null)
+            {
+                continue;
+            }
+
+            button.Label = label;
+            button.IsEnabled = !_isConnecting;
+        }
     }
 
     private void SetConnectingState()
@@ -3015,6 +4948,7 @@ public sealed partial class MainPage : Page
         _isConnecting = true;
         _hasDisconnected = false;
         ConnectionStateText.Text = T("State.Connecting");
+        UpdatePollingActionButtonLabels();
         ShowStatus(T("Status.Connecting"), InfoBarSeverity.Informational);
     }
 
@@ -3108,9 +5042,119 @@ public sealed partial class MainPage : Page
         return LocalizationService.Format(key, args);
     }
 
+    private sealed class VisualizationSnapshot
+    {
+        public VisualizationSummary Summary { get; init; } = new();
+
+        public VisualizationCurrent Current { get; init; } = new();
+
+        public object[] TypeCounts { get; init; } = [];
+
+        public object[] SensorTree { get; init; } = [];
+    }
+
+    private sealed class VisualizationSummary
+    {
+        public int SensorCount { get; init; }
+
+        public int TemperatureCount { get; init; }
+
+        public int FanCount { get; init; }
+
+        public int PerformanceCount { get; init; }
+
+        public int ElectricalCount { get; init; }
+
+        public double? MaxTemperature { get; init; }
+
+        public double? AverageFanRpm { get; init; }
+
+        public double? MinFanRpm { get; init; }
+
+        public double? MaxFanRpm { get; init; }
+
+        public double? MaxPerformance { get; init; }
+
+        public double? AveragePerformance { get; init; }
+
+        public double? PowerWatts { get; init; }
+
+        public int VoltageCount { get; init; }
+
+        public double? AverageVoltage { get; init; }
+
+        public int CurrentCount { get; init; }
+
+        public double? TotalCurrent { get; init; }
+
+        public double? CpuUsage { get; init; }
+
+        public double? MemUsage { get; init; }
+
+        public double? IoUsage { get; init; }
+
+        public double? SysUsage { get; init; }
+
+        public int OkCount { get; init; }
+
+        public int WarningCount { get; init; }
+
+        public string LastUpdated { get; init; } = string.Empty;
+    }
+
+    private sealed class VisualizationCurrent
+    {
+        public List<VisualizationPoint> Temperatures { get; init; } = [];
+
+        public List<VisualizationPoint> Fans { get; init; } = [];
+
+        public List<VisualizationPoint> Power { get; init; } = [];
+
+        public List<VisualizationPoint> Performance { get; init; } = [];
+
+        public List<VisualizationPoint> Electrical { get; init; } = [];
+
+        public List<VisualizationPoint> AllNumeric { get; init; } = [];
+
+        public List<VisualizationPoint> StatusSensors { get; init; } = [];
+
+        public List<VisualizationPoint> Health { get; init; } = [];
+    }
+
+    private sealed class VisualizationPoint
+    {
+        public string Id { get; init; } = string.Empty;
+
+        public string Name { get; init; } = string.Empty;
+
+        public string Type { get; init; } = string.Empty;
+
+        public double? Value { get; init; }
+
+        public string Unit { get; init; } = string.Empty;
+
+        public string Status { get; init; } = string.Empty;
+
+        public string Subtitle { get; init; } = string.Empty;
+    }
+
     private sealed class SensorDashboardHistoryPoint
     {
+        public string Id { get; set; } = string.Empty;
+
         public string Time { get; set; } = string.Empty;
+
+        public string Timestamp { get; set; } = string.Empty;
+
+        public long UnixMilliseconds { get; set; }
+
+        public VisualizationSummary? Summary { get; set; }
+
+        public VisualizationCurrent? Current { get; set; }
+
+        public object[] TypeCounts { get; set; } = [];
+
+        public object[] SensorTree { get; set; } = [];
 
         public double? MaxTemperature { get; set; }
 

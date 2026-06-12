@@ -22,7 +22,7 @@ public partial class App : Application
     {
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
         {
-            WriteStartupLog(eventArgs.ExceptionObject.ToString() ?? "Unknown unhandled exception.");
+            WriteStartupLog(eventArgs.ExceptionObject.ToString() ?? "未知未处理异常。");
         };
 
         TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
