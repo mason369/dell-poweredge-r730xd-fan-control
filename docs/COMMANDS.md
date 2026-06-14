@@ -37,13 +37,13 @@ cd C:\DellR730xdFanControlCenter
 .\tools\Publish-ReleaseZip.ps1
 ```
 
-脚本会先执行 `tools\Publish-UnpackagedExe.ps1` 生成 `artifacts/exe/win-x64/`，再创建 `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`。创建后会把 zip 解压到临时目录，检查 `DellR730xdFanControlCenter.exe`、`Microsoft.WindowsAppRuntime.dll`、`Microsoft.ui.xaml.dll`、`DellR730xdFanControlCenter.pri`、`Assets/Charts/dashboard.html`、`Assets/Charts/echarts.min.js` 和 `BundledTools/ipmitool/ipmitool.exe`。本机验证下载后的 zip 能否启动时运行：
+脚本会先执行 `tools\Publish-UnpackagedExe.ps1` 生成 `artifacts/exe/win-x64/`，再创建 `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`。创建后会把 zip 解压到临时目录，检查 `DellR730xdFanControlCenter.exe`、`Microsoft.WindowsAppRuntime.dll`、`Microsoft.ui.xaml.dll`、`DellR730xdFanControlCenter.pri`、`Assets/Charts/dashboard.html`、`Assets/Charts/echarts.min.js` 和 `BundledTools/ipmitool/ipmitool.exe`。该 zip 是 unsigned unpackaged 下载物，不走 MSIX 安装；如果解压内容包含 `.msix`、`.pfx`、`.cer`、`AppxManifest.xml` 或 `Package.appxmanifest`，脚本会失败停止，避免 Release 包被证书信任链或包身份问题影响。本机验证下载后的 zip 能否启动时运行：
 
 ```powershell
 .\tools\Publish-ReleaseZip.ps1 -VerifyLaunch
 ```
 
-`-VerifyLaunch` 会从解压后的 zip 启动 exe，等待顶层窗口和窗口标题，并检查本次启动后是否出现新的 `.NET Runtime` 或 `Application Error` 事件；验证结束后会关闭该临时启动进程并删除临时解压目录。GitHub Actions 的 `Package Release` workflow 默认只做文件结构验证，不启动 GUI；手动触发时上传 workflow artifact，推送 `v*` tag 时还会用 `gh release upload --clobber` 覆盖同名 GitHub Release zip。
+`-VerifyLaunch` 会从解压后的 zip 启动 exe，等待顶层窗口和窗口标题，并检查本次启动后是否出现新的 `.NET Runtime` 或 `Application Error` 事件；验证结束后会关闭该临时启动进程并删除临时解压目录。GitHub Actions 的 `Package Release` workflow 默认只做文件结构和无签名包泄漏验证，不启动 GUI，也不调用 `tools\Publish-SignedMsix.ps1`、`Add-AppxPackage` 或 `Get-AuthenticodeSignature`；手动触发时上传 workflow artifact，推送 `v*` tag 时还会用 `gh release upload --clobber` 覆盖同名 GitHub Release zip。
 
 ## 命令日志与时间段记录
 

@@ -37,13 +37,13 @@ cd C:\DellR730xdFanControlCenter
 .\tools\Publish-ReleaseZip.ps1
 ```
 
-The script first runs `tools\Publish-UnpackagedExe.ps1` to create `artifacts/exe/win-x64/`, then creates `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`. After creation, it extracts the zip to a temporary directory and checks `DellR730xdFanControlCenter.exe`, `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `DellR730xdFanControlCenter.pri`, `Assets/Charts/dashboard.html`, `Assets/Charts/echarts.min.js`, and `BundledTools/ipmitool/ipmitool.exe`. To verify locally that the downloaded zip can launch, run:
+The script first runs `tools\Publish-UnpackagedExe.ps1` to create `artifacts/exe/win-x64/`, then creates `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`. After creation, it extracts the zip to a temporary directory and checks `DellR730xdFanControlCenter.exe`, `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `DellR730xdFanControlCenter.pri`, `Assets/Charts/dashboard.html`, `Assets/Charts/echarts.min.js`, and `BundledTools/ipmitool/ipmitool.exe`. This zip is an unsigned unpackaged download, not an MSIX installer. If extracted content contains `.msix`, `.pfx`, `.cer`, `AppxManifest.xml`, or `Package.appxmanifest`, the script fails so the release package is not affected by certificate trust chain or package identity problems. To verify locally that the downloaded zip can launch, run:
 
 ```powershell
 .\tools\Publish-ReleaseZip.ps1 -VerifyLaunch
 ```
 
-`-VerifyLaunch` starts the exe from the extracted zip, waits for a top-level window and title, and checks whether new `.NET Runtime` or `Application Error` events were logged after launch. It closes that temporary process and removes the extraction directory after verification. The GitHub Actions `Package Release` workflow performs file-layout verification only and does not start the GUI by default; manual runs upload a workflow artifact, while `v*` tags also replace the same-named GitHub Release zip using `gh release upload --clobber`.
+`-VerifyLaunch` starts the exe from the extracted zip, waits for a top-level window and title, and checks whether new `.NET Runtime` or `Application Error` events were logged after launch. It closes that temporary process and removes the extraction directory after verification. The GitHub Actions `Package Release` workflow performs file-layout and no-signed-package-leak verification only, does not start the GUI by default, and does not call `tools\Publish-SignedMsix.ps1`, `Add-AppxPackage`, or `Get-AuthenticodeSignature`; manual runs upload a workflow artifact, while `v*` tags also replace the same-named GitHub Release zip using `gh release upload --clobber`.
 
 ## Command Logs And Duration Records
 

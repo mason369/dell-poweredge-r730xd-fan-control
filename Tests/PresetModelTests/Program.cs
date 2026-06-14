@@ -2019,6 +2019,14 @@ static void RunPublishScriptChecks()
         releaseZipScript.Contains("VerifyLaunch", StringComparison.Ordinal),
         "Release zip verification should check WinUI runtime files, bundled ipmitool, and provide an explicit local launch verification mode.");
     Require(
+        releaseZipScript.Contains("\".msix\"", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("\".pfx\"", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("\".cer\"", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("AppxManifest.xml", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("Package.appxmanifest", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("signed/package-identity files are not allowed", StringComparison.Ordinal),
+        "Release zip verification should fail when signed MSIX, certificate, or package identity files leak into the unsigned downloadable zip.");
+    Require(
         releaseWorkflow.Contains("windows-latest", StringComparison.Ordinal) &&
         releaseWorkflow.Contains("dotnet run --project .\\Tests\\PresetModelTests\\PresetModelTests.csproj", StringComparison.Ordinal) &&
         releaseWorkflow.Contains(".\\tools\\Publish-ReleaseZip.ps1", StringComparison.Ordinal) &&
@@ -2026,6 +2034,14 @@ static void RunPublishScriptChecks()
         releaseWorkflow.Contains("gh release upload", StringComparison.Ordinal) &&
         releaseWorkflow.Contains("--clobber", StringComparison.Ordinal),
         "GitHub Actions release workflow should build on Windows, run tests, package the release zip, upload the workflow artifact, and replace release assets on tag reruns.");
+    Require(
+        !releaseWorkflow.Contains("Publish-SignedMsix.ps1", StringComparison.Ordinal) &&
+        !releaseWorkflow.Contains("Add-AppxPackage", StringComparison.Ordinal) &&
+        !releaseWorkflow.Contains("Get-AuthenticodeSignature", StringComparison.Ordinal) &&
+        !releaseWorkflow.Contains(".msix", StringComparison.Ordinal) &&
+        !releaseWorkflow.Contains(".pfx", StringComparison.Ordinal) &&
+        !releaseWorkflow.Contains(".cer", StringComparison.Ordinal),
+        "GitHub Actions release workflow should publish the unsigned unpackaged zip only, not a signed MSIX or certificate-dependent artifact.");
 }
 
 static void RunInfoBarAccessibilityLocalizationChecks()

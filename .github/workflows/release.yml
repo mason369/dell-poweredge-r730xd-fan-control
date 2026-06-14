@@ -1,0 +1,60 @@
+name: Package Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build and package Windows release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Show .NET info
+        shell: pwsh
+        run: dotnet --info
+
+      - name: Run model and packaging checks
+        shell: pwsh
+        run: dotnet run --project .\Tests\PresetModelTests\PresetModelTests.csproj
+
+      - name: Build release zip
+        shell: pwsh
+        run: .\tools\Publish-ReleaseZip.ps1
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DellR730xdFanControlCenter-win-x64
+          path: artifacts/release/DellR730xdFanControlCenter-win-x64.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = $env:GITHUB_REF_NAME
+          $zip = Resolve-Path "artifacts\release\DellR730xdFanControlCenter-win-x64.zip"
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+              gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title $tag --notes "Automated Windows release package for $tag."
+          }
+
+          gh release upload $tag $zip --repo $env:GITHUB_REPOSITORY --clobber
