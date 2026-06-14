@@ -8,6 +8,7 @@ using System.Xml.Linq;
 
 var defaults = FanPreset.CreateDefaultPresets();
 Require(defaults.Count >= 5, "Default preset list should include restore, balanced, cooling, performance, and Dell automatic presets.");
+Require(defaults.All(preset => preset.CanDelete), "Starter presets should expose the same delete action as custom presets.");
 Require(new AppSettings().SensorRefreshSeconds == 1, "Default SDR polling interval should remain the original 1 second setting.");
 
 var localizedSensorString = new SensorReading
@@ -159,6 +160,7 @@ RunLanguageSelectorXamlChecks();
 RunVisibleXamlLocalizationCoverageChecks();
 RunInfoBarAccessibilityLocalizationChecks();
 RunPackageManifestLocalizationCoverageChecks();
+RunPublishScriptChecks();
 RunDashboardHtmlLocalizationCoverageChecks();
 RunRuntimeStatePersistenceSourceChecks();
 
@@ -175,6 +177,7 @@ Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LastUpdateValue")
 Require(LocalizationService.T("Status.PollingSkippedPreviousRunning").Contains("未启动新的 ipmitool", StringComparison.Ordinal), "Chinese skipped polling log should state that no new ipmitool process is started.");
 Require(LocalizationService.T("Status.AutoTickSkippedIpmiBusy").Contains("未启动新的 ipmitool", StringComparison.Ordinal), "Chinese skipped auto tick log should state that no new ipmitool process is started.");
 Require(LocalizationService.T("Status.IpmiCommandBusy").Contains("未启动新的 ipmitool", StringComparison.Ordinal), "Chinese busy IPMI error should state that no new ipmitool process is started.");
+Require(LocalizationService.T("Status.PowerCurveFanUnchanged").Contains("未下发风扇命令", StringComparison.Ordinal), "Chinese unchanged automatic fan target should clearly state that no fan command is sent.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveTemperature")), "Hero live temperature label should have a Chinese translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveFanRpm")), "Hero live fan RPM label should have a Chinese translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LivePower")), "Hero live power label should have a Chinese translation.");
@@ -213,6 +216,7 @@ Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LastUpdateValue")
 Require(LocalizationService.T("Status.PollingSkippedPreviousRunning").Contains("No new ipmitool", StringComparison.Ordinal), "English skipped polling log should state that no new ipmitool process is started.");
 Require(LocalizationService.T("Status.AutoTickSkippedIpmiBusy").Contains("No new ipmitool", StringComparison.Ordinal), "English skipped auto tick log should state that no new ipmitool process is started.");
 Require(LocalizationService.T("Status.IpmiCommandBusy").Contains("did not start a new ipmitool", StringComparison.Ordinal), "English busy IPMI error should state that no new ipmitool process is started.");
+Require(LocalizationService.T("Status.PowerCurveFanUnchanged").Contains("No fan command sent", StringComparison.Ordinal), "English unchanged automatic fan target should clearly state that no fan command is sent.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveTemperature")), "Hero live temperature label should have an English translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveFanRpm")), "Hero live fan RPM label should have an English translation.");
 Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LivePower")), "Hero live power label should have an English translation.");
@@ -262,6 +266,21 @@ try
     Require(loadedBalanced.EditableDetail == "晚上降低噪音的自定义说明", "Edited built-in preset description should survive settings save/load.");
     Require(loadedBalanced.Percent == 18, "Edited built-in preset percent should survive settings save/load.");
 
+    var presetsWithoutBalanced = loaded.Presets
+        .Where(preset => !preset.Id.Equals("balanced", StringComparison.OrdinalIgnoreCase))
+        .Select(preset => preset.Clone())
+        .ToList();
+    settingsStore.Save(new AppSettings { Presets = presetsWithoutBalanced });
+    var loadedWithoutBalanced = settingsStore.Load();
+    Require(
+        !loadedWithoutBalanced.Presets.Any(preset => preset.Id.Equals("balanced", StringComparison.OrdinalIgnoreCase)),
+        "Deleting a starter preset should persist instead of being re-created on settings load.");
+
+    settingsStore.Save(new AppSettings { Presets = [] });
+    Require(
+        settingsStore.Load().Presets.Count == 0,
+        "Deleting every preset should persist an empty preset list instead of re-seeding starter presets.");
+
     var loadedCurve = loaded.Presets.Single(preset => preset.Id == curve.Id);
     Require(loadedCurve.Kind == FanPreset.CurveKind, "Temperature curve preset kind should survive settings save/load.");
     Require(loadedCurve.CurvePoints.Count == 2, "Temperature curve preset points should survive settings save/load.");
@@ -307,6 +326,8 @@ RunHeroMetricSeverityStyleChecks();
 RunPollingSkipLogGateChecks();
 RunIpmiCommandNoRetrySourceChecks();
 RunAutoPolicySamplingOwnershipSourceChecks();
+RunAutoPolicyUnchangedTargetSkipSourceChecks();
+RunAutoPolicyFailureContextSourceChecks();
 RunIpmiTemperatureLookupChecks();
 RunSensorSubtitleFormatterChecks();
 RunHeroRealtimeSummaryLayoutXamlChecks();
@@ -399,6 +420,53 @@ static void RunAutoPolicySamplingOwnershipSourceChecks()
         source.Contains("RecordVisualizationHistoryPoint(snapshotTime)", StringComparison.Ordinal) &&
         source.Contains("ScheduleVisualizationSnapshot()", StringComparison.Ordinal),
         "The auto-policy tick should keep updating sensors, chart history, and dashboard snapshots when normal polling is suppressed.");
+}
+
+static void RunAutoPolicyUnchangedTargetSkipSourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var tickStartIndex = source.IndexOf("private async Task RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
+    var percentIndex = source.IndexOf("var percent = CalculateFanPercentForAutoTick", tickStartIndex, StringComparison.Ordinal);
+    var skipIndex = source.IndexOf("ShouldSkipUnchangedAutoPolicyFanCommand", percentIndex, StringComparison.Ordinal);
+    var commandIndex = source.IndexOf("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken)", percentIndex, StringComparison.Ordinal);
+    var rememberIndex = source.IndexOf("RememberAutoPolicyFanTarget(targetKey, percent)", commandIndex, StringComparison.Ordinal);
+    var postCommandRefreshIndex = source.IndexOf("await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken)", commandIndex, StringComparison.Ordinal);
+
+    Require(
+        tickStartIndex >= 0 &&
+        percentIndex > tickStartIndex &&
+        skipIndex > percentIndex &&
+        commandIndex > skipIndex &&
+        rememberIndex > commandIndex &&
+        postCommandRefreshIndex > commandIndex,
+        "Auto-policy ticks should skip unchanged calculated fan percentages before sending another all-fan raw command, and should read sensors again after an actual fan command.");
+    Require(
+        source.Contains("BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, \"SkipUnchangedFanPercent\")", StringComparison.Ordinal) &&
+        source.Contains("ClearAutoPolicyFanTargetCache();", StringComparison.Ordinal),
+        "Unchanged auto-policy skips should be logged explicitly, and manual/Dell/stop paths should clear the cached automatic fan target.");
+}
+
+static void RunAutoPolicyFailureContextSourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var autoPolicyStart = source.IndexOf("private async Task RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
+    var autoPolicyEnd = source.IndexOf("private int CalculateAutoFanPercent", autoPolicyStart, StringComparison.Ordinal);
+    var autoPolicyBody = autoPolicyStart >= 0 && autoPolicyEnd > autoPolicyStart
+        ? source[autoPolicyStart..autoPolicyEnd]
+        : string.Empty;
+    Require(
+        autoPolicyBody.Length > 0 &&
+        autoPolicyBody.Contains("Dictionary<string, string>? fanCommandProperties = null;", StringComparison.Ordinal) &&
+        autoPolicyBody.Contains("fanCommandProperties = BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, \"SetAllFansManualSpeed\");", StringComparison.Ordinal) &&
+        autoPolicyBody.Contains("operation.Fail(ex, fanCommandProperties);", StringComparison.Ordinal),
+        "Auto-policy failures after calculating a fan target should log the computed CPU temperature, power reading, target percent, and raw-command action with the failed operation.");
+    Require(
+        source.Contains("private static Dictionary<string, string> BuildAutoPolicyFanCommandProperties(double cpuTemp, int percent, double? powerWatts, string action)", StringComparison.Ordinal) &&
+        source.Contains("[\"cpuTemperatureCelsius\"] = cpuTemp.ToString(\"0.0\", CultureInfo.InvariantCulture)", StringComparison.Ordinal) &&
+        source.Contains("[\"fanPercent\"] = percent.ToString(CultureInfo.InvariantCulture)", StringComparison.Ordinal) &&
+        source.Contains("[\"action\"] = action", StringComparison.Ordinal) &&
+        source.Contains("properties[\"powerWatts\"] = powerWatts.Value.ToString(\"0.0\", CultureInfo.InvariantCulture);", StringComparison.Ordinal),
+        "Auto-policy fan-command log properties should be built in one place so success, unchanged, and failed command paths keep the same diagnostic fields.");
 }
 
 static void RunSensorSubtitleFormatterChecks()
@@ -809,8 +877,9 @@ static void RunCurveEditorInteractionPerformanceChecks()
     var powerMoveBody = ExtractMethodBody(pageSource, "OnNewPowerCurveCanvasPointerMoved");
 
     Require(
-        pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: true);", StringComparison.Ordinal),
-        "Wheel events forwarded from the chart WebView should scroll the outer page without queuing animated ChangeView transitions.");
+        pageSource.Contains("_pendingVisualizationWheelShouldAnimate", StringComparison.Ordinal) &&
+        pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: !animate);", StringComparison.Ordinal),
+        "Wheel events forwarded from the chart WebView should preserve smooth platform scrolling for discrete wheel input without animating every precision touchpad delta.");
     Require(
         pageSource.Contains("_syncingTemperatureCurveInputsFromCanvas", StringComparison.Ordinal) &&
         pageSource.Contains("_syncingPowerCurveInputsFromCanvas", StringComparison.Ordinal),
@@ -880,8 +949,13 @@ static void RunRequestScrollResponsivenessChecks()
         "Chart WebView payloads should send a bounded sampled history instead of cloning and serializing the entire retained history on every refresh.");
     Require(
         pageSource.Contains("_pendingVisualizationWheelDeltaY", StringComparison.Ordinal) &&
-        pageSource.Contains("ScheduleVisualizationWheelScroll", StringComparison.Ordinal),
-        "Forwarded WebView wheel messages should be coalesced before calling ScrollViewer.ChangeView.");
+        pageSource.Contains("_pendingVisualizationWheelShouldAnimate", StringComparison.Ordinal) &&
+        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate)", StringComparison.Ordinal),
+        "Forwarded WebView wheel messages should coalesce scroll distance and whether the host should use platform smoothing before calling ScrollViewer.ChangeView.");
+    Require(
+        pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: !animate);", StringComparison.Ordinal) &&
+        !pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: true);", StringComparison.Ordinal),
+        "Forwarded chart mouse-wheel scrolling should not force every host scroll step to jump without animation.");
     Require(
         pageSource.Contains("_localizedSensorsDirty", StringComparison.Ordinal) &&
         pageSource.Contains("RefreshLocalizedSensorRowsIfVisible", StringComparison.Ordinal) &&
@@ -889,11 +963,19 @@ static void RunRequestScrollResponsivenessChecks()
         "Sensor table localization rows should be deferred while the Sensors page is hidden so request completion does not refresh an off-screen ListView during overview scrolling.");
     Require(
         dashboardHtml.Contains("let pendingHostWheelDeltaY = 0;", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("let pendingHostWheelShouldAnimate = false;", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("const shouldAnimateHostWheel = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(event.deltaY) >= 80;", StringComparison.Ordinal) &&
         dashboardHtml.Contains("requestAnimationFrame(postPendingHostWheelDelta);", StringComparison.Ordinal),
-        "The chart WebView should coalesce wheel forwarding to one host message per animation frame.");
+        "The chart WebView should coalesce wheel forwarding to one host message per animation frame while preserving whether the input was a discrete wheel gesture.");
     Require(
         !wheelHandlerBody.Contains("window.chrome.webview.postMessage", StringComparison.Ordinal),
         "The chart WebView should not post one host wheel message for every raw wheel event.");
+    Require(
+        dashboardHtml.Contains("window.chrome.webview.postMessage({ type: \"wheel\", deltaY, animate });", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("zoomOnMouseWheel: false", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("moveOnMouseWheel: false", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("moveOnMouseMove: false", StringComparison.Ordinal),
+        "ECharts inside dataZoom should keep the slider handles for range selection without consuming mouse-wheel page scrolling.");
 }
 
 static void RunRequestIoResponsivenessChecks()
@@ -961,6 +1043,11 @@ static void RunGlobalPollingResponsivenessChecks()
         addVolatileLogBody.Contains("if (!IsOverviewViewVisible())", StringComparison.Ordinal) &&
         addVolatileLogBody.Contains("Logs.Insert(0, entry);", StringComparison.Ordinal),
         "Visible runtime-log ListView updates should be deferred while the overview page is hidden instead of changing an off-screen bound collection on every command completion.");
+    Require(
+        pageSource.Contains("private async Task ConnectAndStartPollingAsync(bool restoreRunningState = true)", StringComparison.Ordinal) &&
+        pageSource.Contains("if (connected && restoreRunningState)", StringComparison.Ordinal) &&
+        pageSource.Contains("await ConnectAndStartPollingAsync(restoreRunningState: false);", StringComparison.Ordinal),
+        "A background sensor polling failure should visibly reconnect with mc info + sdr elist after releasing the IPMI lock, without reapplying saved fan presets or hiding the original failure.");
 }
 
 static void RunHardwareTileValueLayoutXamlChecks()
@@ -1057,16 +1144,19 @@ static void RunPostFanCommandRefreshChecks()
     var localizationSource = File.ReadAllText(FindRepositoryFile("Services/LocalizationService.cs"));
 
     Require(
-        mainPageSource.Contains("private async Task RefreshSensorsAfterFanCommandAsync()", StringComparison.Ordinal) &&
-        mainPageSource.Contains("await RefreshSensorsCoreAsync(ReadProfile(), token)", StringComparison.Ordinal) &&
+        mainPageSource.Contains("private async Task<TimeSpan> RefreshSensorsAfterFanCommandCoreAsync(IdracProfile profile, CancellationToken token)", StringComparison.Ordinal) &&
+        mainPageSource.Contains("await RefreshSensorsCoreAsync(profile, token)", StringComparison.Ordinal) &&
         mainPageSource.Contains("RestartSensorPollingAfterImmediateRefresh();", StringComparison.Ordinal),
-        "Successful user fan commands should immediately refresh sensors and dashboard data instead of waiting for the next polling interval.");
+        "Successful user fan commands should share one control-and-read operation that refreshes sensors and dashboard data before releasing the IPMI lock.");
     Require(
-        CountOccurrences(mainPageSource, "await RefreshSensorsAfterFanCommandAsync();") >= 5,
-        "All direct user fan-setting paths should trigger the immediate post-command sensor refresh.");
+        !mainPageSource.Contains("await RefreshSensorsAfterFanCommandAsync();", StringComparison.Ordinal),
+        "Post-command sensor refresh must not be started as a second UI command after the fan command has already released the IPMI lock.");
     Require(
-        mainPageSource.Contains("if (succeeded)", StringComparison.Ordinal),
-        "Post-command sensor refresh should run only after the fan command reports success.");
+        CountOccurrences(mainPageSource, "await RefreshSensorsAfterFanCommandCoreAsync(profile, token);") >= 5,
+        "All direct user fan-setting paths should run the immediate sensor refresh inside the same locked command body as the fan command.");
+    Require(
+        mainPageSource.Contains("SetHeroRequestStatus(T(\"Status.RefreshingSensorsAfterFanCommand\"));", StringComparison.Ordinal),
+        "The combined control-and-read operation should make the sensor refresh phase visible instead of reporting fan control as complete before readings update.");
     Require(
         localizationSource.Contains("\"Status.RefreshingSensorsAfterFanCommand\"", StringComparison.Ordinal) &&
         localizationSource.Contains("\"Status.FanCommandSensorsRefreshed\"", StringComparison.Ordinal),
@@ -1879,6 +1969,63 @@ static string ReadReswValue(XDocument resources, string name)
 
     Require(!string.IsNullOrWhiteSpace(value), $"Package resource {name} should be present and non-empty.");
     return value!;
+}
+
+static void RunPublishScriptChecks()
+{
+    var msixScript = File.ReadAllText(FindRepositoryFile(Path.Combine("tools", "Publish-SignedMsix.ps1")));
+    var unpackagedScript = File.ReadAllText(FindRepositoryFile(Path.Combine("tools", "Publish-UnpackagedExe.ps1")));
+    var releaseZipScript = File.ReadAllText(FindRepositoryFile(Path.Combine("tools", "Publish-ReleaseZip.ps1")));
+    var releaseWorkflow = File.ReadAllText(FindRepositoryFile(Path.Combine(".github", "workflows", "release.yml")));
+    Require(
+        msixScript.Contains("/p:WindowsAppSDKSelfContained=true", StringComparison.Ordinal),
+        "Signed MSIX publishing should be Windows App SDK self-contained so the package does not require a separate Windows App Runtime install.");
+    Require(
+        msixScript.Contains("Package.Dependencies.PackageDependency", StringComparison.Ordinal) &&
+        msixScript.Contains("external package dependencies", StringComparison.Ordinal),
+        "Signed MSIX publishing should inspect the generated manifest and fail when external package dependencies remain.");
+    Require(
+        msixScript.Contains("\"Microsoft.WindowsAppRuntime.dll\"", StringComparison.Ordinal) &&
+        msixScript.Contains("\"Microsoft.ui.xaml.dll\"", StringComparison.Ordinal) &&
+        msixScript.Contains("\"BundledTools\\ipmitool\\ipmitool.exe\"", StringComparison.Ordinal),
+        "Signed MSIX publishing should verify that Windows App SDK, WinUI, and bundled ipmitool runtime files are actually inside the package.");
+    Require(
+        msixScript.Contains("Get-AuthenticodeSignature", StringComparison.Ordinal),
+        "Signed MSIX publishing should keep signature verification in addition to runtime-content validation.");
+    Require(
+        msixScript.Contains("Cert:\\LocalMachine\\TrustedPeople", StringComparison.Ordinal) &&
+        msixScript.Contains("Cert:\\LocalMachine\\Root", StringComparison.Ordinal) &&
+        msixScript.Contains("0x800B0109", StringComparison.Ordinal),
+        "Signed MSIX publishing should verify LocalMachine deployment trust because Authenticode validity alone does not prove Add-AppxPackage will accept the package.");
+    Require(
+        msixScript.Contains("/p:PublishDir=$msixPublishDirectory\\", StringComparison.Ordinal) &&
+        msixScript.Contains("legacyPackagedPublishDirectory", StringComparison.Ordinal),
+        "Signed MSIX publishing should keep MSIX-only publish intermediates out of bin/Release publish folders so users do not run a non-release exe artifact.");
+    Require(
+        unpackagedScript.Contains("-p:WindowsPackageType=None", StringComparison.Ordinal) &&
+        unpackagedScript.Contains("-p:WindowsAppSDKSelfContained=true", StringComparison.Ordinal) &&
+        unpackagedScript.Contains("artifacts\\exe\\win-x64", StringComparison.Ordinal),
+        "Direct exe releases should be produced only by the unpackaged publish script using WindowsPackageType=None and the dedicated artifacts/exe output.");
+    Require(
+        releaseZipScript.Contains("Publish-UnpackagedExe.ps1", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("Compress-Archive", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("Expand-Archive", StringComparison.Ordinal),
+        "Release zip publishing should reuse the unpackaged exe script and verify the downloaded-zip shape after compression.");
+    Require(
+        releaseZipScript.Contains("Microsoft.WindowsAppRuntime.dll", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("Microsoft.ui.xaml.dll", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("DellR730xdFanControlCenter.pri", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("BundledTools\\ipmitool\\ipmitool.exe", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("VerifyLaunch", StringComparison.Ordinal),
+        "Release zip verification should check WinUI runtime files, bundled ipmitool, and provide an explicit local launch verification mode.");
+    Require(
+        releaseWorkflow.Contains("windows-latest", StringComparison.Ordinal) &&
+        releaseWorkflow.Contains("dotnet run --project .\\Tests\\PresetModelTests\\PresetModelTests.csproj", StringComparison.Ordinal) &&
+        releaseWorkflow.Contains(".\\tools\\Publish-ReleaseZip.ps1", StringComparison.Ordinal) &&
+        releaseWorkflow.Contains("actions/upload-artifact@v4", StringComparison.Ordinal) &&
+        releaseWorkflow.Contains("gh release upload", StringComparison.Ordinal) &&
+        releaseWorkflow.Contains("--clobber", StringComparison.Ordinal),
+        "GitHub Actions release workflow should build on Windows, run tests, package the release zip, upload the workflow artifact, and replace release assets on tag reruns.");
 }
 
 static void RunInfoBarAccessibilityLocalizationChecks()

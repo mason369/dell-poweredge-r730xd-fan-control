@@ -209,6 +209,11 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
         ElectricalPulseSeconds = next.ElectricalPulseSeconds;
     }
 
+    public override string ToString()
+    {
+        return string.IsNullOrWhiteSpace(Title) ? Id : Title;
+    }
+
     private static string WithAlpha(string hex, string alpha)
     {
         if (hex.Length != 9 || hex[0] != '#')

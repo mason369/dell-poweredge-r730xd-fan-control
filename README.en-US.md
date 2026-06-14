@@ -9,7 +9,31 @@
 </p>
 
 <p align="center">
-  <a href="README.md">中文</a> ·
+  <a href="README.en-US.md">English</a> |
+  <a href="README.md">简体中文</a> |
+  <a href="README.zht.md">繁體中文</a> |
+  <a href="README.ko.md">한국어</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.it.md">Italiano</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.bs.md">Bosanski</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.no.md">Norsk</a> |
+  <a href="README.br.md">Português (Brasil)</a> |
+  <a href="README.th.md">ไทย</a> |
+  <a href="README.tr.md">Türkçe</a> |
+  <a href="README.uk.md">Українська</a> |
+  <a href="README.bn.md">বাংলা</a> |
+  <a href="README.gr.md">Ελληνικά</a> |
+  <a href="README.vi.md">Tiếng Việt</a>
+</p>
+
+<p align="center">
   <a href="docs/COMMANDS.en-US.md">IPMI Command Reference</a> ·
   <a href="SECURITY.en-US.md">Security</a> ·
   <a href="docs/PROJECT_METADATA.en-US.md">Project Metadata</a>
@@ -41,6 +65,74 @@ This project is not a generic server management suite. It is a local control cen
 | Check credential, log, and supply-chain risks | [Security](SECURITY.en-US.md) |
 | Troubleshoot sensors, polling, charts, or tray behavior | [Troubleshooting](#troubleshooting) |
 
+## 5-Minute Quick Start
+
+Use this path when you already know the iDRAC address, username, and password, and you want to confirm that sensors and fan control work before reading the full manual.
+
+1. Enable **IPMI over LAN** in iDRAC and confirm that the current Windows machine can reach the iDRAC management network.
+2. Start the development build from source:
+
+   ```powershell
+   cd C:\DellR730xdFanControlCenter
+   dotnet run --project .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x64
+   ```
+
+3. First launch opens Settings. Enter the iDRAC/BMC address, username, and password. Enable "Remember password with DPAPI" only if you want automatic connection on later launches.
+4. Click "Save settings". The app runs a real `mc info` connection test, then one `sdr elist` refresh, and starts persistent polling only after those succeed.
+5. Return to Overview and confirm real readings for CPU/inlet/exhaust temperatures, Fan 1-6 RPM, power, voltage, current, and state cards.
+6. Start with "Restore Dell factory fan speed" or conservative 20%/35% manual speeds before testing lower speeds. Low fan speeds, individual target selectors, and curve-auto policies should be validated gradually while someone is watching the machine.
+7. To hand control back to BMC, click "Restore Dell factory fan speed". If smart auto or curve auto is running, also click "Stop auto"; otherwise the next auto tick can send software fan commands again.
+
+```mermaid
+flowchart LR
+    A["Enable iDRAC IPMI over LAN"] --> B["Enter Host / User / Password"]
+    B --> C["Save settings"]
+    C --> D["mc info connection test"]
+    D --> E["First sdr elist refresh"]
+    E --> F["Overview boards and charts update"]
+    F --> G["Choose Dell Auto, manual percent, or curve policy"]
+```
+
+## Running App Interface
+
+The image below is an actual running app screenshot. It shows the interactive visualization page, history-range filters, temperature/fan/performance/electrical charts, and visible status feedback. The values shown come from the local R730xd validation environment and are examples of the UI and data flow; different workloads, iDRAC firmware, fan walls, drive counts, and ambient conditions produce different readings.
+
+![R730XD Smart Fan Center running interface with interactive history charts and hardware status](Assets/Screenshots/main-window.png)
+
+## Visual Workflows
+
+### Commands And Failure Handling
+
+```mermaid
+flowchart TB
+    U["User button, tray menu, or background tick"] --> L{"IPMI lock available?"}
+    L -- "No, background tick" --> S["Skip this tick and log: no new ipmitool"]
+    L -- "No, user command" --> W["Wait for the current user command chain to finish"]
+    L -- "Yes" --> P["Start ipmitool.exe"]
+    P --> R{"Exit code is 0?"}
+    R -- "Yes" --> O["Update UI, JSONL logs, and chart history"]
+    R -- "No" --> X["Show stdout/stderr root cause and stop the current operation"]
+```
+
+### Pages And Common Entrypoints
+
+```mermaid
+flowchart LR
+    O["Overview"] --> O1["Live summary, charts, quick actions, recent log"]
+    F["Fan Control"] --> F1["Manual presets, temperature curves, power curves, smart auto"]
+    S["Sensors"] --> S1["Full SDR table and localized sensor names"]
+    C["Settings"] --> C1["Connection, password, polling, theme, language, tray"]
+    T["Tray Menu"] --> T1["Restore window, refresh sensors, presets, stop auto, exit"]
+```
+
+## Multilingual Docs And UI
+
+- README language entries: [English](README.en-US.md), [简体中文](README.md), [繁體中文](README.zht.md), [한국어](README.ko.md), [Deutsch](README.de.md), [Español](README.es.md), [Français](README.fr.md), [Italiano](README.it.md), [Dansk](README.da.md), [日本語](README.ja.md), [Polski](README.pl.md), [Русский](README.ru.md), [Bosanski](README.bs.md), [العربية](README.ar.md), [Norsk](README.no.md), [Português (Brasil)](README.br.md), [ไทย](README.th.md), [Türkçe](README.tr.md), [Українська](README.uk.md), [বাংলা](README.bn.md), [Ελληνικά](README.gr.md), and [Tiếng Việt](README.vi.md).
+- Compatibility entry: [README.zh.md](README.zh.md) points readers to the default Simplified Chinese README. The full long-form manuals are maintained in [README.md](README.md) and this file [README.en-US.md](README.en-US.md); other language README files provide real localized entry pages for core use, safety, and verification instead of dead language-switch links.
+- 中文配套文档: [IPMI 命令参考](docs/COMMANDS.md), [安全说明](SECURITY.md), [项目元数据](docs/PROJECT_METADATA.md).
+- English companion docs: [IPMI Command Reference](docs/COMMANDS.en-US.md), [Security](SECURITY.en-US.md), [Project Metadata](docs/PROJECT_METADATA.en-US.md).
+- The app includes 22 UI languages. Open Settings, choose a language in the UI language dropdown, and save; visible UI switches immediately. Existing JSONL runtime logs keep their structured fields and original runtime semantics, and are not rewritten into another language.
+
 ## Scope
 
 - Target server: Dell PowerEdge R730xd.
@@ -51,23 +143,32 @@ This project is not a generic server management suite. It is a local control cen
 
 Different iDRAC firmware versions, backplanes, fan layouts, and sensor layouts can change individual fan target-selector behavior. Fan 1-6 target selectors are implemented in code but disabled by default; `0x00` is a target selector in the firmware raw command, not `0%` fan speed, so verify your firmware mapping before enabling them.
 
+### Usage-Scope Photos
+
+The photos below show the actual Dell PowerEdge R730xd chassis environment this project targets, including dual CPU heatsinks, the front fan wall, expansion-card area, and chassis airflow path. They document the hardware scope of the app; they do not imply that every R730xd has the same backplane, cards, drive count, cable routing, or iDRAC SDR sensor names.
+
+![Dell PowerEdge R730xd internal top view showing CPU heatsinks, fan wall, and expansion-card area](Assets/Screenshots/r730xd-hardware-top.jpg)
+
+![Dell PowerEdge R730xd internal airflow view showing CPU heatsinks, fan wall, and front chassis structure](Assets/Screenshots/r730xd-hardware-airflow.jpg)
+
 ## Feature Overview
 
 - Modern WinUI 3 interface with light, dark, and system theme support.
 - All-fan percentage control from 0-100%; the app enters manual fan mode before setting a percentage.
 - The built-in Default/Restore Manual preset keeps manual mode plus all fans at 10% for users who explicitly choose that preset as a local quiet baseline.
 - Starter presets: Default 10%, Balanced 20%, Cooling 35%, Performance 50%, and Dell Auto.
-- Edit preset names, descriptions, and available percentages; add, save, and delete custom manual percentage presets. Starter presets cannot be deleted.
+- Edit preset names, descriptions, and available percentages; add, save, and delete manual percentage presets. Starter presets can also be deleted; the deletion is written to `settings.json`, the next launch does not re-seed them, and starter presets return only when the settings file is removed or recreated.
 - Add and edit temperature-fan curve presets, plus power-fan curve presets in the editor below them. Both curve editors support clicking empty chart space to add points, dragging existing points to adjust them live, right-side numeric controls for fine tuning, optional smooth transitions, and continuous all-fan control after switching to the preset.
 - Dell automatic fan mode remains available as both a separate action and a preset entry. It sends the command that hands fan control back to iDRAC/BMC; if the software auto timer is still running, a later tick can send software fan commands again, so use "Stop auto" to stop the background policy.
 - Individual target-byte control for fans 1-6 is implemented but disabled by default.
 - The software auto policy reads BMC SDR. The global policy and temperature curves use CPU temperature; power curves use the power sensor whose unit is `Watts` or whose key contains `Pwr Consumption`, while still checking the CPU emergency temperature threshold first.
 - At the emergency temperature threshold, the smart auto policy sends the Dell automatic mode command. That command does not stop the software auto timer; later ticks continue to run the current policy.
-- Clicking "Start polling" or successfully saving settings tests the iDRAC connection, reads SDR once, and starts persistent SDR polling with a 1-second default interval. While polling is active, the same command reads "Cancel polling"; clicking it stops future sensor polling ticks and updates the visible state instead of pretending another connection test ran. If an `ipmitool` command is already in flight, that command is allowed to finish and the app does not start a new tick. Only one IPMI operation is allowed at a time, so a tick is skipped when the previous poll is still running, and no new `ipmitool` process or RMCP+ session is started for that skipped tick.
+- Clicking "Start polling" or successfully saving settings tests the iDRAC connection, reads SDR once, and starts persistent SDR polling with a 1-second default interval. While polling is active, the same command reads "Cancel polling"; clicking it stops future sensor polling ticks and updates the visible state instead of pretending another connection test ran. If an `ipmitool` command is already in flight, that command is allowed to finish and the app does not start a new tick. Only one IPMI operation is allowed at a time, so a tick is skipped when the previous poll is still running, and no new `ipmitool` process or RMCP+ session is started for that skipped tick. When a background sensor polling command fails, the app first stops the current poll, shows and logs the original failure, then runs one real reconnect flow (`mc info` + `sdr elist`); polling resumes only after that reconnect succeeds. If reconnect fails, the app stays disconnected and shows the root cause without writing fabricated chart history.
 - After a manual preset, Dell Auto, temperature curve, power curve, or smart temperature policy starts successfully, the running state is written to `%LocalAppData%\DellR730xdFanControlCenter\settings.json`. On the next app launch, after a real connection/start-polling sequence succeeds, the app re-executes the saved preset or automatic policy. Restore failures show the real error instead of only marking the UI as running.
 - User-triggered fan commands wait for the current IPMI command to finish before continuing, so switching presets no longer shows the "IPMI command is already running" busy error. Background polling ticks, smart-auto ticks, and curve-auto ticks still skip while IPMI is busy to avoid accumulating queued commands.
 - While smart auto or curve auto is running, the regular sensor polling timer does not start a second independent `sdr elist` sampling path. Each auto-policy tick reads SDR, updates the sensor list, dashboard boards, interactive charts, and JSONL chart history. After auto policy is stopped, regular polling continues on the configured cadence.
-- Every real `ipmitool` command, including Dell fan-control raw commands (`raw 0x30 0x30 ...`), fails immediately on a non-zero exit code and shows stdout/stderr. The app does not automatically retry, delay and retry, or record the failure as "retrying".
+- Smart auto and curve auto remember the most recent all-fan percentage successfully sent by the same automatic mode. If a later tick computes the same percentage from the current temperature or power reading, it logs "No fan command sent" and still refreshes sensors/charts, but it does not resend the same Dell raw fan-control command. Switching automatic modes, manual all-fan control, individual fan control, Dell Auto, or Stop Auto clears this cache so the next automatic takeover sends the required target again.
+- Every real `ipmitool` command, including Dell fan-control raw commands (`raw 0x30 0x30 ...`), fails immediately on a non-zero exit code and shows stdout/stderr. The app does not retry the same failed command, delay and retry, or record the failure as "retrying". The only background recovery action is one visible real reconnect after a sensor polling failure; that reconnect does not reapply the last saved fan preset or automatic policy, avoiding a duplicate fan command after a read failure.
 - After a user-triggered fan command succeeds, including all-fan control, individual fan control, manual presets, restore-manual presets, and Dell automatic mode, the app immediately runs one more `sdr elist` read and uses the real BMC response to refresh the fan RPM board, power/state board, interactive charts, and JSONL chart history point. If that refresh fails, the real error is shown; the app does not fabricate sensor data from the just-sent percentage. After the refresh succeeds, the next polling timer interval is restarted from that completion time so the original tick does not immediately duplicate the same read.
 - Bundled `ipmitool.exe` and required Cygwin DLLs under `BundledTools/ipmitool`.
 - Bundled local ECharts dashboard assets under `Assets/Charts/dashboard.html` and `Assets/Charts/echarts.min.js`; runtime does not depend on an online CDN.
@@ -76,12 +177,25 @@ Different iDRAC firmware versions, backplanes, fan layouts, and sensor layouts c
 - iDRAC web console shortcut opens `https://<host>/`.
 - All visible UI strings are wired to localization resources. The app now includes 22 interface languages: English, 简体中文, 繁體中文, 한국어, Deutsch, Español, Français, Italiano, Dansk, 日本語, Polski, Русский, Bosanski, العربية, Norsk, Português (Brasil), ไทย, Türkçe, Українська, বাংলা, Ελληνικά, and Tiếng Việt. The language selector shows each option in that language's own native name instead of translating every language name into the current UI language; the MSIX package manifest display name and description are also localized through `Strings/<language>/Resources.resw`, so Start menu, package metadata, and shell surfaces do not keep fixed Chinese or English text; backend JSONL logs and internal runtime records keep Chinese/structured internal semantics and are not converted through UI localization.
 - Charts, dashboard cards, status messages, and the Sensors table's Sensor column use localized display names. Known SDR names are translated into the current UI language; unregistered English/vendor discrete event names display as localized "Hardware event <SDR ID>" labels so the UI does not expose fixed English strings. The original BMC key is still used internally for classification and matching; run `ipmitool sdr elist` manually when exact raw output needs to be compared.
-- The Overview interactive chart runs in WebView2, but mouse-wheel events are forwarded to the outer WinUI `ScrollViewer` for page scrolling. Forwarded wheel events disable extra scroll animation so scrolling over the chart stays responsive like the non-Web boards instead of feeling stuck.
+- The Overview interactive chart runs in WebView2, but mouse-wheel events are forwarded to the outer WinUI `ScrollViewer` for page scrolling. Forwarding distinguishes discrete mouse-wheel input from high-frequency precision scrolling: mouse wheels use WinUI platform scroll animation, while touchpad-style small deltas move by the coalesced distance directly. ECharts internal wheel zoom is disabled, and history ranges are still adjusted with the bottom slider, so scrolling over the chart should not trap the page.
+- The main window and chart page adapt to Windows DPI scaling, window width, and narrow layouts. `app.manifest` declares `PerMonitorV2`; `MainPage.xaml.cs` switches Small, Medium, and Large layouts from effective pixel width on startup and every window-size change; and `Assets/Charts/dashboard.html` also reads container width plus `window.devicePixelRatio` before laying out charts. This adaptation does not require a Settings toggle, and failures do not create fake charts or fake layout-success states.
 - Passwords can be stored with Windows DPAPI under the current Windows user context.
 - Runtime logs are written as JSON Lines to `%LocalAppData%\DellR730xdFanControlCenter\logs\runtime-YYYYMMDD.jsonl`; each line is a complete atomic event, including user commands, sensor refreshes, smart auto ticks, and IPMI command timing.
 - Startup exceptions are written to `%LocalAppData%\DellR730xdFanControlCenter\startup-error.log`.
 
 ## Screens
+
+### Resolution, DPI, And Window Scaling
+
+The main UI adapts automatically at app startup and after every window-size change; users do not need to enable an extra Settings switch.
+
+- Entry points and scope: adaptation covers Overview, historical charts, Quick Actions, Temperature Board, Fan RPM Board, Power & Health, Fan Control, curve editors, Sensors table, and Settings. The tray menu remains a native Windows menu rendered by the operating system for the current DPI.
+- Default configuration: `app.manifest` uses `PerMonitorV2` DPI awareness, and the app switches layout by WinUI effective pixels instead of physical resolution. The current `MainPage.xaml.cs` breakpoints are `<641` for Small, `641-1007` for Medium, and `>=1008` for Large.
+- Execution flow: `MainPage.OnPageSizeChanged` calls `ApplyResponsiveLayout`, then reflows the hero, overview metric cards, quick actions, all-fan controls, preset editor, temperature/power curve editors, smart-auto controls, and Settings command bar. Small layout changes `NavigationView` to top navigation; Medium and Small layouts let temperature, fan, and power/health boards use page scrolling instead of fixed-height clipping.
+- Chart flow: the Overview WebView minimum height is `1520` in Large layout and `3200` in Medium/Small layout so historical chart panels are not covered by following content. `Assets/Charts/dashboard.html` adjusts grid, legend, axis margins, and line rendering from container width, chart count, and `window.devicePixelRatio`. Chart labels do not use ellipsis as the normal display strategy.
+- Success behavior: on narrow windows or high DPI, cards, command bars, charts, and tables should show complete content through wrapping, reflow, or outer page scrolling. The UI should not show bottom divider lines through content, hidden charts, crowded button text, abbreviated performance/electrical labels, or horizontal page overflow.
+- Failure behavior: if WebView2 resources, chart scripts, or local chart assets fail to load, the top error and runtime log show the real failure. The app does not use blank images, fabricated data, or silent downgrade behavior to pretend charts are ready.
+- Verified scope: the current repository static checks include `RunContentScrollWidthXamlChecks`, `RunDpiTextWrappingXamlChecks`, and `RunDashboardChartLayoutChecks` in `Tests/PresetModelTests/Program.cs`. Local manual validation covered Windows window sizes `640x900`, `920x900`, and `1366x900`, plus chart-page equivalent DPR `1.0`, `1.25`, `1.5`, `1.75`, and `2.0`. That validation record is not a guarantee that every remote-desktop, GPU-driver scaling, or third-party window-manager combination is identical; when reporting an issue, include the Windows scaling percentage, window size, screenshot, and runtime log.
 
 ### Overview
 
@@ -113,7 +227,7 @@ The Fan Control page manages presets and advanced control:
 - The temperature editor starts with `45 C = 18%`, `68 C = 28%`, and `78 C = 42%`; the power editor starts with `280 W = 18%`, `500 W = 28%`, and `750 W = 42%`. These defaults only seed a new editor and do not overwrite saved presets.
 - Saving a curve requires at least 2 points. Temperature curves require temperatures from `-40` to `125` C, fan percentages from `0` to `100`, and no duplicate temperatures; power curves require power from `0` to `1200` W, fan percentages from `0` to `100`, and no duplicate power points. Invalid points show the validation reason in the preview area, and Add/Save still run the same strict validation instead of silently replacing the input with a default curve.
 - The Smooth curve switch is saved with the preset. When it is off, the app evaluates the current temperature or power reading on the polyline formed by the configured points and uses the fan percent at that position. When it is on, the same points are used with a smoothed curve position, reducing abrupt percentage jumps as the input crosses a point. Values below the first point and above the last point are still clamped to the endpoint percentages.
-- Switching to a temperature curve preset starts the software auto polling loop. Each tick reads SDR, parses CPU temperature, computes the percentage from the curve points and smooth setting, and sends the resulting all-fan percentage command. Switching to a power curve preset reads SDR, checks CPU emergency temperature first, then computes the percentage from the power reading; if the current SDR result has no matching power sensor, the UI and logs show the real failure and no fan command is sent.
+- Switching to a temperature curve preset starts the software auto polling loop. Each tick reads SDR, parses CPU temperature, computes the percentage from the curve points and smooth setting, and sends the all-fan percentage command only when the result differs from the last percentage successfully sent by the same automatic mode. Switching to a power curve preset reads SDR, checks CPU emergency temperature first, then computes the percentage from the power reading; if the current SDR result has no matching power sensor, the UI and logs show the real failure and no fan command is sent.
 - Manual all-fan control, individual fan control, the built-in Restore Manual preset, Dell Auto, Overview/tray Restore Dell factory fan speed, and Stop Auto all clear the current curve state. Only Stop Auto, deleting the running curve preset, or an auto-policy failure stops the software auto timer; if that timer is still running, the next tick continues controlling all fans with the global linear policy.
 - Except for Stop Auto, successful user-triggered fan commands immediately append one real SDR refresh so Overview cards, performance/electrical charts, and chart history reflect the BMC's current values. That refresh still uses the same serialized IPMI lock; if it fails, the UI and logs show the failure reason instead of pretending the chart data was updated.
 - Saving a preset writes it to local settings, and the tray menu reads those saved presets. Temperature curves are stored as `Kind = TemperatureCurve`; power curves are stored as `Kind = PowerCurve`; both keep points in `Presets[].CurvePoints` with their `TemperatureCelsius` or `PowerWatts` fields plus `SmoothCurve`. If the currently running manual preset, Dell Auto preset, temperature curve, or power curve is saved, the app waits for the current IPMI command to finish and immediately re-applies that preset; another "Switch" click is not required. Saving an active curve immediately runs one real `sdr elist` read and fan calculation; if that first run fails, the error is shown and that automatic policy is stopped.
@@ -243,6 +357,18 @@ dotnet run --project .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x6
 - `DellR730xdFanControlCenter (Package)`: MSIX package launch.
 - `DellR730xdFanControlCenter (Unpackaged)`: plain project launch.
 
+## Verification
+
+After changes, run at least these commands to confirm the app builds and this repository's model, i18n, layout, tray, chart, and failure-handling static checks pass:
+
+```powershell
+cd C:\DellR730xdFanControlCenter
+dotnet build .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x64
+dotnet run --project .\Tests\PresetModelTests\PresetModelTests.csproj
+```
+
+`Tests/PresetModelTests/Program.cs` does not only check preset models; it also covers sensor display-name localization, 22-language resource completeness, visible XAML text localization, package manifest localization, log-level styling, polling-skip logging, IPMI command no-retry behavior, auto-policy sampling ownership, Settings command bar, tray menu, chart layout, DPI/text wrapping, and content scroll width. This command does not replace real R730xd/iDRAC hardware validation; fan raw commands, individual fan target IDs, and SDR read duration still need supervised confirmation on the target machine.
+
 ## Publish
 
 The project enables MSIX tooling and configures `Microsoft.Windows.SDK.BuildTools.WinApp` to support WinUI `dotnet run` and packaging-related workflows. Published output must include:
@@ -265,7 +391,24 @@ The output directory is:
 artifacts/exe/win-x64/
 ```
 
-`DellR730xdFanControlCenter.exe` inside that directory can be launched directly. The publish script verifies that the exe, `Assets/AppIcon.ico`, dashboard assets, and the bundled `BundledTools/ipmitool/ipmitool.exe` are all present, and fails if any required file is missing. This exe output is a self-contained unpackaged directory; it does not rely on MSIX package identity. Distribute the whole directory, not just the single exe file.
+`DellR730xdFanControlCenter.exe` inside that directory can be launched directly. The publish script verifies that the exe, `Assets/AppIcon.ico`, dashboard assets, and the bundled `BundledTools/ipmitool/ipmitool.exe` are all present, and fails if any required file is missing. This exe output is a self-contained unpackaged directory; it does not rely on MSIX package identity. Distribute the whole directory, not just the single exe file. Do not use `bin\Release\...\publish\DellR730xdFanControlCenter.exe` to verify the unpackaged release; that path can come from an MSIX build intermediate and is not this project's supported directly runnable exe output.
+
+To create the downloadable zip used by GitHub Actions and GitHub Releases, run:
+
+```powershell
+cd C:\DellR730xdFanControlCenter
+.\tools\Publish-ReleaseZip.ps1
+```
+
+The output file is:
+
+```text
+artifacts/release/DellR730xdFanControlCenter-win-x64.zip
+```
+
+The script first runs `tools\Publish-UnpackagedExe.ps1`, compresses the full unpackaged output directory, then extracts the zip to a temporary verification directory and checks the exe, WinUI/Windows App SDK runtime files, dashboard assets, and bundled `ipmitool.exe`. On a local machine, add `-VerifyLaunch` to start `DellR730xdFanControlCenter.exe` from the extracted zip and confirm that it creates a titled top-level window without new `.NET Runtime` or `Application Error` startup events. CI does not start the GUI by default; it verifies the downloaded-zip file layout.
+
+The repository `.github/workflows/release.yml` runs the same zip publishing script on a Windows runner. Manual `workflow_dispatch` runs upload `DellR730xdFanControlCenter-win-x64.zip` as a workflow artifact. Pushing a `v*` tag also creates or reuses the matching GitHub Release and uploads the zip with `gh release upload --clobber`, so rerunning the workflow for the same tag can package again and replace the downloadable asset.
 
 To create an installable signed MSIX package, use the repository publish script:
 
@@ -274,7 +417,7 @@ cd C:\DellR730xdFanControlCenter
 .\tools\Publish-SignedMsix.ps1
 ```
 
-The script verifies that the `Package.appxmanifest` `Publisher` equals the signing certificate subject. By default it creates or reuses a `CN=mason369` code-signing certificate in the current user's certificate store, exports the public certificate to `artifacts/certificates/mason369-msix-signing.cer`, and imports that public certificate into the current user's `TrustedPeople` and `Root` stores for local verification and installation. The private key remains in the current user's certificate store; the script does not write a `.pfx` file into the repository.
+The script verifies that the `Package.appxmanifest` `Publisher` equals the signing certificate subject. By default it creates or reuses a `CN=mason369` code-signing certificate in the current user's certificate store and exports the public certificate to `artifacts/certificates/mason369-msix-signing.cer`. The default publish path must run from an elevated PowerShell session because a self-signed MSIX must trust the public certificate in `CurrentUser\TrustedPeople`, `CurrentUser\Root`, `LocalMachine\TrustedPeople`, and `LocalMachine\Root`; otherwise `Add-AppxPackage` can reject the package with `0x800B0109`. The private key remains in the current user's certificate store; the script does not write a `.pfx` file into the repository. Use `-SkipTrustImport` only when the target machine already trusts the signer through enterprise certificate deployment or a documented manual step; after skipping the import, still install the package on the target machine to verify it.
 
 The signed package is written to:
 
@@ -282,7 +425,7 @@ The signed package is written to:
 artifacts/msix/DellR730xdFanControlCenter_1.0.0.0_x64_Test/DellR730xdFanControlCenter_1.0.0.0_x64.msix
 ```
 
-At the end, the script runs `Get-AuthenticodeSignature` against the MSIX and fails if the signature status is not `Valid`. The self-signed certificate is appropriate for local testing or controlled internal distribution. Public releases should use a trusted code-signing certificate whose subject exactly matches the manifest publisher. After publishing, install and start the app on the target machine and confirm that the bundled `ipmitool.exe`, dashboard page, and tray icon resolve from the installed package.
+The script uses `WindowsAppSDKSelfContained=true` to create a self-contained MSIX. After signing, it runs `Get-AuthenticodeSignature` and fails if the signature status is not `Valid`; then it unpacks the MSIX, verifies that the generated `AppxManifest.xml` no longer declares external `PackageDependency` entries, and confirms that `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, the bundled `ipmitool.exe`, the dashboard page, and the app icon are inside the package. The script places the temporary publish directory needed for MSIX packaging under `obj\signed-msix\publish`, removes it after inspection, and also removes stale `bin\Release\...\publish` intermediates so a non-release exe is not mistaken for the unpackaged build. A valid signature only proves that the package has not been tampered with and that Authenticode can validate the signer; it does not prove that Windows deployment will accept the MSIX. Missing deployment trust, runtime dependencies, a bad entry point, or missing packaged files can still make installation or launch fail. Reinstalling changed MSIX content with the same `Identity` and the same `Version` is rejected by Windows with `0x80073CFB`; real releases should increase the `Package.appxmanifest` `Identity Version`, while local same-version verification requires removing the installed package with `Remove-AppxPackage` before installing again. The self-signed certificate is appropriate for local testing or controlled internal distribution. Public releases should use a trusted code-signing certificate whose subject exactly matches the manifest publisher. After publishing, run `Add-AppxPackage -Path artifacts\msix\DellR730xdFanControlCenter_1.0.0.0_x64_Test\DellR730xdFanControlCenter_1.0.0.0_x64.msix` on the target machine and start the app once to confirm that the main window, bundled `ipmitool.exe`, dashboard page, and tray icon resolve from the installed package.
 
 ## IPMI Command Behavior
 
@@ -308,7 +451,7 @@ Every JSONL line is one complete JSON object with `eventId`, `timestamp`, `level
 - `Application/UiLog`: settings saves, preset changes, polling warnings, log-file path notices, and other UI events.
 - `Operation/UiCommand`: button-triggered user commands with `Started` plus either `Succeeded` or `Failed` terminal records.
 - `Operation/SensorRefresh`: each SDR sensor refresh, including host, polling seconds, sensor count, and duration.
-- `Operation/SmartAutoPolicyTick`: each smart auto tick, including temperature thresholds, CPU temperature, computed fan percent, or emergency Dell Auto action.
+- `Operation/SmartAutoPolicyTick`: each smart auto tick, including temperature thresholds, CPU temperature, computed fan percent, or emergency Dell Auto action. If a target percentage has been computed but the later raw fan command fails, the failed record still keeps `cpuTemperatureCelsius`, `fanPercent`, `action = SetAllFansManualSpeed`, and `powerWatts` for power curves.
 - `IpmiCommand/CommandCompleted`: each completed `ipmitool` child command with command line, exit code, success state, and duration.
 
 Log-write failure is not treated as success. If the runtime log cannot be written during a user command, the current operation stops and the status bar plus Recent Log show "Runtime log write failed". Startup-stage unhandled exceptions still write `startup-error.log`. Runtime logs do not include the iDRAC password, but they can include iDRAC host, username in command text, tool paths, preset names, and local paths; review logs with [Security](SECURITY.en-US.md) before sharing.
@@ -326,7 +469,7 @@ The smart auto policy performs one `sdr elist` read per tick, parses CPU tempera
 
 CPU temperature detection prefers temperature rows whose key contains `CPU`. If no CPU-named temperature rows exist, it uses the highest value among all temperature sensors. If no temperature sensor is found, the app reports an error.
 
-Smart auto ticks share the same IPMI lock as sensor polling, manual fan commands, and Dell automatic restore. When the user starts smart auto or switches to a curve preset, the app waits for the current IPMI command to finish, then runs the first tick before starting the background timer; if that first tick fails, the timer is not started and the UI/logs show the root cause. While an auto policy is running, regular sensor polling does not start its own `sdr elist`, which prevents two background timers from creating duplicate RMCP+ sessions in the same period; the auto-policy tick's SDR result is the sensor and chart update source during that time. If a later background auto tick fires while another IPMI command is running, that auto policy cycle is skipped, and the latest request status plus logs state that no new `ipmitool` process or RMCP+ session was started. Manual fan commands, Dell Auto commands, and Overview/tray restore only clear the current curve state; they do not stop an already running software auto timer. To keep Dell firmware in control, click "Stop auto" before or after restoring Dell automatic mode.
+Smart auto ticks share the same IPMI lock as sensor polling, manual fan commands, and Dell automatic restore. When the user starts smart auto or switches to a curve preset, the app waits for the current IPMI command to finish, then runs the first tick before starting the background timer; if that first tick fails, the timer is not started and the UI/logs show the root cause. While an auto policy is running, regular sensor polling does not start its own `sdr elist`, which prevents two background timers from creating duplicate RMCP+ sessions in the same period; the auto-policy tick's SDR result is the sensor and chart update source during that time. If a later background auto tick fires while another IPMI command is running, that auto policy cycle is skipped, and the latest request status plus logs state that no new `ipmitool` process or RMCP+ session was started. If a background auto tick completes SDR reading but computes the same target percentage as the last successful send for the same automatic mode, it skips the fan raw command and logs "No fan command sent"; sensors, boards, charts, and history points have still been refreshed from that SDR read. Manual fan commands, Dell Auto commands, and Overview/tray restore only clear the current curve state; they do not stop an already running software auto timer. To keep Dell firmware in control, click "Stop auto" before or after restoring Dell automatic mode.
 
 Curve presets use the same tick and emergency protection, but they compute the fan percentage from user-defined points:
 
@@ -346,8 +489,8 @@ Curve presets use the same tick and emergency protection, but they compute the f
 - Smart auto and curve auto ticks also never run concurrently with another IPMI command; when a background tick finds IPMI busy, it is skipped and logs "No new ipmitool process" instead of queuing and increasing handling time.
 - A skipped tick is a scheduling fact, not a successful IPMI request; the log explicitly states that no new `ipmitool` process or RMCP+ session was started.
 - If one SDR read takes longer than the configured polling interval, the app shows a top warning with a recommended interval because a real command exceeded the configured cadence.
-- A polling command failure stops polling, updates connection state, and shows the failure reason; the app does not retry automatically, silently degrade, or pretend the failed poll succeeded.
-- Dell fan-control raw commands follow the same no-retry failure policy as polling commands: non-zero exits from `raw 0x30 0x30 ...` fail immediately and show stdout/stderr, while `sdr elist` sensor-read failures are not retried and do not create synthetic history points.
+- A polling command failure stops the current poll, updates connection state, and shows the failure reason; the app then releases the IPMI lock and runs one real reconnect flow (`mc info` + `sdr elist`). Persistent polling resumes only if reconnect succeeds; reconnect failure remains visible and disconnected without silent degradation or pretending success.
+- Dell fan-control raw commands and individual sensor reads do not retry the same failed command: non-zero exits from `raw 0x30 0x30 ...` fail immediately and show stdout/stderr, while failed `sdr elist` reads do not create synthetic history points. Only background polling failures append one visible reconnect attempt.
 
 ## Individual Fan Risk
 
@@ -407,7 +550,7 @@ $env:IPMI_PASSWORD = "<your-password>"
 
 ### Polling takes too long or RMCP+ sessions fail
 
-A full `sdr elist` read can take several to more than ten seconds; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds. `SensorRefreshSeconds = 1` only means the app triggers a polling tick every second; it does not mean iDRAC can return a complete SDR read every second. The app serializes IPMI operations: when the previous poll is still running or another IPMI command holds the lock, the tick is skipped and no new `ipmitool` process or RMCP+ session is started. While smart auto or curve auto is running, the auto-policy tick already reads SDR and updates the UI, so regular sensor polling does not independently read SDR again. If a real `ipmitool` command returns `Unable to establish IPMI v2 / RMCP+ session`, the app stops polling and shows the failure reason without retrying or pretending success. If the top warning says one read exceeded the configured interval, adjust polling seconds manually to the UI recommendation; the app does not force-rewrite your setting.
+A full `sdr elist` read can take several to more than ten seconds; the locally observed R730xd/iDRAC 2.82 takes about 11-13 seconds. `SensorRefreshSeconds = 1` only means the app triggers a polling tick every second; it does not mean iDRAC can return a complete SDR read every second. The app serializes IPMI operations: when the previous poll is still running or another IPMI command holds the lock, the tick is skipped and no new `ipmitool` process or RMCP+ session is started. While smart auto or curve auto is running, the auto-policy tick already reads SDR and updates the UI, so regular sensor polling does not independently read SDR again. If a background sensor polling `ipmitool` command returns `Unable to establish IPMI v2 / RMCP+ session`, times out, or exits non-zero, the app stops that polling run, shows the failure reason, and then performs one real reconnect. If reconnect `mc info` or `sdr elist` still fails, the app stays disconnected and continues to show the root cause. If the top warning says one read exceeded the configured interval, adjust polling seconds manually to the UI recommendation; the app does not force-rewrite your setting.
 
 ### Charts fail to load
 
@@ -419,6 +562,17 @@ Assets\Charts\echarts.min.js
 ```
 
 Charts use local WebView2 resources. If the WebView2 runtime is unavailable, install or repair Microsoft Edge WebView2 Runtime.
+
+### UI is crowded under high DPI, scaling, or narrow windows
+
+The app declares `PerMonitorV2` DPI awareness and switches layout in `MainPage.xaml.cs` at `<641`, `641-1007`, and `>=1008` effective-pixel widths. If text is still crowded, charts are covered, performance/electrical labels are abbreviated, the page overflows horizontally, or a bottom divider crosses content, first confirm that you are running the latest build output and run:
+
+```powershell
+dotnet build .\DellR730xdFanControlCenter.csproj -c Debug -p:Platform=x64
+dotnet run --project .\Tests\PresetModelTests\PresetModelTests.csproj
+```
+
+If the checks pass but the UI is still abnormal, record the Windows display scaling percentage, window size, monitor resolution, whether the app is running through Remote Desktop, a screenshot, and the matching log entries under `%LocalAppData%\DellR730xdFanControlCenter\logs`. Chart resource load failures show real errors as described in "Charts fail to load"; the app should not hide labels, abbreviate text, or write fake history points to mask the problem.
 
 ### Runtime log write fails
 

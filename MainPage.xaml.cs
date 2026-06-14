@@ -42,6 +42,7 @@ public sealed partial class MainPage : Page
     private const string HeroThermalSmartPolicyChinese = "软件恒温策略";
     private const string HeroThermalDellAutoChinese = "Dell 自动温控";
     private const string CurveHoverFanSpeedChineseLabel = "风扇速度";
+    private const string SmartAutoPolicyTargetKey = "__smart-auto__";
     private static readonly JsonSerializerOptions VisualizationJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -54,6 +55,9 @@ public sealed partial class MainPage : Page
         "Status.PollingSkippedIpmiBusyNoSample",
         "Status.AutoTickSkipped",
         "Status.AutoTickSkippedIpmiBusy",
+        "Status.SmartFanUnchanged",
+        "Status.CurveFanUnchanged",
+        "Status.PowerCurveFanUnchanged",
     ];
 
     private readonly SettingsStore _settingsStore = new();
@@ -83,6 +87,7 @@ public sealed partial class MainPage : Page
     private bool _visualizationReady;
     private bool _visualizationSnapshotUpdateScheduled;
     private double _pendingVisualizationWheelDeltaY;
+    private bool _pendingVisualizationWheelShouldAnimate;
     private bool _visualizationWheelScrollScheduled;
     private bool _overviewMetricsDirty = true;
     private bool _visualizationSnapshotDirty = true;
@@ -91,6 +96,8 @@ public sealed partial class MainPage : Page
     private DateTime? _latestVisualizationSnapshotTime;
     private string? _activePresetId;
     private FanPreset? _activeCurvePreset;
+    private int? _lastAutoPolicyFanPercent;
+    private string? _lastAutoPolicyTargetKey;
     private string _heroRequestMessage = string.Empty;
     private string _heroRequestSummary = string.Empty;
     private DateTime? _heroRequestUpdatedAt;
@@ -460,12 +467,15 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        ScheduleVisualizationWheelScroll(deltaY);
+        var animate = root.TryGetProperty("animate", out var animateProperty) &&
+            animateProperty.ValueKind == JsonValueKind.True;
+        ScheduleVisualizationWheelScroll(deltaY, animate);
     }
 
-    private void ScheduleVisualizationWheelScroll(double deltaY)
+    private void ScheduleVisualizationWheelScroll(double deltaY, bool animate)
     {
         _pendingVisualizationWheelDeltaY += deltaY;
+        _pendingVisualizationWheelShouldAnimate |= animate;
         if (_visualizationWheelScrollScheduled)
         {
             return;
@@ -483,7 +493,9 @@ public sealed partial class MainPage : Page
     {
         _visualizationWheelScrollScheduled = false;
         var deltaY = _pendingVisualizationWheelDeltaY;
+        var animate = _pendingVisualizationWheelShouldAnimate;
         _pendingVisualizationWheelDeltaY = 0;
+        _pendingVisualizationWheelShouldAnimate = false;
         if (Math.Abs(deltaY) < 0.01)
         {
             return;
@@ -493,7 +505,7 @@ public sealed partial class MainPage : Page
             ContentScrollViewer.VerticalOffset + deltaY,
             0,
             ContentScrollViewer.ScrollableHeight);
-        ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: true);
+        ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: !animate);
     }
 
     public Task ApplyQuickFanSpeedAsync(int percent)
@@ -680,15 +692,13 @@ public sealed partial class MainPage : Page
         });
     }
 
-    private async Task RefreshSensorsAfterFanCommandAsync()
+    private async Task<TimeSpan> RefreshSensorsAfterFanCommandCoreAsync(IdracProfile profile, CancellationToken token)
     {
-        await RunUiCommandAsync(T("Status.RefreshingSensorsAfterFanCommand"), async token =>
-        {
-            var elapsed = await RefreshSensorsCoreAsync(ReadProfile(), token);
-            CheckSensorPollingLatency(elapsed);
-            RestartSensorPollingAfterImmediateRefresh();
-            ShowStatus(F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds), InfoBarSeverity.Success);
-        });
+        SetHeroRequestStatus(T("Status.RefreshingSensorsAfterFanCommand"));
+        var elapsed = await RefreshSensorsCoreAsync(profile, token);
+        CheckSensorPollingLatency(elapsed);
+        RestartSensorPollingAfterImmediateRefresh();
+        return elapsed;
     }
 
     private void RestartSensorPollingAfterImmediateRefresh()
@@ -704,7 +714,7 @@ public sealed partial class MainPage : Page
         UpdatePollingStatusTexts();
     }
 
-    private async Task ConnectAndStartPollingAsync()
+    private async Task ConnectAndStartPollingAsync(bool restoreRunningState = true)
     {
         SetConnectingState();
         var connected = await RunUiCommandAsync(T("Status.Connecting"), async token =>
@@ -716,7 +726,7 @@ public sealed partial class MainPage : Page
             ShowStatus(T("Status.ConnectedPolling"), InfoBarSeverity.Success);
             CheckSensorPollingLatency(elapsed);
         });
-        if (connected)
+        if (connected && restoreRunningState)
         {
             try
             {
@@ -800,6 +810,7 @@ public sealed partial class MainPage : Page
         }
 
         _pollingSkipLogGate.Reset(PollingSkipKind.IpmiCommandBusy);
+        Exception? pollingFailure = null;
         try
         {
             var elapsed = await RefreshSensorsCoreAsync(BuildProfileFromSettings(), CancellationToken.None);
@@ -807,13 +818,19 @@ public sealed partial class MainPage : Page
         }
         catch (Exception ex)
         {
-            StopSensorPolling(ex.Message);
-            ShowFailure(ex);
+            pollingFailure = ex;
         }
         finally
         {
             _ipmiOperationLock.Release();
             _sensorPollingTickRunning = false;
+        }
+
+        if (pollingFailure is not null)
+        {
+            StopSensorPolling(pollingFailure.Message);
+            ShowFailure(pollingFailure);
+            await ConnectAndStartPollingAsync(restoreRunningState: false);
         }
     }
 
@@ -876,19 +893,17 @@ public sealed partial class MainPage : Page
 
     private async Task ApplyAllFansAsync(int percent)
     {
-        var succeeded = await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
+        await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
         {
-            await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
+            var profile = ReadProfile();
+            await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);
             _activeCurvePreset = null;
+            ClearAutoPolicyFanTargetCache();
             SetModeSummary("Mode.Manual");
             MarkActivePreset(null, persistRunningState: true);
-            ShowStatus(F("Status.AllFansSet", percent), InfoBarSeverity.Success);
+            var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+            ShowStatus(F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds), InfoBarSeverity.Success);
         });
-
-        if (succeeded)
-        {
-            await RefreshSensorsAfterFanCommandAsync();
-        }
     }
 
     private async void OnSetSingleFanClick(object sender, RoutedEventArgs e)
@@ -908,19 +923,17 @@ public sealed partial class MainPage : Page
         var channel = FanChannels.First(fan => fan.Index == fanIndex);
         var percent = CheckedPercent(channel.Percent, F("Field.SingleFanPercent", fanIndex));
 
-        var succeeded = await RunUiCommandAsync(F("Status.FanSet", fanIndex, percent), async token =>
+        await RunUiCommandAsync(F("Status.FanSet", fanIndex, percent), async token =>
         {
-            await _ipmi.SetSingleFanManualSpeedAsync(ReadProfile(), fanIndex, percent, token);
+            var profile = ReadProfile();
+            await _ipmi.SetSingleFanManualSpeedAsync(profile, fanIndex, percent, token);
             _activeCurvePreset = null;
+            ClearAutoPolicyFanTargetCache();
             SetModeSummary("Mode.Manual");
             MarkActivePreset(null, persistRunningState: true);
-            ShowStatus(F("Status.FanSet", fanIndex, percent), InfoBarSeverity.Success);
+            var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+            ShowStatus(F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds), InfoBarSeverity.Success);
         });
-
-        if (succeeded)
-        {
-            await RefreshSensorsAfterFanCommandAsync();
-        }
     }
 
     private async void OnApplyPresetClick(object sender, RoutedEventArgs e)
@@ -969,10 +982,6 @@ public sealed partial class MainPage : Page
         try
         {
             var preset = ReadPresetFromSender(sender);
-            if (!preset.CanDelete)
-            {
-                throw new InvalidOperationException(T("Validation.CannotDeleteBuiltInPreset"));
-            }
 
             Presets.Remove(preset);
             if (_activePresetId?.Equals(preset.Id, StringComparison.OrdinalIgnoreCase) == true)
@@ -984,6 +993,7 @@ public sealed partial class MainPage : Page
             if (_activeCurvePreset?.Id.Equals(preset.Id, StringComparison.OrdinalIgnoreCase) == true)
             {
                 _activeCurvePreset = null;
+                ClearAutoPolicyFanTargetCache();
                 _autoPolicyTimer.Stop();
                 StartAutoButton.IsEnabled = true;
                 StopAutoButton.IsEnabled = false;
@@ -1571,59 +1581,53 @@ public sealed partial class MainPage : Page
     private async Task ApplyManualPresetAsync(FanPreset preset)
     {
         var percent = CheckedPercent(preset.Percent, T("Field.AllFanPercent"));
-        var succeeded = await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
+        await RunUiCommandAsync(F("Status.SetAllFans", percent), async token =>
         {
-            await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
+            var profile = ReadProfile();
+            await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);
             AllFanSlider.Value = percent;
             AllFanPercentBox.Value = percent;
             _activeCurvePreset = null;
+            ClearAutoPolicyFanTargetCache();
             SetModeSummary("Mode.PresetManual", preset.DisplayName, percent);
             MarkActivePreset(preset.Id, persistRunningState: true);
-            ShowStatus(F("Status.PresetApplied", preset.DisplayName), InfoBarSeverity.Success);
+            var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+            ShowStatus(F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds), InfoBarSeverity.Success);
         });
-
-        if (succeeded)
-        {
-            await RefreshSensorsAfterFanCommandAsync();
-        }
     }
 
     private async Task RestoreDefaultManualAsync(string? activePresetId = "restore-manual", int? percentOverride = null)
     {
         var percent = percentOverride ?? AppSettings.LocalDefaultManualFanPercent;
-        var succeeded = await RunUiCommandAsync(F("Status.RestoringDefault", percent), async token =>
+        await RunUiCommandAsync(F("Status.RestoringDefault", percent), async token =>
         {
             PersistSettingsFromControls();
+            var profile = ReadProfile();
             AllFanSlider.Value = percent;
             AllFanPercentBox.Value = percent;
-            await _ipmi.SetAllFansManualSpeedAsync(ReadProfile(), percent, token);
+            await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);
             _activeCurvePreset = null;
+            ClearAutoPolicyFanTargetCache();
             SetModeSummary("Mode.ManualPercent", percent);
             MarkActivePreset(activePresetId, persistRunningState: true);
-            ShowStatus(F("Status.RestoredDefault", percent), InfoBarSeverity.Success);
+            var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+            ShowStatus(F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds), InfoBarSeverity.Success);
         });
-
-        if (succeeded)
-        {
-            await RefreshSensorsAfterFanCommandAsync();
-        }
     }
 
     private async Task ResetDellAutomaticModeAsync(string? activePresetId = "dell-auto")
     {
-        var succeeded = await RunUiCommandAsync(T("Status.ResettingDellAuto"), async token =>
+        await RunUiCommandAsync(T("Status.ResettingDellAuto"), async token =>
         {
-            await _ipmi.SetDellAutomaticModeAsync(ReadProfile(), token);
+            var profile = ReadProfile();
+            await _ipmi.SetDellAutomaticModeAsync(profile, token);
             _activeCurvePreset = null;
+            ClearAutoPolicyFanTargetCache();
             SetModeSummary("Mode.DellAuto");
             MarkActivePreset(activePresetId, persistRunningState: true);
-            ShowStatus(T("Status.DellAutoRestored"), InfoBarSeverity.Success);
+            var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+            ShowStatus(F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds), InfoBarSeverity.Success);
         });
-
-        if (succeeded)
-        {
-            await RefreshSensorsAfterFanCommandAsync();
-        }
     }
 
     private async Task ApplyCurvePresetAsync(FanPreset preset)
@@ -1635,6 +1639,7 @@ public sealed partial class MainPage : Page
             {
                 PersistSettingsFromControls();
                 _activeCurvePreset = curvePreset;
+                ClearAutoPolicyFanTargetCache();
                 PrepareAutoPolicyRunningState();
                 SetModeSummary("Mode.CurveAuto", curvePreset.DisplayName);
                 MarkActivePreset(curvePreset.Id);
@@ -1683,6 +1688,7 @@ public sealed partial class MainPage : Page
         }
 
         _activeCurvePreset = null;
+        ClearAutoPolicyFanTargetCache();
         PrepareAutoPolicyRunningState();
         SetModeSummary("Mode.SmartAuto");
         AddLog(T("Log.Info"), T("Status.AutoStarted"));
@@ -1721,6 +1727,7 @@ public sealed partial class MainPage : Page
     {
         _autoPolicyTimer.Stop();
         _activeCurvePreset = null;
+        ClearAutoPolicyFanTargetCache();
         StartAutoButton.IsEnabled = true;
         StopAutoButton.IsEnabled = false;
         SetAutoPolicySummary(false);
@@ -1746,6 +1753,7 @@ public sealed partial class MainPage : Page
     {
         _autoPolicyTimer.Stop();
         _activeCurvePreset = null;
+        ClearAutoPolicyFanTargetCache();
         StartAutoButton.IsEnabled = true;
         StopAutoButton.IsEnabled = false;
         SetAutoPolicySummary(false);
@@ -1815,6 +1823,7 @@ public sealed partial class MainPage : Page
             "SmartAutoPolicyTick",
             T("Status.AutoStarted"),
             operationProperties);
+        Dictionary<string, string>? fanCommandProperties = null;
 
         try
         {
@@ -1832,6 +1841,8 @@ public sealed partial class MainPage : Page
             {
                 await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);
                 _activeCurvePreset = null;
+                ClearAutoPolicyFanTargetCache();
+                var emergencyRefreshElapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken);
                 AddLog(T("Log.Warn"), F("Status.EmergencyAuto", cpuTemp));
                 SetModeSummary("Mode.DellAuto");
                 SetHeroRequestStatus(F("Status.EmergencyAuto", cpuTemp));
@@ -1841,48 +1852,50 @@ public sealed partial class MainPage : Page
                     {
                         ["cpuTemperatureCelsius"] = cpuTemp.ToString("0.0", CultureInfo.InvariantCulture),
                         ["action"] = "RestoreDellAutomaticMode",
+                        ["postCommandRefreshSeconds"] = emergencyRefreshElapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture),
                     });
                 return;
             }
 
             double? powerWatts = null;
             var percent = CalculateFanPercentForAutoTick(activeCurvePreset, cpuTemp, readings, out powerWatts);
+            var targetKey = GetAutoPolicyTargetKey(activeCurvePreset);
 
+            if (ShouldSkipUnchangedAutoPolicyFanCommand(targetKey, percent))
+            {
+                var unchangedMessage = FormatAutoFanUnchanged(activeCurvePreset, cpuTemp, powerWatts, percent);
+                SetAutoModeSummary(activeCurvePreset, percent);
+                AddLog(T("Log.Info"), unchangedMessage);
+                SetHeroRequestStatus(unchangedMessage);
+                var unchangedProperties = BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, "SkipUnchangedFanPercent");
+                operation.Succeed(unchangedMessage, unchangedProperties);
+                return;
+            }
+
+            fanCommandProperties = BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, "SetAllFansManualSpeed");
             await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);
+            RememberAutoPolicyFanTarget(targetKey, percent);
+            var appliedRefreshElapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken);
             var message = activeCurvePreset is null
                 ? F("Status.SmartFanApplied", cpuTemp, percent)
                 : activeCurvePreset.IsPowerCurvePreset
                     ? FormatPowerCurveFanApplied(activeCurvePreset.DisplayName, powerWatts!.Value, percent)
                     : F("Status.CurveFanApplied", activeCurvePreset.DisplayName, cpuTemp, percent);
-            if (activeCurvePreset is null)
-            {
-                SetModeSummary("Mode.SmartPercent", percent);
-            }
-            else
-            {
-                SetModeSummary("Mode.CurvePercent", activeCurvePreset.DisplayName, percent);
-            }
+            SetAutoModeSummary(activeCurvePreset, percent);
 
             AddLog(T("Log.Info"), message);
             SetHeroRequestStatus(message);
-            var successProperties = new Dictionary<string, string>
+            var successProperties = new Dictionary<string, string>(fanCommandProperties)
             {
-                ["cpuTemperatureCelsius"] = cpuTemp.ToString("0.0", CultureInfo.InvariantCulture),
-                ["fanPercent"] = percent.ToString(CultureInfo.InvariantCulture),
-                ["action"] = "SetAllFansManualSpeed",
+                ["postCommandRefreshSeconds"] = appliedRefreshElapsed.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture),
             };
-            if (powerWatts.HasValue)
-            {
-                successProperties["powerWatts"] = powerWatts.Value.ToString("0.0", CultureInfo.InvariantCulture);
-            }
-
             operation.Succeed(message, successProperties);
         }
         catch (Exception ex)
         {
             try
             {
-                operation.Fail(ex);
+                operation.Fail(ex, fanCommandProperties);
             }
             catch (Exception logException)
             {
@@ -1893,6 +1906,22 @@ public sealed partial class MainPage : Page
 
             throw;
         }
+    }
+
+    private static Dictionary<string, string> BuildAutoPolicyFanCommandProperties(double cpuTemp, int percent, double? powerWatts, string action)
+    {
+        var properties = new Dictionary<string, string>
+        {
+            ["cpuTemperatureCelsius"] = cpuTemp.ToString("0.0", CultureInfo.InvariantCulture),
+            ["fanPercent"] = percent.ToString(CultureInfo.InvariantCulture),
+            ["action"] = action,
+        };
+        if (powerWatts.HasValue)
+        {
+            properties["powerWatts"] = powerWatts.Value.ToString("0.0", CultureInfo.InvariantCulture);
+        }
+
+        return properties;
     }
 
     private int CalculateAutoFanPercent(double cpuTemp)
@@ -1948,6 +1977,61 @@ public sealed partial class MainPage : Page
     private string FormatPowerCurveFanApplied(string presetName, double powerWatts, int percent)
     {
         return F("Status.PowerCurveFanApplied", presetName, powerWatts, T("SensorUnit.Watts"), percent);
+    }
+
+    private string FormatPowerCurveFanUnchanged(string presetName, double powerWatts, int percent)
+    {
+        return F("Status.PowerCurveFanUnchanged", presetName, powerWatts, T("SensorUnit.Watts"), percent);
+    }
+
+    private static string GetAutoPolicyTargetKey(FanPreset? activeCurvePreset)
+    {
+        return activeCurvePreset?.Id ?? SmartAutoPolicyTargetKey;
+    }
+
+    private bool ShouldSkipUnchangedAutoPolicyFanCommand(string targetKey, int percent)
+    {
+        return _lastAutoPolicyFanPercent == percent &&
+               string.Equals(_lastAutoPolicyTargetKey, targetKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void RememberAutoPolicyFanTarget(string targetKey, int percent)
+    {
+        _lastAutoPolicyTargetKey = targetKey;
+        _lastAutoPolicyFanPercent = percent;
+    }
+
+    private void ClearAutoPolicyFanTargetCache()
+    {
+        _lastAutoPolicyTargetKey = null;
+        _lastAutoPolicyFanPercent = null;
+    }
+
+    private string FormatAutoFanUnchanged(FanPreset? activeCurvePreset, double cpuTemp, double? powerWatts, int percent)
+    {
+        if (activeCurvePreset is null)
+        {
+            return F("Status.SmartFanUnchanged", cpuTemp, percent);
+        }
+
+        if (activeCurvePreset.IsPowerCurvePreset)
+        {
+            return FormatPowerCurveFanUnchanged(activeCurvePreset.DisplayName, powerWatts!.Value, percent);
+        }
+
+        return F("Status.CurveFanUnchanged", activeCurvePreset.DisplayName, cpuTemp, percent);
+    }
+
+    private void SetAutoModeSummary(FanPreset? activeCurvePreset, int percent)
+    {
+        if (activeCurvePreset is null)
+        {
+            SetModeSummary("Mode.SmartPercent", percent);
+        }
+        else
+        {
+            SetModeSummary("Mode.CurvePercent", activeCurvePreset.DisplayName, percent);
+        }
     }
 
     private async void OnVisitIdracClick(object sender, RoutedEventArgs e)

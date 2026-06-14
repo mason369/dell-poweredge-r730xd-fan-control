@@ -66,7 +66,7 @@ public sealed class FanPreset
     public bool CanEditCurve => IsCurvePreset;
 
     [JsonIgnore]
-    public bool CanDelete => !IsBuiltIn;
+    public bool CanDelete => true;
 
     [JsonIgnore]
     public bool CanSave => true;

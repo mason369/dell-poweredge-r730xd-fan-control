@@ -81,12 +81,13 @@ public sealed class SettingsStore
 
     private static List<FanPreset> NormalizePresets(List<FanPreset>? presets)
     {
-        var normalized = FanPreset.CreateDefaultPresets();
-        if (presets is null || presets.Count == 0)
+        if (presets is null)
         {
-            return normalized;
+            return FanPreset.CreateDefaultPresets();
         }
 
+        var normalized = new List<FanPreset>();
+        var builtInDefaults = FanPreset.CreateDefaultPresets();
         foreach (var preset in presets)
         {
             var clone = preset.Clone();
@@ -95,10 +96,9 @@ public sealed class SettingsStore
                 clone.Id = Guid.NewGuid().ToString("N");
             }
 
-            var existing = normalized.FindIndex(item => item.Id.Equals(clone.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing >= 0)
+            var builtInDefault = builtInDefaults.Find(item => item.Id.Equals(clone.Id, StringComparison.OrdinalIgnoreCase));
+            if (builtInDefault is not null)
             {
-                var builtInDefault = normalized[existing];
                 clone.IsBuiltIn = builtInDefault.IsBuiltIn;
                 clone.Kind = builtInDefault.Kind;
 
@@ -115,6 +115,7 @@ public sealed class SettingsStore
 
             NormalizePreset(clone);
 
+            var existing = normalized.FindIndex(item => item.Id.Equals(clone.Id, StringComparison.OrdinalIgnoreCase));
             if (existing >= 0)
             {
                 normalized[existing] = clone;

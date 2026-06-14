@@ -2100,11 +2100,25 @@
                                         Content="深色"
                                         Tag="Dark" />
                                 </ComboBox>
-                                <ComboBox
-                                    x:Name="LanguageComboBox"
-                                    local:Localization.Key="Settings.Language"
-                                    Header="界面语言"
-                                    SelectionChanged="OnLanguageSelectionChanged" />
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        Margin="0,28,0,0"
+                                        FontSize="18"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Glyph="&#xE774;"
+                                        IsHitTestVisible="False"
+                                        VerticalAlignment="Top" />
+                                    <ComboBox
+                                        x:Name="LanguageComboBox"
+                                        Grid.Column="1"
+                                        local:Localization.Key="Settings.Language"
+                                        Header="界面语言"
+                                        SelectionChanged="OnLanguageSelectionChanged" />
+                                </Grid>
                             </StackPanel>
                         </Border>
                     </Grid>

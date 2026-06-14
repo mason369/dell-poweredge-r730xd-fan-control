@@ -28,6 +28,23 @@ ipmitool -I lanplus -H <host> -U <user> -E <ipmi-arguments>
 
 命令日志会显示工具路径、参数、退出码和耗时，不显示密码。总览页“最新日志”会把信息、警告、成功、错误/失败显示为不同颜色状态标记，其中只有错误和失败使用红色；本地 JSONL 运行日志不写入颜色值，只写入 `level`、`displayLevel`、`succeeded`、`exitCode` 等结构化字段。运行日志同时会为用户命令、传感器刷新和软件恒温 tick 写入起止时间段记录。
 
+## 发布与压缩包验证命令
+
+GitHub Actions 下载 zip 与本机 Release zip 使用同一条本地脚本生成：
+
+```powershell
+cd C:\DellR730xdFanControlCenter
+.\tools\Publish-ReleaseZip.ps1
+```
+
+脚本会先执行 `tools\Publish-UnpackagedExe.ps1` 生成 `artifacts/exe/win-x64/`，再创建 `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`。创建后会把 zip 解压到临时目录，检查 `DellR730xdFanControlCenter.exe`、`Microsoft.WindowsAppRuntime.dll`、`Microsoft.ui.xaml.dll`、`DellR730xdFanControlCenter.pri`、`Assets/Charts/dashboard.html`、`Assets/Charts/echarts.min.js` 和 `BundledTools/ipmitool/ipmitool.exe`。本机验证下载后的 zip 能否启动时运行：
+
+```powershell
+.\tools\Publish-ReleaseZip.ps1 -VerifyLaunch
+```
+
+`-VerifyLaunch` 会从解压后的 zip 启动 exe，等待顶层窗口和窗口标题，并检查本次启动后是否出现新的 `.NET Runtime` 或 `Application Error` 事件；验证结束后会关闭该临时启动进程并删除临时解压目录。GitHub Actions 的 `Package Release` workflow 默认只做文件结构验证，不启动 GUI；手动触发时上传 workflow artifact，推送 `v*` tag 时还会用 `gh release upload --clobber` 覆盖同名 GitHub Release zip。
+
 ## 命令日志与时间段记录
 
 运行日志路径为：
@@ -40,7 +57,7 @@ ipmitool -I lanplus -H <host> -U <user> -E <ipmi-arguments>
 
 - `Operation/UiCommand`：设置页连接、刷新传感器、设置风扇、总览/托盘“还原戴尔出厂设置转速”、Dell 自动预设、手动 10% 预设等按钮操作。每次操作会写 `Started` 和 `Succeeded` 或 `Failed`，并带 `operationId`、`startedAt`、`finishedAt`、`durationMilliseconds`。
 - `Operation/SensorRefresh`：每次 `sdr elist` 刷新。记录 host、轮询秒数、传感器数量和耗时。
-- `Operation/SmartAutoPolicyTick`：每次软件自动策略 tick。记录温度阈值、CPU 温度、曲线预设类型、功耗曲线使用的 `powerWatts`、计算出的风扇百分比，或达到紧急阈值后的 Dell 自动动作。
+- `Operation/SmartAutoPolicyTick`：每次软件自动策略 tick。记录温度阈值、CPU 温度、曲线预设类型、功耗曲线使用的 `powerWatts`、计算出的风扇百分比，或达到紧急阈值后的 Dell 自动动作。如果本轮计算出的风扇百分比与同一自动模式下上次成功下发值一致，`action` 记录为 `SkipUnchangedFanPercent`，表示本轮刷新了 SDR 和图表但没有重复发送风扇 raw 控制命令。如果已经计算出目标百分比但后续 raw 风扇命令失败，`Failed` 记录仍会保留 `cpuTemperatureCelsius`、`fanPercent`、`action = SetAllFansManualSpeed`，功耗曲线还会保留 `powerWatts`，便于直接定位失败前准备下发的目标。
 - `IpmiCommand/CommandCompleted`：每条实际 `ipmitool` 子命令完成。记录完整命令行、退出码、成功状态和耗时。
 
 如果运行日志无法写入，应用不会把按钮触发的用户命令显示为成功；状态栏和最近日志会显示“运行日志写入失败”。当前没有自动清理策略，持续轮询会让当天 JSONL 文件增长。
@@ -68,7 +85,9 @@ ipmitool -I lanplus -H <host> -U <user> -E <ipmi-arguments>
 
 Dell 风扇控制 raw 命令指所有以 `raw 0x30 0x30` 开头的命令，包括进入手动模式、设置全部风扇、设置单风扇和恢复 Dell 自动模式。若这类命令的 `ipmitool` 子进程返回非零退出码，应用会立即把该操作标记为失败，写入一次 `IpmiCommand/CommandCompleted` 记录，并把本次 stdout/stderr 显示给用户。
 
-`mc info`、`sdr elist`、raw 命令、参数校验失败、缺少 `ipmitool.exe` 和命令超时都不会自动重试、延迟重试或写入“将重试”记录。传感器轮询失败会停止轮询并显示根因，不会写入伪造图表历史点。
+软件自动或曲线自动已经完成 SDR 读取并计算出目标百分比后，如果 `raw 0x30 0x30 0x02 ...` 失败，失败的 `Operation/SmartAutoPolicyTick` 记录会带上本轮 CPU 温度、功耗读数、目标百分比和动作名。该记录用于排查，不代表命令成功；应用仍会显示真实失败并停止该自动策略周期。
+
+`mc info`、`sdr elist`、raw 命令、参数校验失败、缺少 `ipmitool.exe` 和命令超时都不会重试同一条失败命令、延迟重试或写入“将重试”记录。传感器后台轮询失败会先停止本轮轮询并显示根因，然后执行一次真实重连流程（`mc info` + `sdr elist`）；重连成功才恢复持续轮询，重连失败继续显示真实错误并保持断开，不会写入伪造图表历史点。
 
 ## 托盘右键菜单
 
@@ -169,13 +188,14 @@ sdr elist
 - 达到或超过紧急自动阈值：发送 Dell 自动模式命令；软件自动计时器不会因此自动停止。
 
 软件自动 tick 与传感器轮询和用户触发的风扇命令互斥。用户主动启动软件自动或切换曲线预设时，应用会等待当前 IPMI 命令完成，再执行首轮 tick；首轮成功后才启动后台计时器，首轮失败会显示真实错误且不会启动后台计时器。后台 tick 触发时如果上一轮自动策略仍在运行，或已有 IPMI 命令占用锁，本次自动策略周期会跳过；同一段忙碌期间只记录第一条跳过日志，不会打开或覆盖顶部 InfoBar，也不会启动新的 `ipmitool` 进程或 RMCP+ 会话。
+后台 tick 成功读取 SDR 并计算出目标百分比后，会先与同一自动模式最近一次成功下发的全部风扇百分比比较；如果一致，本轮只更新传感器、看板、图表和历史点，并记录“未下发风扇命令”，不会重复执行 `raw 0x30 0x30 0x02 ...`。切换自动模式、手动全部风扇、单风扇、Dell 自动或停止自动会清除该缓存，下一次自动接管会重新下发需要的目标百分比。
 
 如果当前运行的是曲线预设，tick 仍然先执行同一个 `sdr elist`，但百分比不再来自全局目标/高温阈值，而是来自保存的曲线点。曲线分为两类：
 
 - 温度曲线保存为 `Kind = TemperatureCurve`，点位包含 `TemperatureCelsius` 和 `FanPercent`；功耗曲线保存为 `Kind = PowerCurve`，点位包含 `PowerWatts` 和 `FanPercent`。两者都保存在 `%LocalAppData%\DellR730xdFanControlCenter\settings.json` 的 `Presets[].CurvePoints`，并保存同一个 `SmoothCurve` 开关。
 - 风扇控制页用两个图形编辑器维护点位：上方温度曲线图在空白处点击会生成温度/风扇百分比点；下方功耗曲线图在空白处点击会生成功耗瓦数/风扇百分比点。鼠标移入曲线图会显示十字辅助线、当前温度/功耗和风扇速度百分比；拖动已有点位会实时更新曲线点位和右侧对应数字控件，右侧点位列表也可用数字控件继续微调；拖动中只执行轻量绘制，完整预览文本和严格校验在松手、右侧数值编辑、添加点或保存时刷新；已有曲线预设可从预设卡片载入对应编辑器，页面会自动滚到匹配图表。保存成功后，页面会滚回刚新增或刚更新的预设卡片。
 - 温度曲线保存或切换时至少需要 2 个点，温度范围为 `-40` 到 `125` °C，风扇百分比范围为 `0` 到 `100`，温度点不能重复。功耗曲线至少需要 2 个点，功耗范围为 `0` 到 `1200` W，风扇百分比范围为 `0` 到 `100`，功耗点不能重复。
-- 温度曲线使用 CPU 温度计算百分比；功耗曲线使用本轮 SDR 中单位包含 `Watts` 或名称包含 `Pwr Consumption` 的功耗传感器计算百分比。功耗曲线仍会先解析 CPU 温度并检查紧急自动阈值；找不到 CPU 温度或找不到功耗读数都会显示错误并停止本轮，不会下发风扇命令。
+- 温度曲线使用 CPU 温度计算百分比；功耗曲线使用本轮 SDR 中单位包含 `Watts` 或名称包含 `Pwr Consumption` 的功耗传感器计算百分比。功耗曲线仍会先解析 CPU 温度并检查紧急自动阈值；找不到 CPU 温度或找不到功耗读数都会显示错误并停止本轮，不会下发风扇命令。计算出的百分比与同一曲线预设上次成功下发值一致时，也不会重复下发风扇命令。
 - 输入值低于第一个点时使用第一个点，高于最后一个点时使用最后一个点；其余情况会把当前温度或当前功耗代入由点位连接成的曲线，按该位置求风扇百分比并四舍五入为整数百分比。
 - 如果预设启用了 `SmoothCurve`，点位和端点仍相同，但中间百分比会按平滑曲线过渡后再四舍五入；最终发送的仍是单个 `<calculated-percent-hex>` 全部风扇百分比。
 - 达到紧急自动阈值时，曲线计算结果不会继续下发，应用先发送 Dell 自动模式命令；该动作不停止软件自动计时器。
@@ -220,7 +240,9 @@ UI 已实现单风扇目标编号控制，但默认关闭。本机 R730xd/iDRAC 
 - 如果其他 IPMI 命令正在执行，本次 tick 会跳过，避免并发命令冲突；同一段 IPMI 忙碌期间只记录第一条跳过日志。
 - 跳过 tick 不会启动新的 `ipmitool` 进程，也不会建立新的 RMCP+ 会话。它不是成功请求，也不会更新为“成功”状态。
 - 如果单次读取耗时超过当前轮询间隔，应用会根据实际耗时在顶部提示建议轮询间隔。
-- 如果轮询命令失败，应用会停止轮询、标记断开并显示失败原因，不会自动重试、静默降级或伪装成功。
+- 如果轮询命令失败，应用会停止当前轮询、标记断开并显示失败原因，然后释放 IPMI 锁并执行一次真实重连流程（`mc info` + `sdr elist`）。重连成功才恢复持续轮询；重连失败继续显示真实错误并保持断开，不会静默降级或伪装成功。
+
+后台轮询失败后的重连不会重新应用上次保存的手动预设、Dell 自动预设、温度曲线或功耗曲线，避免一次 SDR 读取故障触发重复下发风扇命令。手动点击“开始轮询”或保存设置后的首次连接仍会在连接成功后恢复保存的运行状态。
 
 本机 R730xd/iDRAC 2.82 观察到完整 SDR 读取约 11-13 秒。若你的环境中顶部提示单次读取超过当前间隔，可以手动把轮询间隔设置为略高于实际 SDR 读取耗时；应用不会强制改写该设置。
 
@@ -309,7 +331,7 @@ $env:IPMI_PASSWORD = "<your-password>"
 
 ### SDR 轮询慢或 RMCP+ 会话失败
 
-iDRAC 返回完整 SDR 可能需要数秒到十几秒。过低轮询会持续建立 IPMI v2/RMCP+ 会话，可能导致 `Unable to establish IPMI v2 / RMCP+ session`。软件自动或曲线自动运行时，普通轮询不会再额外读取 SDR，避免与自动策略 tick 重复建立会话。在设置页“应用设置”中把轮询间隔提高到界面推荐值或更高；应用不会自动重试或假装失败轮询成功。
+iDRAC 返回完整 SDR 可能需要数秒到十几秒。过低轮询会持续建立 IPMI v2/RMCP+ 会话，可能导致 `Unable to establish IPMI v2 / RMCP+ session`。软件自动或曲线自动运行时，普通轮询不会再额外读取 SDR，避免与自动策略 tick 重复建立会话。在设置页“应用设置”中把轮询间隔提高到界面推荐值或更高。后台轮询失败会触发一次可见的真实重连，但失败命令本身不会被重试，应用也不会假装失败轮询成功。
 
 ### 传感器分类不符合预期
 

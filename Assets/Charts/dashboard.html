@@ -345,6 +345,7 @@
     let customRangeEnd = "";
     let lastPayload = null;
     let pendingHostWheelDeltaY = 0;
+    let pendingHostWheelShouldAnimate = false;
     let hostWheelFrameRequested = false;
 
     function initCharts() {
@@ -777,7 +778,12 @@
 
     function chartDataZoom(layout) {
       return [
-        { type: "inside" },
+        {
+          type: "inside",
+          zoomOnMouseWheel: false,
+          moveOnMouseWheel: false,
+          moveOnMouseMove: false
+        },
         {
           type: "slider",
           height: layout.zoomHeight,
@@ -1252,9 +1258,11 @@
           return;
         }
 
+        const shouldAnimateHostWheel = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(event.deltaY) >= 80;
         event.preventDefault();
         event.stopPropagation();
         pendingHostWheelDeltaY += deltaY;
+        pendingHostWheelShouldAnimate = pendingHostWheelShouldAnimate || shouldAnimateHostWheel;
         if (!hostWheelFrameRequested) {
           hostWheelFrameRequested = true;
           requestAnimationFrame(postPendingHostWheelDelta);
@@ -1265,12 +1273,14 @@
     function postPendingHostWheelDelta() {
       hostWheelFrameRequested = false;
       const deltaY = pendingHostWheelDeltaY;
+      const animate = pendingHostWheelShouldAnimate;
       pendingHostWheelDeltaY = 0;
+      pendingHostWheelShouldAnimate = false;
       if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.01) {
         return;
       }
 
-      window.chrome.webview.postMessage({ type: "wheel", deltaY });
+      window.chrome.webview.postMessage({ type: "wheel", deltaY, animate });
     }
 
     initCharts();

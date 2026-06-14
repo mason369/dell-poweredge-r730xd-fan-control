@@ -24,6 +24,11 @@ public sealed class LogEntry
 
     private LogLevelStyle Style => LogLevelStyle.FromSemanticLevel(SemanticLevel);
 
+    public override string ToString()
+    {
+        return $"{DisplayTime} {Level} {Message}".Trim();
+    }
+
     private static SolidColorBrush ToBrush(string hex)
     {
         if (hex.Length != 9 || hex[0] != '#')
