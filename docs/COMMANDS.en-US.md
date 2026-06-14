@@ -37,7 +37,7 @@ cd C:\DellR730xdFanControlCenter
 .\tools\Publish-ReleaseZip.ps1
 ```
 
-The script first runs `tools\Publish-UnpackagedExe.ps1` to create `artifacts/exe/win-x64/`, then creates `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`. After creation, it extracts the zip to a temporary directory and checks `DellR730xdFanControlCenter.exe`, `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `DellR730xdFanControlCenter.pri`, `Assets/Charts/dashboard.html`, `Assets/Charts/echarts.min.js`, and `BundledTools/ipmitool/ipmitool.exe`. This zip is an unsigned unpackaged download, not an MSIX installer. If extracted content contains `.msix`, `.pfx`, `.cer`, `AppxManifest.xml`, or `Package.appxmanifest`, the script fails so the release package is not affected by certificate trust chain or package identity problems. To verify locally that the downloaded zip can launch, run:
+The script first runs `tools\Publish-UnpackagedExe.ps1` to create `artifacts/exe/win-x64/`, then creates `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`. After creation, it extracts the zip to a temporary directory and checks `DellR730xdFanControlCenter.exe`, `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `DellR730xdFanControlCenter.pri`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `Assets/Charts/dashboard.html`, `Assets/Charts/echarts.min.js`, ECharts license/NOTICE files, `BundledTools/ipmitool/ipmitool.exe`, and `BundledTools/ipmitool/LICENSES/**`. This zip is an unsigned unpackaged download, not an MSIX installer. If extracted content contains `.msix`, `.pfx`, `.cer`, `AppxManifest.xml`, or `Package.appxmanifest`, the script fails so the release package is not affected by certificate trust chain or package identity problems. To verify locally that the downloaded zip can launch, run:
 
 ```powershell
 .\tools\Publish-ReleaseZip.ps1 -VerifyLaunch
@@ -292,8 +292,8 @@ CPU temperature lookup:
 
 ## Tested Local BMC
 
-- Host: `192.168.1.73`
-- User: `root`
+- Host: documentation uses reserved example address `192.0.2.10`; real private addresses are not committed.
+- User: documentation uses example user `idrac-user`; real accounts are not committed.
 - Firmware observed by `mc info`: `2.82`
 - Sensors observed: Fan1-Fan6 RPM, Inlet Temp, Exhaust Temp, CPU-related Temp rows, power, voltage, redundancy, drive and cable presence.
 - All-fan 20% command: succeeded.

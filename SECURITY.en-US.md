@@ -150,14 +150,17 @@ Validate curves first under low load and with someone watching the machine. Do n
 
 ## Supply Chain And Bundled Assets
 
-The repository includes bundled `ipmitool.exe`, Cygwin DLLs, and ECharts frontend assets. When publishing or repackaging, verify:
+The repository includes bundled `ipmitool.exe`, Cygwin/GCC/OpenSSL/zlib DLLs, and ECharts frontend assets. When publishing or repackaging, verify:
 
 - Bundled binaries come from trusted sources.
 - Files have not been replaced or tampered with.
+- `LICENSE` and `THIRD_PARTY_NOTICES.md` remain with source and release packages.
+- Versions, SHA-256 hashes, and source notes in `BundledTools/ipmitool/README.md` match the actual files.
+- `BundledTools/ipmitool/LICENSES/**` remains with the bundled command runtime, especially the ipmitool, Cygwin, OpenSSL, GCC runtime, and zlib notices.
 - `Assets/Charts/echarts.LICENSE.txt` and `Assets/Charts/echarts.NOTICE.txt` remain with the chart assets.
 - The release package includes `BundledTools/ipmitool/**` and `Assets/Charts/**`.
 
-If you replace `ipmitool.exe` or chart assets, document the source, version, verification method, and compatibility changes.
+If you replace `ipmitool.exe`, Cygwin/GCC/OpenSSL/zlib DLLs, or chart assets, document the source, version, SHA-256 hash, license files, source availability, and compatibility changes in the same change, and update release-script required-file checks. Do not publish a Release package when these notices are missing.
 
 ## Failure Handling Principles
 

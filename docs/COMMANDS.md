@@ -37,7 +37,7 @@ cd C:\DellR730xdFanControlCenter
 .\tools\Publish-ReleaseZip.ps1
 ```
 
-脚本会先执行 `tools\Publish-UnpackagedExe.ps1` 生成 `artifacts/exe/win-x64/`，再创建 `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`。创建后会把 zip 解压到临时目录，检查 `DellR730xdFanControlCenter.exe`、`Microsoft.WindowsAppRuntime.dll`、`Microsoft.ui.xaml.dll`、`DellR730xdFanControlCenter.pri`、`Assets/Charts/dashboard.html`、`Assets/Charts/echarts.min.js` 和 `BundledTools/ipmitool/ipmitool.exe`。该 zip 是 unsigned unpackaged 下载物，不走 MSIX 安装；如果解压内容包含 `.msix`、`.pfx`、`.cer`、`AppxManifest.xml` 或 `Package.appxmanifest`，脚本会失败停止，避免 Release 包被证书信任链或包身份问题影响。本机验证下载后的 zip 能否启动时运行：
+脚本会先执行 `tools\Publish-UnpackagedExe.ps1` 生成 `artifacts/exe/win-x64/`，再创建 `artifacts/release/DellR730xdFanControlCenter-win-x64.zip`。创建后会把 zip 解压到临时目录，检查 `DellR730xdFanControlCenter.exe`、`Microsoft.WindowsAppRuntime.dll`、`Microsoft.ui.xaml.dll`、`DellR730xdFanControlCenter.pri`、`LICENSE`、`THIRD_PARTY_NOTICES.md`、`Assets/Charts/dashboard.html`、`Assets/Charts/echarts.min.js`、ECharts 许可证/NOTICE、`BundledTools/ipmitool/ipmitool.exe` 和 `BundledTools/ipmitool/LICENSES/**`。该 zip 是 unsigned unpackaged 下载物，不走 MSIX 安装；如果解压内容包含 `.msix`、`.pfx`、`.cer`、`AppxManifest.xml` 或 `Package.appxmanifest`，脚本会失败停止，避免 Release 包被证书信任链或包身份问题影响。本机验证下载后的 zip 能否启动时运行：
 
 ```powershell
 .\tools\Publish-ReleaseZip.ps1 -VerifyLaunch
@@ -292,8 +292,8 @@ CPU 温度查找规则：
 
 ## 本机已测试 BMC
 
-- Host：`192.168.1.73`
-- User：`root`
+- Host：文档示例使用 `192.0.2.10`；真实内网地址不写入仓库。
+- User：文档示例使用 `idrac-user`；真实账号不写入仓库。
 - `mc info` 观察到的固件版本：`2.82`
 - 观察到的传感器：Fan1-Fan6 RPM、Inlet Temp、Exhaust Temp、CPU 相关 Temp 行、功耗、电压、冗余、硬盘与线缆在位状态。
 - 全部风扇 20% 命令：成功。

@@ -9,9 +9,9 @@ public sealed class AppSettings
 
     public const string BundledIpmiToolRelativePath = @"BundledTools\ipmitool\ipmitool.exe";
 
-    public string Host { get; set; } = "192.168.1.73";
+    public string Host { get; set; } = "192.0.2.10";
 
-    public string UserName { get; set; } = "root";
+    public string UserName { get; set; } = "idrac-user";
 
     public bool RememberPassword { get; set; }
 

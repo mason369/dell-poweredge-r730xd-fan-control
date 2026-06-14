@@ -86,8 +86,8 @@ Does not include:
 
 | Setting | Default |
 | --- | --- |
-| Host | `192.168.1.73` |
-| UserName | `root` |
+| Host | `192.0.2.10` |
+| UserName | `idrac-user` |
 | RememberPassword | `false` |
 | IpmiToolPath | `BundledTools\ipmitool\ipmitool.exe` |
 | FanCount | `6` |
@@ -195,17 +195,28 @@ WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, BMC sensor
 - hardware-monitoring
 - thermal-management
 
+## License And Third-Party Notices
+
+- Project source license: MIT License in the repository root `LICENSE`.
+- Third-party notices: repository root `THIRD_PARTY_NOTICES.md`.
+- Bundled command runtime notices: `BundledTools/ipmitool/README.md` records versions, SHA-256 hashes, licenses, and source entry points for `ipmitool.exe` plus Cygwin/GCC/OpenSSL/zlib DLLs.
+- ECharts notices: `Assets/Charts/echarts.LICENSE.txt` and `Assets/Charts/echarts.NOTICE.txt` must be distributed with the chart assets.
+- Release packages must not present bundled third-party binaries as MIT-licensed project code; MIT covers only this repository's own source and documentation.
+
 ## Release Checklist
 
 Before publishing or packaging, confirm:
 
 - `dotnet build` succeeds for the target platform.
 - `dotnet run --project Tests\PresetModelTests\PresetModelTests.csproj` succeeds, covering manual preset editing, temperature/power curve evaluation from current readings, smooth curve evaluation, settings storage, sensor-state translation keys, and runtime logging JSONL behavior.
+- Repository root `LICENSE` and `THIRD_PARTY_NOTICES.md` exist and are present in published output.
 - Output contains `BundledTools/ipmitool/ipmitool.exe`.
+- Output contains `BundledTools/ipmitool/README.md` and `BundledTools/ipmitool/LICENSES/**`.
 - Output contains `Assets/Charts/dashboard.html` and `Assets/Charts/echarts.min.js`.
-- For directly runnable exe-directory releases, use `tools/Publish-UnpackagedExe.ps1` or an equivalent command and confirm that the output directory contains `DellR730xdFanControlCenter.exe`, `Assets/AppIcon.ico`, dashboard assets, and the bundled `ipmitool.exe`; this mode requires distributing the whole directory, not just the single exe file. Do not treat an MSIX build intermediate under `bin\Release\...\publish` as the unpackaged release artifact.
-- For GitHub Actions or GitHub Release downloadable zips, use `tools/Publish-ReleaseZip.ps1` or `.github/workflows/release.yml`, and confirm that the extracted zip contains the exe, `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `DellR730xdFanControlCenter.pri`, dashboard assets, and bundled `ipmitool.exe`. Local verification can run `tools/Publish-ReleaseZip.ps1 -VerifyLaunch` to confirm that the extracted zip starts a window. This zip is an unsigned unpackaged release and should not contain `.msix`, `.pfx`, `.cer`, `AppxManifest.xml`, or `Package.appxmanifest`; the script must fail when it detects those signed-package or package-identity files. The GitHub Actions workflow should not call `tools\Publish-SignedMsix.ps1`, `Add-AppxPackage`, or `Get-AuthenticodeSignature`. GitHub Actions manual runs upload only a workflow artifact; `v*` tags upload the GitHub Release asset directly and use `gh release upload --clobber` so rerunning the same tag can replace the same-named zip, without uploading a workflow artifact that could be blocked by full artifact storage quota.
-- For MSIX releases, sign with `tools/Publish-SignedMsix.ps1` or an equivalent command; the script must publish with `WindowsAppSDKSelfContained=true`, the signing certificate subject must exactly match the `Package.appxmanifest` `Publisher`, and `Get-AuthenticodeSignature` must return `Valid`. After signing, the package must be unpacked to verify that the generated `AppxManifest.xml` contains no external `PackageDependency`, and that `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, dashboard assets, and bundled `ipmitool.exe` are inside the package. The script should place the MSIX publish intermediate under `obj\signed-msix\publish` and clean it after completion so it does not leave a misleading `bin\Release\...\publish` byproduct.
+- Output contains `Assets/Charts/echarts.LICENSE.txt` and `Assets/Charts/echarts.NOTICE.txt`.
+- For directly runnable exe-directory releases, use `tools/Publish-UnpackagedExe.ps1` or an equivalent command and confirm that the output directory contains `DellR730xdFanControlCenter.exe`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `Assets/AppIcon.ico`, dashboard assets, ECharts license/NOTICE files, the bundled `ipmitool.exe`, and bundled command-runtime license files; this mode requires distributing the whole directory, not just the single exe file. Do not treat an MSIX build intermediate under `bin\Release\...\publish` as the unpackaged release artifact.
+- For GitHub Actions or GitHub Release downloadable zips, use `tools/Publish-ReleaseZip.ps1` or `.github/workflows/release.yml`, and confirm that the extracted zip contains the exe, `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `DellR730xdFanControlCenter.pri`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, dashboard assets, ECharts license/NOTICE files, bundled `ipmitool.exe`, and bundled command-runtime license files. Local verification can run `tools/Publish-ReleaseZip.ps1 -VerifyLaunch` to confirm that the extracted zip starts a window. This zip is an unsigned unpackaged release and should not contain `.msix`, `.pfx`, `.cer`, `AppxManifest.xml`, or `Package.appxmanifest`; the script must fail when it detects those signed-package or package-identity files. The GitHub Actions workflow should not call `tools\Publish-SignedMsix.ps1`, `Add-AppxPackage`, or `Get-AuthenticodeSignature`. GitHub Actions manual runs upload only a workflow artifact; `v*` tags upload the GitHub Release asset directly and use `gh release upload --clobber` so rerunning the same tag can replace the same-named zip, without uploading a workflow artifact that could be blocked by full artifact storage quota.
+- For MSIX releases, sign with `tools/Publish-SignedMsix.ps1` or an equivalent command; the script must publish with `WindowsAppSDKSelfContained=true`, the signing certificate subject must exactly match the `Package.appxmanifest` `Publisher`, and `Get-AuthenticodeSignature` must return `Valid`. After signing, the package must be unpacked to verify that the generated `AppxManifest.xml` contains no external `PackageDependency`, and that `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, dashboard assets, ECharts license/NOTICE files, bundled `ipmitool.exe`, and bundled command-runtime license files are inside the package. The script should place the MSIX publish intermediate under `obj\signed-msix\publish` and clean it after completion so it does not leave a misleading `bin\Release\...\publish` byproduct.
 - The default self-signed MSIX publish flow must run from an elevated PowerShell session and confirm that the public certificate is present in `CurrentUser\TrustedPeople`, `CurrentUser\Root`, `LocalMachine\TrustedPeople`, and `LocalMachine\Root`; without local deployment trust, `Add-AppxPackage` rejects the package with `0x800B0109` even when `Get-AuthenticodeSignature` returns `Valid`.
 - Reinstalling changed MSIX content under the same `Identity` and same `Version` is rejected by Windows with `0x80073CFB`; real releases must increase the `Package.appxmanifest` `Identity Version`, while local same-version verification must remove the old package before installing the new one.
 - Signature verification is not launch verification. After MSIX publishing, run `Add-AppxPackage` on the target machine and launch the package to confirm that the main window appears, settings can be saved, and tray/dashboard features work; missing Windows deployment trust, runtime dependencies, a bad entry point, or missing packaged files can still make a package fail even when its signature is `Valid`.
@@ -214,4 +225,4 @@ Before publishing or packaging, confirm:
 - Settings can be saved.
 - The tray right-click menu shows window/page entries, refresh sensors, logs/iDRAC entries, Dell automatic restore, stop auto, all-fan 20/35/50%, and a preset submenu; common fixed actions are no longer nested behind a second-level Fan Control menu.
 - Overview "Open logs" opens `%LocalAppData%\DellR730xdFanControlCenter\logs`, and today's `runtime-YYYYMMDD.jsonl` can be written.
-- No password, private IP plan, or other sensitive data is committed.
+- No password, real private address, private IP plan, or other sensitive data is committed; documentation examples use `192.0.2.10` and `idrac-user`.

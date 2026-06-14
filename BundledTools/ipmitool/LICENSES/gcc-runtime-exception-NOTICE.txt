@@ -1,0 +1,27 @@
+GCC runtime library notice for bundled cyggcc_s-1.dll
+
+Bundled file:
+
+- cyggcc_s-1.dll
+
+This DLL is the GCC runtime library from the Cygwin toolchain. The Cygwin
+package summary identifies libgcc1 as the GCC C runtime library. GCC runtime
+libraries are generally distributed under GPLv3 with the GCC Runtime Library
+Exception for covered runtime components.
+
+Package references:
+
+- https://cygwin.com/packages/summary/libgcc1.html
+- https://cygwin.com/packages/summary/gcc-src.html
+
+GCC Runtime Library Exception reference:
+
+- https://spdx.org/licenses/GCC-exception-3.1.html
+- https://www.gnu.org/licenses/gcc-exception-3.1-faq.html
+
+Binary redistribution note:
+
+When distributing this repository's Windows release package, keep this notice
+and provide access to the corresponding GCC/libgcc source package through the
+Cygwin package/source pages or an equivalent source mirror. The app's MIT
+license does not relicense cyggcc_s-1.dll.

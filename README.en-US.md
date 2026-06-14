@@ -46,6 +46,7 @@
   <img alt="Dell PowerEdge R730xd" src="https://img.shields.io/badge/Dell-PowerEdge%20R730xd-0672CB" />
   <img alt="iDRAC IPMI over LAN" src="https://img.shields.io/badge/iDRAC-IPMI%20over%20LAN-0F766E" />
   <img alt="ECharts" src="https://img.shields.io/badge/Charts-ECharts-AA344D" />
+  <img alt="License MIT" src="https://img.shields.io/badge/License-MIT-16A34A" />
   <img alt="Explicit failure handling" src="https://img.shields.io/badge/failures-explicit-B91C1C" />
   <img alt="22 UI languages" src="https://img.shields.io/badge/UI%20languages-22-4B5563" />
 </p>
@@ -139,7 +140,7 @@ flowchart LR
 - Target control plane: iDRAC/BMC IPMI over LAN.
 - Target OS: Windows 10 2004 / build 19041 or newer.
 - Target users: homelab operators, server caretakers, dense-drive R730xd owners, and noise-constrained environments that still need visible thermal control.
-- Locally observed environment: R730xd / iDRAC firmware 2.82, example host `192.168.1.73`, example user `root`.
+- Locally observed environment: R730xd / iDRAC firmware 2.82. Documentation and default configuration use reserved example host `192.0.2.10` and example user `idrac-user`; real private addresses and accounts should not be committed to the repository.
 
 Different iDRAC firmware versions, backplanes, fan layouts, and sensor layouts can change individual fan target-selector behavior. Fan 1-6 target selectors are implemented in code but disabled by default; `0x00` is a target selector in the firmware raw command, not `0%` fan speed, so verify your firmware mapping before enabling them.
 
@@ -285,8 +286,8 @@ When "minimize to tray on close" is enabled, closing the window hides the main w
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| Host | `192.168.1.73` | Example iDRAC address; replace it on first use. |
-| UserName | `root` | Example user. |
+| Host | `192.0.2.10` | Reserved documentation example iDRAC address; replace it with your BMC/iDRAC address on first use. |
+| UserName | `idrac-user` | Documentation example user; replace it with an iDRAC user that has enough IPMI/OEM raw privilege. |
 | RememberPassword | `false` | Password saving is off by default; when enabled, the password is protected with current-user Windows DPAPI in `settings.json`. |
 | IpmiToolPath | `BundledTools\ipmitool\ipmitool.exe` | Loading and saving settings normalize this to the bundled relative path; Settings displays the resolved absolute path read-only. |
 | FanCount | `6` | Common R730xd Fan 1-6 layout. |
@@ -373,6 +374,8 @@ dotnet run --project .\Tests\PresetModelTests\PresetModelTests.csproj
 
 The project enables MSIX tooling and configures `Microsoft.Windows.SDK.BuildTools.WinApp` to support WinUI `dotnet run` and packaging-related workflows. Published output must include:
 
+- `LICENSE`
+- `THIRD_PARTY_NOTICES.md`
 - `BundledTools/ipmitool/**`
 - `Assets/Charts/**`
 - WinUI / Windows App SDK runtime files
@@ -391,7 +394,7 @@ The output directory is:
 artifacts/exe/win-x64/
 ```
 
-`DellR730xdFanControlCenter.exe` inside that directory can be launched directly. The publish script verifies that the exe, `Assets/AppIcon.ico`, dashboard assets, and the bundled `BundledTools/ipmitool/ipmitool.exe` are all present, and fails if any required file is missing. This exe output is a self-contained unpackaged directory; it does not rely on MSIX package identity. Distribute the whole directory, not just the single exe file. Do not use `bin\Release\...\publish\DellR730xdFanControlCenter.exe` to verify the unpackaged release; that path can come from an MSIX build intermediate and is not this project's supported directly runnable exe output.
+`DellR730xdFanControlCenter.exe` inside that directory can be launched directly. The publish script verifies that the exe, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `Assets/AppIcon.ico`, dashboard assets, ECharts license/NOTICE files, the bundled `BundledTools/ipmitool/ipmitool.exe`, and `BundledTools/ipmitool/LICENSES/**` are all present, and fails if any required file is missing. This exe output is a self-contained unpackaged directory; it does not rely on MSIX package identity. Distribute the whole directory, not just the single exe file. Do not use `bin\Release\...\publish\DellR730xdFanControlCenter.exe` to verify the unpackaged release; that path can come from an MSIX build intermediate and is not this project's supported directly runnable exe output.
 
 To create the downloadable zip used by GitHub Actions and GitHub Releases, run:
 
@@ -406,7 +409,7 @@ The output file is:
 artifacts/release/DellR730xdFanControlCenter-win-x64.zip
 ```
 
-The script first runs `tools\Publish-UnpackagedExe.ps1`, compresses the full unpackaged output directory, then extracts the zip to a temporary verification directory and checks the exe, WinUI/Windows App SDK runtime files, dashboard assets, and bundled `ipmitool.exe`. This downloadable zip is explicitly an unsigned unpackaged release: it does not create, upload, or require installing an MSIX. If `.msix`, `.pfx`, `.cer`, `AppxManifest.xml`, or `Package.appxmanifest` appears inside the zip, the script fails so the GitHub Release download cannot become unusable because of a self-signed certificate, certificate trust chain, or package identity problem. On a local machine, add `-VerifyLaunch` to start `DellR730xdFanControlCenter.exe` from the extracted zip and confirm that it creates a titled top-level window without new `.NET Runtime` or `Application Error` startup events. CI does not start the GUI by default; it verifies the downloaded-zip file layout and that no signed/package-identity files leaked into the zip.
+The script first runs `tools\Publish-UnpackagedExe.ps1`, compresses the full unpackaged output directory, then extracts the zip to a temporary verification directory and checks the exe, WinUI/Windows App SDK runtime files, project license, third-party notices, dashboard assets, ECharts license/NOTICE files, bundled `ipmitool.exe`, and `BundledTools/ipmitool/LICENSES/**`. This downloadable zip is explicitly an unsigned unpackaged release: it does not create, upload, or require installing an MSIX. If `.msix`, `.pfx`, `.cer`, `AppxManifest.xml`, or `Package.appxmanifest` appears inside the zip, the script fails so the GitHub Release download cannot become unusable because of a self-signed certificate, certificate trust chain, or package identity problem. On a local machine, add `-VerifyLaunch` to start `DellR730xdFanControlCenter.exe` from the extracted zip and confirm that it creates a titled top-level window without new `.NET Runtime` or `Application Error` startup events. CI does not start the GUI by default; it verifies the downloaded-zip file layout, license/notice files, and that no signed/package-identity files leaked into the zip.
 
 The repository `.github/workflows/release.yml` runs the same zip publishing script on a Windows runner. The workflow publishes only the unsigned unpackaged zip; it does not call `tools\Publish-SignedMsix.ps1`, `Add-AppxPackage`, or `Get-AuthenticodeSignature`. Manual `workflow_dispatch` runs upload `DellR730xdFanControlCenter-win-x64.zip` as a workflow artifact. Pushing a `v*` tag creates or reuses the matching GitHub Release and uploads the zip with `gh release upload --clobber`. Tag-triggered releases do not upload a workflow artifact, so a full Actions artifact quota cannot block GitHub Release asset publication; manual artifact runs still fail explicitly when quota is unavailable. Rerunning the workflow for the same tag can package again and replace the downloadable asset.
 
@@ -425,7 +428,7 @@ The signed package is written to:
 artifacts/msix/DellR730xdFanControlCenter_1.0.0.0_x64_Test/DellR730xdFanControlCenter_1.0.0.0_x64.msix
 ```
 
-The script uses `WindowsAppSDKSelfContained=true` to create a self-contained MSIX. After signing, it runs `Get-AuthenticodeSignature` and fails if the signature status is not `Valid`; then it unpacks the MSIX, verifies that the generated `AppxManifest.xml` no longer declares external `PackageDependency` entries, and confirms that `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, the bundled `ipmitool.exe`, the dashboard page, and the app icon are inside the package. The script places the temporary publish directory needed for MSIX packaging under `obj\signed-msix\publish`, removes it after inspection, and also removes stale `bin\Release\...\publish` intermediates so a non-release exe is not mistaken for the unpackaged build. A valid signature only proves that the package has not been tampered with and that Authenticode can validate the signer; it does not prove that Windows deployment will accept the MSIX. Missing deployment trust, runtime dependencies, a bad entry point, or missing packaged files can still make installation or launch fail. Reinstalling changed MSIX content with the same `Identity` and the same `Version` is rejected by Windows with `0x80073CFB`; real releases should increase the `Package.appxmanifest` `Identity Version`, while local same-version verification requires removing the installed package with `Remove-AppxPackage` before installing again. The self-signed certificate is appropriate for local testing or controlled internal distribution. Public releases should use a trusted code-signing certificate whose subject exactly matches the manifest publisher. After publishing, run `Add-AppxPackage -Path artifacts\msix\DellR730xdFanControlCenter_1.0.0.0_x64_Test\DellR730xdFanControlCenter_1.0.0.0_x64.msix` on the target machine and start the app once to confirm that the main window, bundled `ipmitool.exe`, dashboard page, and tray icon resolve from the installed package.
+The script uses `WindowsAppSDKSelfContained=true` to create a self-contained MSIX. After signing, it runs `Get-AuthenticodeSignature` and fails if the signature status is not `Valid`; then it unpacks the MSIX, verifies that the generated `AppxManifest.xml` no longer declares external `PackageDependency` entries, and confirms that `Microsoft.WindowsAppRuntime.dll`, `Microsoft.ui.xaml.dll`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, the bundled `ipmitool.exe`, third-party license files, the dashboard page, and the app icon are inside the package. The script places the temporary publish directory needed for MSIX packaging under `obj\signed-msix\publish`, removes it after inspection, and also removes stale `bin\Release\...\publish` intermediates so a non-release exe is not mistaken for the unpackaged build. A valid signature only proves that the package has not been tampered with and that Authenticode can validate the signer; it does not prove that Windows deployment will accept the MSIX. Missing deployment trust, runtime dependencies, a bad entry point, or missing packaged files can still make installation or launch fail. Reinstalling changed MSIX content with the same `Identity` and the same `Version` is rejected by Windows with `0x80073CFB`; real releases should increase the `Package.appxmanifest` `Identity Version`, while local same-version verification requires removing the installed package with `Remove-AppxPackage` before installing again. The self-signed certificate is appropriate for local testing or controlled internal distribution. Public releases should use a trusted code-signing certificate whose subject exactly matches the manifest publisher. After publishing, run `Add-AppxPackage -Path artifacts\msix\DellR730xdFanControlCenter_1.0.0.0_x64_Test\DellR730xdFanControlCenter_1.0.0.0_x64.msix` on the target machine and start the app once to confirm that the main window, bundled `ipmitool.exe`, dashboard page, license/notice files, and tray icon resolve from the installed package.
 
 ## IPMI Command Behavior
 
@@ -587,6 +590,10 @@ This failure is not silently ignored. Button-triggered user commands stop and sh
 ### App is still running after closing the window
 
 The default close behavior minimizes to tray. Right-click the tray icon to restore or exit, or disable "Minimize to tray on close" in Settings.
+
+## License
+
+This project's own source code is licensed under the [MIT License](LICENSE). Bundled `ipmitool.exe`, Cygwin/GCC/OpenSSL/zlib runtime DLLs, and ECharts frontend assets keep their upstream licenses and are not relicensed by this project's MIT license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full third-party notice, and [BundledTools/ipmitool/README.md](BundledTools/ipmitool/README.md) for bundled command-tool versions, SHA-256 hashes, and license files.
 
 ## Repository Structure
 

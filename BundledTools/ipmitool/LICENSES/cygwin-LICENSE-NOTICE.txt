@@ -1,0 +1,29 @@
+Cygwin license notice for bundled runtime DLLs
+
+Bundled file:
+
+- cygwin1.dll, observed file metadata version 2.5.2
+
+The Cygwin licensing page states that the Cygwin API library in the winsup
+source tree is covered by the GNU Lesser General Public License version 3 or
+later. It also documents Cygwin's exception for linking open-source programs
+with libcygwin.a.
+
+Project page:
+
+- https://cygwin.com/
+
+License page:
+
+- https://cygwin.com/licensing.html
+
+Source package reference:
+
+- https://cygwin.com/packages/summary/cygwin-src.html
+
+Binary redistribution note:
+
+When distributing this repository's Windows release package, keep this notice
+and provide access to the corresponding Cygwin source package through the
+Cygwin package/source pages or an equivalent source mirror. The app's MIT
+license does not relicense cygwin1.dll.

@@ -150,14 +150,17 @@ IPMI over LAN 应只暴露在可信管理网络中。不要把 iDRAC/IPMI 直接
 
 ## 供应链与内置资产
 
-仓库包含内置 `ipmitool.exe`、Cygwin DLL 和 ECharts 前端资产。发布或重新打包时需要确认：
+仓库包含内置 `ipmitool.exe`、Cygwin/GCC/OpenSSL/zlib DLL 和 ECharts 前端资产。发布或重新打包时需要确认：
 
 - 内置二进制来自可信来源。
 - 文件没有被替换或篡改。
+- `LICENSE` 和 `THIRD_PARTY_NOTICES.md` 随源码和发布包保留。
+- `BundledTools/ipmitool/README.md` 中的版本、SHA-256 和来源说明与实际文件一致。
+- `BundledTools/ipmitool/LICENSES/**` 随内置命令工具保留，尤其包括 ipmitool、Cygwin、OpenSSL、GCC runtime 和 zlib 的声明。
 - `Assets/Charts/echarts.LICENSE.txt` 和 `Assets/Charts/echarts.NOTICE.txt` 随资源保留。
 - 发布包包含 `BundledTools/ipmitool/**` 和 `Assets/Charts/**`。
 
-如果你替换 `ipmitool.exe` 或图表资产，请在文档中记录来源、版本、校验方式和兼容性变化。
+如果你替换 `ipmitool.exe`、Cygwin/GCC/OpenSSL/zlib DLL 或图表资产，请在同一变更中记录来源、版本、SHA-256、许可证文件、源码获取方式和兼容性变化，并更新发布脚本的必需文件检查。缺少这些声明时不应发布 Release 包。
 
 ## 失败处理原则
 

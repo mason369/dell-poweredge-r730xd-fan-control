@@ -46,6 +46,7 @@
   <img alt="Dell PowerEdge R730xd" src="https://img.shields.io/badge/Dell-PowerEdge%20R730xd-0672CB" />
   <img alt="iDRAC IPMI over LAN" src="https://img.shields.io/badge/iDRAC-IPMI%20over%20LAN-0F766E" />
   <img alt="ECharts" src="https://img.shields.io/badge/Charts-ECharts-AA344D" />
+  <img alt="License MIT" src="https://img.shields.io/badge/License-MIT-16A34A" />
   <img alt="Explicit failure handling" src="https://img.shields.io/badge/failures-explicit-B91C1C" />
   <img alt="22 UI languages" src="https://img.shields.io/badge/UI%20languages-22-4B5563" />
 </p>
@@ -63,6 +64,7 @@ R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows WinUI
 | 构建或本机运行 | [构建](#构建) / [运行](#运行) |
 | 核对 raw 命令和风扇目标编号 | [IPMI 命令参考](docs/COMMANDS.md) |
 | 查看凭据、日志和供应链风险 | [安全说明](SECURITY.md) |
+| 查看开源许可证和第三方声明 | [许可证](#许可证) / [第三方声明](THIRD_PARTY_NOTICES.md) |
 | 排查传感器、轮询、图表或托盘问题 | [故障排查](#故障排查) |
 
 ## 5 分钟快速使用
@@ -139,7 +141,7 @@ flowchart LR
 - 目标控制面：iDRAC/BMC 的 IPMI over LAN。
 - 目标系统：Windows 10 2004 / build 19041 或更新版本。
 - 目标用户：需要在 homelab、机房值守、硬盘密集型 R730xd 或噪音受限环境中监控和调节风扇的用户。
-- 已本机观察环境：R730xd / iDRAC firmware 2.82，主机示例为 `192.168.1.73`，用户示例为 `root`。
+- 已本机观察环境：R730xd / iDRAC firmware 2.82。文档和默认配置使用保留示例地址 `192.0.2.10` 与示例用户 `idrac-user`；真实内网地址和账号不应提交到仓库。
 
 不同 iDRAC 固件、不同背板和不同风扇/传感器布局可能改变单风扇目标编号行为。当前代码已实现 Fan 1-6 目标编号控制但默认关闭；`0x00` 是固件 raw 命令中的目标编号，不是 `0%` 转速，必须先确认固件映射再启用。
 
@@ -285,8 +287,8 @@ flowchart LR
 
 | 项目 | 默认值 | 说明 |
 | --- | --- | --- |
-| Host | `192.168.1.73` | 示例 iDRAC 地址，首次使用请改成你的 BMC/iDRAC 地址。 |
-| UserName | `root` | 示例用户。 |
+| Host | `192.0.2.10` | 文档保留示例 iDRAC 地址，首次使用请改成你的 BMC/iDRAC 地址。 |
+| UserName | `idrac-user` | 文档示例用户，首次使用请改成有足够 IPMI/OEM raw 权限的 iDRAC 用户。 |
 | RememberPassword | `false` | 默认不保存密码；开启后使用当前 Windows 用户的 DPAPI 加密写入 `settings.json`。 |
 | IpmiToolPath | `BundledTools\ipmitool\ipmitool.exe` | 设置加载和保存时会规范化为内置工具相对路径，设置页只读显示解析后的绝对路径。 |
 | FanCount | `6` | R730xd 常见 Fan 1-6 布局。 |
@@ -373,6 +375,8 @@ dotnet run --project .\Tests\PresetModelTests\PresetModelTests.csproj
 
 项目文件启用了 MSIX tooling，并配置了 `Microsoft.Windows.SDK.BuildTools.WinApp`，用于支持 WinUI 应用的 `dotnet run` 和打包相关流程。发布时需要确保以下内容进入输出目录：
 
+- `LICENSE`
+- `THIRD_PARTY_NOTICES.md`
 - `BundledTools/ipmitool/**`
 - `Assets/Charts/**`
 - WinUI/Windows App SDK 运行所需文件
@@ -391,7 +395,7 @@ cd C:\DellR730xdFanControlCenter
 artifacts/exe/win-x64/
 ```
 
-该目录内的 `DellR730xdFanControlCenter.exe` 可直接启动。发布脚本会检查 exe、`Assets/AppIcon.ico`、图表资产和内置 `BundledTools/ipmitool/ipmitool.exe` 是否都存在，缺失时直接失败。该 exe 发布目录是 self-contained unpackaged 输出，不依赖 MSIX 安装身份；分发时需要保留整个目录，不能只复制单个 exe。不要运行 `bin\Release\...\publish\DellR730xdFanControlCenter.exe` 来验证免安装版本；该路径可能来自 MSIX 构建中间输出，不是本项目定义的可分发 exe 目录。
+该目录内的 `DellR730xdFanControlCenter.exe` 可直接启动。发布脚本会检查 exe、`LICENSE`、`THIRD_PARTY_NOTICES.md`、`Assets/AppIcon.ico`、图表资产、ECharts 许可证/NOTICE、内置 `BundledTools/ipmitool/ipmitool.exe` 以及 `BundledTools/ipmitool/LICENSES/**` 是否都存在，缺失时直接失败。该 exe 发布目录是 self-contained unpackaged 输出，不依赖 MSIX 安装身份；分发时需要保留整个目录，不能只复制单个 exe。不要运行 `bin\Release\...\publish\DellR730xdFanControlCenter.exe` 来验证免安装版本；该路径可能来自 MSIX 构建中间输出，不是本项目定义的可分发 exe 目录。
 
 要生成 GitHub Actions 和 Release 使用的下载 zip，运行：
 
@@ -406,7 +410,7 @@ cd C:\DellR730xdFanControlCenter
 artifacts/release/DellR730xdFanControlCenter-win-x64.zip
 ```
 
-该脚本会先执行 `tools\Publish-UnpackagedExe.ps1`，再压缩整个免安装输出目录，随后把 zip 解压到临时目录并检查 exe、WinUI/Windows App SDK 运行时、图表资源和内置 `ipmitool.exe`。该下载 zip 明确是 unsigned unpackaged 发行物，不生成、不上传、也不要求安装 MSIX；如果 zip 中混入 `.msix`、`.pfx`、`.cer`、`AppxManifest.xml` 或 `Package.appxmanifest`，脚本会直接失败，避免 Release 下载物因为自签证书、证书信任链或包身份问题变得不可运行。本机可追加 `-VerifyLaunch`，脚本会从解压后的 zip 启动 `DellR730xdFanControlCenter.exe`，确认出现带标题的顶层窗口且没有新的 `.NET Runtime` 或 `Application Error` 启动错误；CI 中默认不启动 GUI，只做文件结构和无签名包泄漏验证。
+该脚本会先执行 `tools\Publish-UnpackagedExe.ps1`，再压缩整个免安装输出目录，随后把 zip 解压到临时目录并检查 exe、WinUI/Windows App SDK 运行时、项目许可证、第三方声明、图表资源、ECharts 许可证/NOTICE、内置 `ipmitool.exe` 和 `BundledTools/ipmitool/LICENSES/**`。该下载 zip 明确是 unsigned unpackaged 发行物，不生成、不上传、也不要求安装 MSIX；如果 zip 中混入 `.msix`、`.pfx`、`.cer`、`AppxManifest.xml` 或 `Package.appxmanifest`，脚本会直接失败，避免 Release 下载物因为自签证书、证书信任链或包身份问题变得不可运行。本机可追加 `-VerifyLaunch`，脚本会从解压后的 zip 启动 `DellR730xdFanControlCenter.exe`，确认出现带标题的顶层窗口且没有新的 `.NET Runtime` 或 `Application Error` 启动错误；CI 中默认不启动 GUI，只做文件结构、许可证/notice 和无签名包泄漏验证。
 
 仓库的 `.github/workflows/release.yml` 在 Windows runner 上运行同一套 zip 发布脚本。该 workflow 只发布 unsigned unpackaged zip，不调用 `tools\Publish-SignedMsix.ps1`、`Add-AppxPackage` 或 `Get-AuthenticodeSignature`。手动触发 `workflow_dispatch` 会上传 `DellR730xdFanControlCenter-win-x64.zip` 作为 workflow artifact；推送 `v*` tag 时会创建或复用对应 GitHub Release，并用 `gh release upload --clobber` 覆盖同名 zip 资产。tag 发布路径不上传 workflow artifact，避免 Actions artifact 存储额度满时阻断 Release 资产发布；手动 artifact 运行仍会在额度不足时明确失败。因此同一 tag 重新运行 workflow 可以再次打包并替换下载资产。
 
@@ -425,7 +429,7 @@ cd C:\DellR730xdFanControlCenter
 artifacts/msix/DellR730xdFanControlCenter_1.0.0.0_x64_Test/DellR730xdFanControlCenter_1.0.0.0_x64.msix
 ```
 
-脚本使用 `WindowsAppSDKSelfContained=true` 生成自包含 MSIX。签名完成后会执行 `Get-AuthenticodeSignature`，签名状态不是 `Valid` 时会失败停止；随后还会拆包检查生成的 `AppxManifest.xml` 不再声明外部 `PackageDependency`，并确认包内存在 `Microsoft.WindowsAppRuntime.dll`、`Microsoft.ui.xaml.dll`、内置 `ipmitool.exe`、图表页面和应用图标。脚本会把 MSIX 构建需要的临时 publish 目录放在 `obj\signed-msix\publish` 并在检查后删除，同时清理旧的 `bin\Release\...\publish` 中间输出，避免把非发行 exe 当作免安装版本运行。签名有效只说明包没有被篡改且 Authenticode 能验证签名，不代表 Windows 部署服务一定接受该 MSIX；证书未进入部署信任库、运行时依赖缺失、入口点错误或包内文件缺失仍会导致安装或启动失败。内容变更后重复安装同一个 `Identity` 和同一个 `Version` 的 MSIX 会被 Windows 以 `0x80073CFB` 拒绝；正式发布应提高 `Package.appxmanifest` 的 `Identity Version`，本机重复验证同版本包时需要先 `Remove-AppxPackage` 删除旧包再安装。自签证书适合本机测试或内部受控分发；公开发布应换成受信任代码签名证书，并保持证书 Subject 与 manifest Publisher 完全一致。发布后请在目标机器上执行 `Add-AppxPackage -Path artifacts\msix\DellR730xdFanControlCenter_1.0.0.0_x64_Test\DellR730xdFanControlCenter_1.0.0.0_x64.msix` 并实际启动一次，确认主窗口、内置 `ipmitool.exe`、图表页面和托盘图标都能从安装目录解析到。
+脚本使用 `WindowsAppSDKSelfContained=true` 生成自包含 MSIX。签名完成后会执行 `Get-AuthenticodeSignature`，签名状态不是 `Valid` 时会失败停止；随后还会拆包检查生成的 `AppxManifest.xml` 不再声明外部 `PackageDependency`，并确认包内存在 `Microsoft.WindowsAppRuntime.dll`、`Microsoft.ui.xaml.dll`、`LICENSE`、`THIRD_PARTY_NOTICES.md`、内置 `ipmitool.exe`、第三方许可证文件、图表页面和应用图标。脚本会把 MSIX 构建需要的临时 publish 目录放在 `obj\signed-msix\publish` 并在检查后删除，同时清理旧的 `bin\Release\...\publish` 中间输出，避免把非发行 exe 当作免安装版本运行。签名有效只说明包没有被篡改且 Authenticode 能验证签名，不代表 Windows 部署服务一定接受该 MSIX；证书未进入部署信任库、运行时依赖缺失、入口点错误或包内文件缺失仍会导致安装或启动失败。内容变更后重复安装同一个 `Identity` 和同一个 `Version` 的 MSIX 会被 Windows 以 `0x80073CFB` 拒绝；正式发布应提高 `Package.appxmanifest` 的 `Identity Version`，本机重复验证同版本包时需要先 `Remove-AppxPackage` 删除旧包再安装。自签证书适合本机测试或内部受控分发；公开发布应换成受信任代码签名证书，并保持证书 Subject 与 manifest Publisher 完全一致。发布后请在目标机器上执行 `Add-AppxPackage -Path artifacts\msix\DellR730xdFanControlCenter_1.0.0.0_x64_Test\DellR730xdFanControlCenter_1.0.0.0_x64.msix` 并实际启动一次，确认主窗口、内置 `ipmitool.exe`、图表页面、许可证/notice 和托盘图标都能从安装目录解析到。
 
 ## IPMI 命令行为
 
@@ -587,6 +591,10 @@ dotnet run --project .\Tests\PresetModelTests\PresetModelTests.csproj
 ### 关闭后软件仍在运行
 
 默认行为是点击关闭最小化到托盘。右键托盘图标可恢复窗口或退出；也可在设置中关闭“点击关闭时最小化到托盘”。
+
+## 许可证
+
+本项目源码使用 [MIT License](LICENSE)。内置 `ipmitool.exe`、Cygwin/GCC/OpenSSL/zlib 运行时 DLL 和 ECharts 前端资产保留各自上游许可证，不被本项目 MIT 许可证重新授权。完整第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，内置命令工具的版本、SHA-256 和许可证文件见 [BundledTools/ipmitool/README.md](BundledTools/ipmitool/README.md)。
 
 ## 仓库结构
 

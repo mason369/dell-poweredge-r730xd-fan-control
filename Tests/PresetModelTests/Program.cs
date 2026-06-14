@@ -1861,7 +1861,7 @@ static void RunVisibleXamlLocalizationCoverageChecks()
     {
         "--",
         "-- °C",
-        "192.168.1.73",
+        "192.0.2.10",
         "30°C",
         "95°C",
         "100%",

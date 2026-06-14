@@ -191,10 +191,20 @@ try {
         "DellR730xdFanControlCenter.exe",
         "Microsoft.WindowsAppRuntime.dll",
         "Microsoft.ui.xaml.dll",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
         "Assets\AppIcon.ico",
         "Assets\Charts\dashboard.html",
         "Assets\Charts\echarts.min.js",
-        "BundledTools\ipmitool\ipmitool.exe"
+        "Assets\Charts\echarts.LICENSE.txt",
+        "Assets\Charts\echarts.NOTICE.txt",
+        "BundledTools\ipmitool\ipmitool.exe",
+        "BundledTools\ipmitool\README.md",
+        "BundledTools\ipmitool\LICENSES\ipmitool-BSD.txt",
+        "BundledTools\ipmitool\LICENSES\cygwin-LICENSE-NOTICE.txt",
+        "BundledTools\ipmitool\LICENSES\openssl-102n-LICENSE.txt",
+        "BundledTools\ipmitool\LICENSES\gcc-runtime-exception-NOTICE.txt",
+        "BundledTools\ipmitool\LICENSES\zlib-128-LICENSE.txt"
     )
 
     foreach ($relativePath in $requiredPackagePaths) {
