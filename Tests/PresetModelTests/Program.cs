@@ -2035,6 +2035,11 @@ static void RunPublishScriptChecks()
         releaseWorkflow.Contains("--clobber", StringComparison.Ordinal),
         "GitHub Actions release workflow should build on Windows, run tests, package the release zip, upload the workflow artifact, and replace release assets on tag reruns.");
     Require(
+        releaseWorkflow.IndexOf("Publish GitHub Release asset", StringComparison.Ordinal) <
+        releaseWorkflow.IndexOf("Upload workflow artifact", StringComparison.Ordinal) &&
+        releaseWorkflow.Contains("if: ${{ !startsWith(github.ref, 'refs/tags/') }}", StringComparison.Ordinal),
+        "Tag-triggered releases should upload the GitHub Release asset before the manual-run workflow artifact path so artifact quota does not block release publication.");
+    Require(
         !releaseWorkflow.Contains("Publish-SignedMsix.ps1", StringComparison.Ordinal) &&
         !releaseWorkflow.Contains("Add-AppxPackage", StringComparison.Ordinal) &&
         !releaseWorkflow.Contains("Get-AuthenticodeSignature", StringComparison.Ordinal) &&

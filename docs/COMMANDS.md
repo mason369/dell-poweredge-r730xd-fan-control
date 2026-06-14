@@ -43,7 +43,7 @@ cd C:\DellR730xdFanControlCenter
 .\tools\Publish-ReleaseZip.ps1 -VerifyLaunch
 ```
 
-`-VerifyLaunch` 会从解压后的 zip 启动 exe，等待顶层窗口和窗口标题，并检查本次启动后是否出现新的 `.NET Runtime` 或 `Application Error` 事件；验证结束后会关闭该临时启动进程并删除临时解压目录。GitHub Actions 的 `Package Release` workflow 默认只做文件结构和无签名包泄漏验证，不启动 GUI，也不调用 `tools\Publish-SignedMsix.ps1`、`Add-AppxPackage` 或 `Get-AuthenticodeSignature`；手动触发时上传 workflow artifact，推送 `v*` tag 时还会用 `gh release upload --clobber` 覆盖同名 GitHub Release zip。
+`-VerifyLaunch` 会从解压后的 zip 启动 exe，等待顶层窗口和窗口标题，并检查本次启动后是否出现新的 `.NET Runtime` 或 `Application Error` 事件；验证结束后会关闭该临时启动进程并删除临时解压目录。GitHub Actions 的 `Package Release` workflow 默认只做文件结构和无签名包泄漏验证，不启动 GUI，也不调用 `tools\Publish-SignedMsix.ps1`、`Add-AppxPackage` 或 `Get-AuthenticodeSignature`；手动触发时上传 workflow artifact，推送 `v*` tag 时直接用 `gh release upload --clobber` 覆盖同名 GitHub Release zip，不上传 workflow artifact，避免 artifact 存储额度满时阻断 Release 发布。
 
 ## 命令日志与时间段记录
 

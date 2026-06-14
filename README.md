@@ -408,7 +408,7 @@ artifacts/release/DellR730xdFanControlCenter-win-x64.zip
 
 该脚本会先执行 `tools\Publish-UnpackagedExe.ps1`，再压缩整个免安装输出目录，随后把 zip 解压到临时目录并检查 exe、WinUI/Windows App SDK 运行时、图表资源和内置 `ipmitool.exe`。该下载 zip 明确是 unsigned unpackaged 发行物，不生成、不上传、也不要求安装 MSIX；如果 zip 中混入 `.msix`、`.pfx`、`.cer`、`AppxManifest.xml` 或 `Package.appxmanifest`，脚本会直接失败，避免 Release 下载物因为自签证书、证书信任链或包身份问题变得不可运行。本机可追加 `-VerifyLaunch`，脚本会从解压后的 zip 启动 `DellR730xdFanControlCenter.exe`，确认出现带标题的顶层窗口且没有新的 `.NET Runtime` 或 `Application Error` 启动错误；CI 中默认不启动 GUI，只做文件结构和无签名包泄漏验证。
 
-仓库的 `.github/workflows/release.yml` 在 Windows runner 上运行同一套 zip 发布脚本。该 workflow 只发布 unsigned unpackaged zip，不调用 `tools\Publish-SignedMsix.ps1`、`Add-AppxPackage` 或 `Get-AuthenticodeSignature`。手动触发 `workflow_dispatch` 会上传 `DellR730xdFanControlCenter-win-x64.zip` 作为 workflow artifact；推送 `v*` tag 时还会创建或复用对应 GitHub Release，并用 `gh release upload --clobber` 覆盖同名 zip 资产，因此同一 tag 重新运行 workflow 可以再次打包并替换下载资产。
+仓库的 `.github/workflows/release.yml` 在 Windows runner 上运行同一套 zip 发布脚本。该 workflow 只发布 unsigned unpackaged zip，不调用 `tools\Publish-SignedMsix.ps1`、`Add-AppxPackage` 或 `Get-AuthenticodeSignature`。手动触发 `workflow_dispatch` 会上传 `DellR730xdFanControlCenter-win-x64.zip` 作为 workflow artifact；推送 `v*` tag 时会创建或复用对应 GitHub Release，并用 `gh release upload --clobber` 覆盖同名 zip 资产。tag 发布路径不上传 workflow artifact，避免 Actions artifact 存储额度满时阻断 Release 资产发布；手动 artifact 运行仍会在额度不足时明确失败。因此同一 tag 重新运行 workflow 可以再次打包并替换下载资产。
 
 要生成可安装的签名 MSIX 包，使用仓库内发布脚本：
 

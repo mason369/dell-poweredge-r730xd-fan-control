@@ -43,7 +43,7 @@ The script first runs `tools\Publish-UnpackagedExe.ps1` to create `artifacts/exe
 .\tools\Publish-ReleaseZip.ps1 -VerifyLaunch
 ```
 
-`-VerifyLaunch` starts the exe from the extracted zip, waits for a top-level window and title, and checks whether new `.NET Runtime` or `Application Error` events were logged after launch. It closes that temporary process and removes the extraction directory after verification. The GitHub Actions `Package Release` workflow performs file-layout and no-signed-package-leak verification only, does not start the GUI by default, and does not call `tools\Publish-SignedMsix.ps1`, `Add-AppxPackage`, or `Get-AuthenticodeSignature`; manual runs upload a workflow artifact, while `v*` tags also replace the same-named GitHub Release zip using `gh release upload --clobber`.
+`-VerifyLaunch` starts the exe from the extracted zip, waits for a top-level window and title, and checks whether new `.NET Runtime` or `Application Error` events were logged after launch. It closes that temporary process and removes the extraction directory after verification. The GitHub Actions `Package Release` workflow performs file-layout and no-signed-package-leak verification only, does not start the GUI by default, and does not call `tools\Publish-SignedMsix.ps1`, `Add-AppxPackage`, or `Get-AuthenticodeSignature`; manual runs upload a workflow artifact, while `v*` tags directly replace the same-named GitHub Release zip using `gh release upload --clobber` and do not upload a workflow artifact, so full artifact storage quota cannot block Release publication.
 
 ## Command Logs And Duration Records
 
