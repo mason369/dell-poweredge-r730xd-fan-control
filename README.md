@@ -2,7 +2,7 @@
   <img src="Assets/Logo.svg" width="128" alt="R730XD 智控风扇中心图标" />
 </p>
 
-<h1 align="center">Dell R730xd iDRAC Fan Control Center / R730XD 智控风扇中心</h1>
+<h1 align="center">Dell R730xd iDRAC Fan Control Center / R730XD 风扇自动控制</h1>
 
 <p align="center">
   <strong>面向 Dell PowerEdge R730xd 的 Windows WinUI 3 自动风扇控制工具：通过 iDRAC/IPMI 与 ipmitool raw 命令调速，监控 BMC SDR 传感器，并保存本地历史图表。</strong>
