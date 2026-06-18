@@ -5,7 +5,7 @@
 <h1 align="center">Dell R730xd iDRAC Fan Control Center</h1>
 
 <p align="center">
-  <strong>A WinUI 3 iDRAC/IPMI fan-control, sensor-monitoring, and historical-visualization app for Dell PowerEdge R730xd.</strong>
+  <strong>A Windows WinUI 3 automatic fan-control app for Dell PowerEdge R730xd: control fans through iDRAC/IPMI and ipmitool raw commands, monitor BMC SDR sensors, and keep local historical charts.</strong>
 </p>
 
 <p align="center">
@@ -51,14 +51,26 @@
   <img alt="22 UI languages" src="https://img.shields.io/badge/UI%20languages-22-4B5563" />
 </p>
 
-Dell R730xd iDRAC Fan Control Center is a Windows WinUI 3 desktop app for controlling Dell PowerEdge R730xd fans through iDRAC/IPMI, reading BMC sensors, visualizing live hardware state, and handing control back to Dell firmware automatic mode when needed.
+Dell R730xd iDRAC Fan Control Center is a Windows desktop app for Dell PowerEdge R730xd servers. It brings the homelab and server-room staples into one WinUI 3 interface: iDRAC fan control, IPMI over LAN, `ipmitool raw 0x30 0x30` fan-speed commands, BMC SDR sensor reads, temperature-fan curves, power-fan curves, and local historical charts. You can set all fans manually by percentage, let the app compute a target speed from CPU temperature or system power, and hand control back to Dell firmware automatic mode when you want the safe factory path.
 
-This project is not a generic server management suite. It is a local control center for the R730xd, iDRAC/BMC, `ipmitool`, and Dell OEM raw fan commands. The design priorities are command transparency, explicit failure reporting, and recoverable operation. The app does not silently switch backends or pretend a command succeeded. Missing tools, authentication errors, insufficient privileges, unsupported firmware commands, and empty SDR reads are shown directly in the UI and logs.
+It is not a generic server management suite, and it is not a magic quiet button. This project deliberately focuses on the R730xd, iDRAC/BMC, `ipmitool`, and Dell OEM raw fan commands so each fan-control action is visible, auditable, and reversible. Missing tools, authentication errors, insufficient privileges, unsupported firmware commands, and empty SDR reads are shown directly in the UI and JSONL logs. The app does not silently switch backends, pretend a command succeeded, or fill charts with stale sensor values.
+
+## Search-Friendly Positioning
+
+If you found this project by searching for "Dell R730xd fan control", you are probably not looking for an abstract server-management platform. You likely have a very specific problem: an R730xd that is too loud, third-party drives or PCIe cards pushing the fans into takeoff mode, or an IPMI fan script that works but hides too much state. This project is written for those searches:
+
+- Dell PowerEdge R730xd fan control, R730xd fan noise, Dell server quiet fan, homelab server noise.
+- iDRAC fan control, iDRAC IPMI fan speed, IPMI over LAN, `ipmitool raw 0x30 0x30`, Dell OEM raw fan command.
+- Automatic fan control, smart temperature fan control, temperature fan curve, power fan curve, CPU-temperature based fan speed.
+- BMC sensor monitoring, SDR sensor, fan RPM monitor, Windows GUI fan control, WinUI 3 server hardware monitor.
+
+Many searchable solutions are Bash scripts, Docker containers, cron jobs, Home Assistant add-ons, or background services. This project is aimed at a Windows caretaker machine instead: it keeps raw-command transparency, then puts connection tests, sensor refreshes, automatic-policy ticks, chart history, tray actions, and failure causes on screen so you can tell whether the server is currently in Dell Auto, manual percentage, smart temperature automation, or curve-auto mode.
 
 ## Quick Links
 
 | Goal | Entry |
 | --- | --- |
+| Confirm the search-facing positioning | [Search-Friendly Positioning](#search-friendly-positioning) |
 | See what the app does | [Feature Overview](#feature-overview) |
 | Connect to iDRAC for the first time | [First-Run Workflow](#first-run-workflow) |
 | Build or run locally | [Build](#build) / [Run](#run) |
@@ -610,4 +622,4 @@ MainWindow.xaml.cs       Window, tray, and close behavior
 
 ## Repository Topics
 
-`dell`, `poweredge`, `r730xd`, `idrac`, `ipmi`, `ipmitool`, `fan-control`, `server-management`, `homelab`, `winui`, `windows`, `dotnet`
+`dell`, `poweredge`, `r730xd`, `idrac`, `ipmi`, `ipmitool`, `fan-control`, `automatic-fan-control`, `smart-fan-control`, `fan-curve`, `server-management`, `homelab`, `server-noise`, `winui`, `windows`, `dotnet`, `bmc`, `hardware-monitoring`, `thermal-management`

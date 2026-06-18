@@ -2,10 +2,10 @@
   <img src="Assets/Logo.svg" width="128" alt="R730XD 智控风扇中心图标" />
 </p>
 
-<h1 align="center">R730XD 智控风扇中心</h1>
+<h1 align="center">Dell R730xd iDRAC Fan Control Center / R730XD 智控风扇中心</h1>
 
 <p align="center">
-  <strong>面向 Dell PowerEdge R730xd 的 WinUI 3 iDRAC/IPMI 风扇控制、传感器监控和历史可视化工具。</strong>
+  <strong>面向 Dell PowerEdge R730xd 的 Windows WinUI 3 自动风扇控制工具：通过 iDRAC/IPMI 与 ipmitool raw 命令调速，监控 BMC SDR 传感器，并保存本地历史图表。</strong>
 </p>
 
 <p align="center">
@@ -51,14 +51,26 @@
   <img alt="22 UI languages" src="https://img.shields.io/badge/UI%20languages-22-4B5563" />
 </p>
 
-R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows WinUI 3 桌面工具，用于通过 iDRAC/IPMI 控制服务器风扇、读取 BMC 传感器、展示实时硬件状态，并在需要时把风扇控制权交回 Dell 固件自动策略。
+R730XD 智控风扇中心是一款面向 Dell PowerEdge R730xd 的 Windows 桌面应用。它把 homelab 和机房值守里常见的 iDRAC 风扇控制、IPMI over LAN、`ipmitool raw 0x30 0x30` 调速、BMC SDR 传感器读取、温度-风扇曲线和本地历史图表放到同一个 WinUI 3 界面里。你可以手动给全部风扇设置百分比，也可以让软件按 CPU 温度或整机功耗持续计算目标转速；需要回到稳妥路线时，一键把控制权交回 Dell 固件自动策略。
 
-这个项目不是通用服务器管理平台，而是针对 R730xd、iDRAC/BMC、`ipmitool` 和 Dell OEM raw 风扇命令整理出的本地控制中心。它强调三件事：命令透明、失败显式、操作可恢复。软件不会在命令失败时静默切换后端或假装成功；缺少工具、认证失败、权限不足、固件不支持 raw 命令等问题都会直接在界面和日志中暴露。
+它不是通用服务器管理平台，也不是“神奇静音按钮”。这个项目只围绕 R730xd、iDRAC/BMC、`ipmitool` 和 Dell OEM raw 风扇命令做一件事：让每次风扇控制都看得见、查得到、撤得回。缺少工具、认证失败、权限不足、固件不支持 raw 命令、SDR 读取为空等情况会直接显示在界面和 JSONL 日志里，软件不会静默换后端、假装成功，或者用旧读数糊弄图表。
+
+## 适合这些搜索场景
+
+如果你是一路搜着 “Dell R730xd fan control” 进来的，大概率想解决的不是抽象的服务器管理，而是一个很具体的场面：R730xd 风扇太吵，第三方硬盘或 PCIe 设备让风扇起飞，想用 IPMI 调低转速，又不想把散热安全交给一段看不见状态的脚本。本项目主要覆盖这些检索意图：
+
+- Dell PowerEdge R730xd 风扇控制、R730xd 风扇降噪、Dell server quiet fan、homelab server noise。
+- iDRAC fan control、iDRAC IPMI fan speed、IPMI over LAN、`ipmitool raw 0x30 0x30`、Dell OEM raw fan command。
+- 自动风扇控制、smart temperature fan control、temperature fan curve、power fan curve、CPU 温度自动调速。
+- BMC sensor monitoring、SDR sensor、fan RPM monitor、Windows GUI fan control、WinUI 3 server hardware monitor。
+
+网上常见方案多是 Bash、Docker、cron、Home Assistant add-on 或服务进程；这个项目的定位更偏“Windows 值守机上的可视化控制台”。它保留 raw 命令的透明度，同时把连接测试、传感器刷新、自动策略 tick、图表历史、托盘快捷操作和失败原因都摊在屏幕上，方便你知道机器现在到底是在 Dell 自动、手动百分比、软件恒温，还是曲线自动模式。
 
 ## 快速入口
 
 | 目标 | 入口 |
 | --- | --- |
+| 按搜索关键词确认项目定位 | [适合这些搜索场景](#适合这些搜索场景) |
 | 立即了解能做什么 | [功能总览](#功能总览) |
 | 首次连接 iDRAC | [首次使用流程](#首次使用流程) |
 | 构建或本机运行 | [构建](#构建) / [运行](#运行) |
@@ -611,4 +623,4 @@ MainWindow.xaml.cs       窗口、托盘和关闭行为
 
 ## 仓库标签
 
-`dell`, `poweredge`, `r730xd`, `idrac`, `ipmi`, `ipmitool`, `fan-control`, `server-management`, `homelab`, `winui`, `windows`, `dotnet`
+`dell`, `poweredge`, `r730xd`, `idrac`, `ipmi`, `ipmitool`, `fan-control`, `automatic-fan-control`, `smart-fan-control`, `fan-curve`, `server-management`, `homelab`, `server-noise`, `winui`, `windows`, `dotnet`, `bmc`, `hardware-monitoring`, `thermal-management`

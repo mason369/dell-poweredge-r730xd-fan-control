@@ -18,13 +18,30 @@ R730XD 智控风扇中心
 
 ## One-Line Description
 
-Windows WinUI 3 desktop app for Dell PowerEdge R730xd fan control through iDRAC/IPMI, BMC sensor monitoring, live hardware charts, JSONL runtime logs, Dell Auto mode, smart temperature automation, and user-defined temperature-fan curve presets.
+Windows WinUI 3 automatic fan-control center for Dell PowerEdge R730xd, focused on iDRAC/IPMI fan control, `ipmitool raw 0x30 0x30` fan speeds, BMC SDR sensor monitoring, temperature/power fan-curve automation, local historical charts, tray actions, and JSONL runtime logs.
 
 ## Long Description
 
-Dell R730xd iDRAC Fan Control Center brings common R730xd IPMI fan control, sensor polling, preset management, temperature-fan curve presets, tray quick actions, local visualization, and JSONL runtime logging into one Windows desktop app. It bundles `ipmitool.exe` and local chart assets, avoiding dependency on external command paths or online CDNs. The app defaults to Chinese, includes 22 interface languages, routes visible UI strings through a localization service, and localizes the MSIX package manifest display name and description through `Strings/<language>/Resources.resw`.
+Dell R730xd iDRAC Fan Control Center brings common R730xd iDRAC fan control, IPMI over LAN, `ipmitool raw 0x30 0x30` fan-speed commands, BMC SDR sensor polling, preset management, temperature-fan curves, power-fan curves, tray quick actions, local visualization, and JSONL runtime logging into one Windows desktop app. It bundles `ipmitool.exe` and local chart assets, avoiding dependency on external command paths or online CDNs. The app defaults to Chinese, includes 22 interface languages, routes visible UI strings through a localization service, and localizes the MSIX package manifest display name and description through `Strings/<language>/Resources.resw`.
 
 The core goal is to make it clear what the software is doing to the BMC: every command has an explicit UI trigger, failures are displayed directly, runtime logs record atomic events and operation durations, passwords do not enter command-line arguments, and low-speed plus individual fan target-selector risks are documented in the UI and docs, especially that `0x00` is a target selector rather than `0%` fan speed.
+
+## Search Positioning And Repository Intro Notes
+
+Public-facing copy should keep both the English primary name `Dell R730xd iDRAC Fan Control Center` and the Chinese name `R730XD 智控风扇中心`. Search-friendly summaries should front-load these terms: `Dell PowerEdge R730xd fan control`, `iDRAC fan control`, `IPMI fan speed`, `ipmitool raw 0x30 0x30`, `automatic fan control`, `temperature fan curve`, `BMC SDR sensor monitoring`, and `Windows GUI`.
+
+Repository descriptions, release summaries, and external share text should emphasize:
+
+- Controls Dell PowerEdge R730xd fans through iDRAC/IPMI over LAN and `ipmitool raw 0x30 0x30`.
+- Supports manual percentages, Dell Auto mode, smart temperature automation, temperature curves, and power-based fan curves.
+- Monitors BMC SDR sensors, Fan RPM, CPU/inlet/exhaust temperatures, power, voltage, current, and health states in real time.
+- Provides a Windows WinUI 3 graphical interface for homelab noise control, R730xd caretaker machines, third-party drive or PCIe fan-noise situations, and visible server-room supervision.
+- Compared with Bash scripts, Docker containers, cron jobs, Home Assistant add-ons, or background services, this project emphasizes local visible state, chart history, tray actions, command transparency, and explicit failure reporting.
+- The project is not a general server asset-management platform, does not write firmware-level real-time fan curves, and does not claim support for every Dell PowerEdge model. README and security docs should keep documenting scope, failure behavior, and hardware risk.
+
+Recommended search phrases or external link anchors:
+
+`Dell R730xd fan control`, `Dell PowerEdge R730xd fan speed`, `iDRAC IPMI fan control`, `ipmitool raw 0x30 0x30`, `automatic Dell server fan control`, `temperature based fan curve`, `BMC SDR sensor monitor`, `homelab server noise`, `Windows GUI fan control`, `R730xd 风扇控制`, `R730xd 风扇降噪`, `Dell 服务器自动风扇控制`.
 
 ## Target Users
 
@@ -168,13 +185,13 @@ The search-facing English name keeps the important keywords: Dell, R730xd, iDRAC
 ## Recommended Repository Description
 
 ```text
-WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, BMC sensor monitoring, smart temperature automation, tray quick actions, local ECharts visualization, and JSONL runtime logs.
+Windows WinUI 3 GUI for Dell PowerEdge R730xd iDRAC/IPMI fan control: ipmitool raw fan speeds, BMC SDR monitoring, automatic temperature/power fan curves, ECharts history, tray actions, and JSONL logs.
 ```
 
 ## Recommended Chinese Description
 
 ```text
-面向 Dell PowerEdge R730xd 的 WinUI 3 桌面风扇控制中心，支持 iDRAC/IPMI 调速、BMC 传感器监控、软件恒温策略、托盘快捷操作、本地 ECharts 可视化和 JSONL 运行日志。
+面向 Dell PowerEdge R730xd 的 Windows WinUI 3 图形化风扇控制中心，支持 iDRAC/IPMI 与 ipmitool raw 调速、BMC SDR 监控、温度/功耗曲线自动策略、本地历史图表、托盘快捷操作和 JSONL 日志。
 ```
 
 ## Topics
@@ -186,8 +203,12 @@ WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, BMC sensor
 - ipmi
 - ipmitool
 - fan-control
+- automatic-fan-control
+- smart-fan-control
+- fan-curve
 - server-management
 - homelab
+- server-noise
 - winui
 - windows
 - dotnet

@@ -18,13 +18,30 @@ R730XD 智控风扇中心
 
 ## 一句话简介
 
-面向 Dell PowerEdge R730xd 的 Windows WinUI 3 桌面工具，通过 iDRAC/IPMI 控制风扇、读取 BMC 传感器、展示实时硬件图表，提供 JSONL 运行日志，并支持 Dell 自动模式、软件恒温策略与用户自定义温度-风扇曲线预设。
+面向 Dell PowerEdge R730xd 的 Windows WinUI 3 自动风扇控制中心，聚焦 iDRAC/IPMI fan control、`ipmitool raw 0x30 0x30` 调速、BMC SDR 传感器监控、温度/功耗曲线自动策略、本地历史图表、托盘快捷操作和 JSONL 运行日志。
 
 ## 长简介
 
-R730XD 智控风扇中心把 R730xd 常用的 IPMI 风扇控制、传感器轮询、预设管理、温度-风扇曲线预设、托盘快捷操作、本地可视化和 JSONL 运行日志整合到一个 Windows 桌面应用中。应用内置 `ipmitool.exe` 和本地图表资产，避免依赖外部命令路径或在线 CDN。它默认使用中文界面，内置 22 种界面语言，通过本地化服务让可见 UI 字符串可切换，并用 `Strings/<language>/Resources.resw` 本地化 MSIX 包清单显示名和描述。
+R730XD 智控风扇中心把 R730xd 常用的 iDRAC 风扇控制、IPMI over LAN、`ipmitool raw 0x30 0x30` 调速、BMC SDR 传感器轮询、预设管理、温度-风扇曲线、功耗-风扇曲线、托盘快捷操作、本地可视化和 JSONL 运行日志整合到一个 Windows 桌面应用中。应用内置 `ipmitool.exe` 和本地图表资产，避免依赖外部命令路径或在线 CDN。它默认使用中文界面，内置 22 种界面语言，通过本地化服务让可见 UI 字符串可切换，并用 `Strings/<language>/Resources.resw` 本地化 MSIX 包清单显示名和描述。
 
 项目的核心目标是让用户清楚知道软件正在对 BMC 做什么：每条命令有明确的触发入口，失败会直接显示，运行日志会记录原子事件和操作时间段，密码不进入命令行参数，低转速和单风扇目标编号风险会在界面和文档中说明，尤其明确 `0x00` 是目标编号而不是 `0%` 转速。
+
+## 搜索定位与仓库介绍要点
+
+对外介绍应把英文主名 `Dell R730xd iDRAC Fan Control Center` 和中文名 `R730XD 智控风扇中心` 同时保留。搜索友好的摘要需要前置这些关键词：`Dell PowerEdge R730xd fan control`、`iDRAC fan control`、`IPMI fan speed`、`ipmitool raw 0x30 0x30`、`automatic fan control`、`temperature fan curve`、`BMC SDR sensor monitoring`、`Windows GUI`。
+
+仓库介绍、Release 摘要和外部分享文案建议强调：
+
+- 通过 iDRAC/IPMI over LAN 和 `ipmitool raw 0x30 0x30` 控制 Dell PowerEdge R730xd 风扇。
+- 支持手动百分比、Dell 自动模式、软件恒温、温度曲线和功耗曲线自动调速。
+- 实时监控 BMC SDR 传感器、Fan RPM、CPU/进风/排风温度、功耗、电压、电流和健康状态。
+- 用 WinUI 3 做 Windows 图形界面，适合 homelab、R730xd 降噪、第三方硬盘/PCIe 设备后风扇过高、以及需要可视化值守的场景。
+- 与 Bash、Docker、cron、Home Assistant add-on 或后台服务类方案相比，本项目更强调本地可见状态、图表历史、托盘操作、命令透明和失败显式暴露。
+- 项目不是通用服务器资产管理平台，不写入固件级实时风扇曲线，也不承诺支持所有 Dell PowerEdge 型号；README 和安全说明应持续写清楚适用范围、失败行为和硬件风险。
+
+推荐搜索词或外部链接锚文本：
+
+`Dell R730xd fan control`, `Dell PowerEdge R730xd fan speed`, `iDRAC IPMI fan control`, `ipmitool raw 0x30 0x30`, `automatic Dell server fan control`, `temperature based fan curve`, `BMC SDR sensor monitor`, `homelab server noise`, `Windows GUI fan control`, `R730xd 风扇控制`, `R730xd 风扇降噪`, `Dell 服务器自动风扇控制`。
 
 ## 目标用户
 
@@ -168,13 +185,13 @@ Logo 由服务器前面板、涡轮风扇和黄色状态线组成：
 ## 推荐仓库描述
 
 ```text
-WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, BMC sensor monitoring, smart temperature automation, tray quick actions, local ECharts visualization, and JSONL runtime logs.
+Windows WinUI 3 GUI for Dell PowerEdge R730xd iDRAC/IPMI fan control: ipmitool raw fan speeds, BMC SDR monitoring, automatic temperature/power fan curves, ECharts history, tray actions, and JSONL logs.
 ```
 
 ## 推荐中文描述
 
 ```text
-面向 Dell PowerEdge R730xd 的 WinUI 3 桌面风扇控制中心，支持 iDRAC/IPMI 调速、BMC 传感器监控、软件恒温策略、托盘快捷操作、本地 ECharts 可视化和 JSONL 运行日志。
+面向 Dell PowerEdge R730xd 的 Windows WinUI 3 图形化风扇控制中心，支持 iDRAC/IPMI 与 ipmitool raw 调速、BMC SDR 监控、温度/功耗曲线自动策略、本地历史图表、托盘快捷操作和 JSONL 日志。
 ```
 
 ## 标签
@@ -186,8 +203,12 @@ WinUI 3 desktop app for Dell PowerEdge R730xd iDRAC/IPMI fan control, BMC sensor
 - ipmi
 - ipmitool
 - fan-control
+- automatic-fan-control
+- smart-fan-control
+- fan-curve
 - server-management
 - homelab
+- server-noise
 - winui
 - windows
 - dotnet
