@@ -2,7 +2,7 @@
   <img src="Assets/Logo.svg" width="128" alt="R730XD 智控风扇中心图标" />
 </p>
 
-<h1 align="center">R730XD 智控风扇中心</h1>
+<h1 align="center">R730XD 风扇自动控制</h1>
 
 <p align="center">
   <strong>面向 Dell PowerEdge R730xd 的 WinUI 3 iDRAC/IPMI 风扇控制、传感器监控和历史可视化工具。</strong>
