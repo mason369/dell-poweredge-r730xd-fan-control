@@ -10,6 +10,26 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Assert-PathUnderRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    $rootPath = [System.IO.Path]::GetFullPath($Root).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $targetPath = [System.IO.Path]::GetFullPath($Path).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $rootPrefix = "$rootPath$([System.IO.Path]::DirectorySeparatorChar)"
+    if (-not $targetPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Description must stay under repository root '$rootPath'; resolved path was '$targetPath'."
+    }
+}
+
 function Remove-DirectoryIfPresent {
     param(
         [Parameter(Mandatory = $true)]
@@ -50,16 +70,18 @@ $resolvedReleaseOutputDirectory = Join-Path $repoRoot $ReleaseOutputDirectory
 $zipPath = Join-Path $resolvedReleaseOutputDirectory $ZipName
 $verificationDirectory = Join-Path $resolvedReleaseOutputDirectory "zip-verification"
 
+Assert-PathUnderRoot -Path $resolvedReleaseOutputDirectory -Root $repoRoot -Description "Release output directory"
+Assert-PathUnderRoot -Path $zipPath -Root $repoRoot -Description "Release zip path"
+Assert-PathUnderRoot -Path $verificationDirectory -Root $repoRoot -Description "Release verification directory"
+
+Remove-DirectoryIfPresent -Path $resolvedReleaseOutputDirectory -Description "previous release output directory"
+New-Item -ItemType Directory -Path $resolvedReleaseOutputDirectory -Force | Out-Null
+
 & $publishExeScript `
     -Configuration $Configuration `
     -Platform $Platform `
     -RuntimeIdentifier $RuntimeIdentifier `
     -OutputDirectory $ExeOutputDirectory | Out-Host
-
-New-Item -ItemType Directory -Path $resolvedReleaseOutputDirectory -Force | Out-Null
-if (Test-Path -LiteralPath $zipPath) {
-    Remove-Item -LiteralPath $zipPath -Force -ErrorAction Stop
-}
 
 Compress-Archive -Path (Join-Path $resolvedExeOutputDirectory "*") -DestinationPath $zipPath -Force
 if (-not (Test-Path -LiteralPath $zipPath)) {
@@ -99,15 +121,16 @@ try {
         Assert-RequiredFile -Root $verificationDirectory -RelativePath $relativePath
     }
 
-    $forbiddenReleaseFiles = Get-ChildItem -LiteralPath $verificationDirectory -Recurse -File |
+    $forbiddenReleaseFiles = Get-ChildItem -LiteralPath $verificationDirectory -Recurse -Force |
         Where-Object {
             $_.Extension -in @(".msix", ".pfx", ".cer") -or
-            $_.Name -in @("AppxManifest.xml", "Package.appxmanifest")
+            $_.Name -in @("AppxManifest.xml", "Package.appxmanifest") -or
+            $_.FullName -like "*DellR730xdFanControlCenter.exe.WebView2*"
         }
 
     if ($forbiddenReleaseFiles) {
         $fileList = ($forbiddenReleaseFiles | ForEach-Object { $_.FullName.Substring($verificationDirectory.Length).TrimStart([char[]]@("\", "/")) }) -join ", "
-        throw "Release zip verification failed: signed/package-identity files are not allowed in the unsigned downloadable zip: $fileList"
+        throw "Release zip verification failed: signed/package-identity files are not allowed in the unsigned downloadable zip, and WebView2 user data must not be packaged: $fileList"
     }
 
     if ($VerifyLaunch) {

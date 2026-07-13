@@ -6,6 +6,14 @@ using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 
+var fakeIpmiLogPath = Environment.GetEnvironmentVariable("R730XD_FAKE_IPMI_LOG_PATH");
+if (!string.IsNullOrWhiteSpace(fakeIpmiLogPath))
+{
+    return RunFakeIpmiProcess(args, fakeIpmiLogPath);
+}
+
+try
+{
 var defaults = FanPreset.CreateDefaultPresets();
 Require(defaults.Count >= 5, "Default preset list should include restore, balanced, cooling, performance, and Dell automatic presets.");
 Require(defaults.All(preset => preset.CanDelete), "Starter presets should expose the same delete action as custom presets.");
@@ -61,15 +69,43 @@ var currentTemperatureCelsius = 61;
 Require(curve.CalculateFanPercent(currentTemperatureCelsius) == 29, "Current temperature readings should be evaluated at their position on the configured temperature curve.");
 Require(curve.CalculateFanPercent(90) == 60, "Curve temperatures above the last point should use the last point percent.");
 curve.SmoothCurve = true;
-Require(curve.CalculateFanPercent(55) == 24, "Smooth curve mode should evaluate the same configured curve points with a softened position.");
+Require(curve.CalculateFanPercent(55) == 22, "Smooth curve mode should evaluate the configured points with constrained monotone tangents.");
 curve.SmoothCurve = false;
+
+var monotoneTemperatureCurve = new FanPreset
+{
+    Kind = FanPreset.CurveKind,
+    SmoothCurve = true,
+    CurvePoints =
+    [
+        new FanCurvePoint { TemperatureCelsius = 40, FanPercent = 10 },
+        new FanCurvePoint { TemperatureCelsius = 50, FanPercent = 20 },
+        new FanCurvePoint { TemperatureCelsius = 60, FanPercent = 80 },
+        new FanCurvePoint { TemperatureCelsius = 70, FanPercent = 80 },
+    ],
+};
+Require(
+    monotoneTemperatureCurve.CalculateFanPercent(45) == 13,
+    "Smooth temperature curves should use a shared monotone tangent instead of flattening every interval independently.");
+Require(
+    monotoneTemperatureCurve.CalculateFanPercent(65) == 80,
+    "Smooth temperature curves should preserve flat control-point intervals exactly.");
+var previousSmoothTemperaturePercent = monotoneTemperatureCurve.CalculateFanPercent(40);
+for (var temperature = 40.25; temperature <= 70; temperature += 0.25)
+{
+    var percent = monotoneTemperatureCurve.CalculateFanPercent(temperature);
+    Require(
+        percent >= previousSmoothTemperaturePercent && percent is >= 10 and <= 80,
+        "Smooth temperature interpolation should remain monotone and never overshoot neighboring control points.");
+    previousSmoothTemperaturePercent = percent;
+}
 
 curve.CurvePointsText = "50 = 20" + Environment.NewLine + "80 = 50";
 curve.ApplyCurvePointsText();
 Require(curve.CurvePoints.Count == 2, "Editable curve point text should replace the curve point list.");
 Require(curve.CalculateFanPercent(65) == 35, "Edited curve point text should drive later current-temperature curve evaluation.");
 curve.SmoothCurve = true;
-Require(curve.CalculateFanPercent(60) == 28, "Edited curve points should still support smooth current-temperature curve evaluation.");
+Require(curve.CalculateFanPercent(60) == 30, "A two-point smooth temperature curve should reduce to its linear segment.");
 
 var powerCurve = new FanPreset
 {
@@ -90,15 +126,42 @@ var currentPowerWatts = 412;
 Require(powerCurve.CalculateFanPercentForPower(currentPowerWatts) == 24, "Current power readings should be evaluated at their position on the configured power curve.");
 Require(powerCurve.CalculateFanPercentForPower(900) == 42, "Power above the last point should use the last power point percent.");
 powerCurve.SmoothCurve = true;
-Require(powerCurve.CalculateFanPercentForPower(350) == 20, "Power smooth curve mode should evaluate the same configured power points with a softened position.");
+Require(powerCurve.CalculateFanPercentForPower(350) == 21, "Power smooth curve mode should evaluate the configured points with constrained monotone tangents.");
 powerCurve.SmoothCurve = false;
+
+var monotonePowerCurve = new FanPreset
+{
+    Kind = FanPreset.PowerCurveKind,
+    SmoothCurve = true,
+    CurvePoints =
+    [
+        new FanCurvePoint { PowerWatts = 100, FanPercent = 10 },
+        new FanCurvePoint { PowerWatts = 200, FanPercent = 20 },
+        new FanCurvePoint { PowerWatts = 300, FanPercent = 80 },
+        new FanCurvePoint { PowerWatts = 400, FanPercent = 80 },
+    ],
+};
+Require(
+    monotonePowerCurve.CalculateFanPercentForPower(150) == 13,
+    "Smooth power curves should use the same monotone interpolation as temperature curves.");
+Require(
+    monotonePowerCurve.CalculateFanPercentForPower(350) == 80,
+    "Smooth power curves should preserve flat control-point intervals exactly.");
+for (var index = 0; index <= 120; index++)
+{
+    var temperature = 40 + (index * 0.25);
+    var power = 100 + (index * 2.5);
+    Require(
+        monotoneTemperatureCurve.CalculateFanPercent(temperature) == monotonePowerCurve.CalculateFanPercentForPower(power),
+        "Temperature and power smooth curves should evaluate equivalent normalized control points identically.");
+}
 
 powerCurve.CurvePointsText = "300W = 20" + Environment.NewLine + "700W = 50";
 powerCurve.ApplyCurvePointsText();
 Require(powerCurve.CurvePoints.Count == 2, "Editable power curve text should replace the power curve point list.");
 Require(powerCurve.CalculateFanPercentForPower(500) == 35, "Edited power curve point text should drive later current-power curve evaluation.");
 powerCurve.SmoothCurve = true;
-Require(powerCurve.CalculateFanPercentForPower(400) == 25, "Edited power curve points should still support smooth current-power curve evaluation.");
+Require(powerCurve.CalculateFanPercentForPower(400) == 28, "A two-point smooth power curve should reduce to its linear segment.");
 
 var notifiedProperties = new List<string>();
 var notifyingPoint = new FanCurvePoint();
@@ -156,6 +219,7 @@ RunSensorValueLocalizationChecks();
 RunSensorDisplayNameLocalizationChecks();
 RunSupportedLanguageCatalogChecks();
 RunAllLanguageResourceCompletenessChecks();
+RunLocalizationIntegrityChecks();
 RunLanguageSelectorXamlChecks();
 RunVisibleXamlLocalizationCoverageChecks();
 RunInfoBarAccessibilityLocalizationChecks();
@@ -163,6 +227,9 @@ RunPackageManifestLocalizationCoverageChecks();
 RunPublishScriptChecks();
 RunDashboardHtmlLocalizationCoverageChecks();
 RunRuntimeStatePersistenceSourceChecks();
+RunStartupFailureBoundarySourceChecks();
+RunSettingsStoreAtomicSaveSourceChecks();
+RunSingleInstanceRaceSourceChecks();
 
 LocalizationService.SetLanguage("zh-CN");
 Require(LocalizationService.T("SensorValue.StateDeasserted") == "事件已解除", "State Deasserted must have a readable Chinese translation.");
@@ -188,12 +255,12 @@ Require(!string.IsNullOrWhiteSpace(LocalizationService.T("Hero.LiveMoreItems")),
 Require(LocalizationService.T("Overview.LivePower") == "实时功耗", "Overview live power should have a Chinese translation.");
 Require(LocalizationService.T("Overview.AverageVoltage") == "平均电压", "Overview average voltage should have a Chinese translation.");
 Require(LocalizationService.T("Overview.TotalCurrent") == "总电流", "Overview total current should have a Chinese translation.");
-Require(LocalizationService.T("Action.RestoreDellFactoryFanSpeed").Contains("戴尔出厂设置转速", StringComparison.Ordinal), "Chinese factory restore action should name Dell factory fan speed.");
+Require(LocalizationService.T("Action.RestoreDellFactoryFanSpeed").Contains("Dell 出厂设置转速", StringComparison.Ordinal), "Chinese factory restore action should preserve the Dell brand name.");
 Require(LocalizationService.T("Action.StartPolling") == "开始轮询", "Chinese polling start action should describe starting sensor polling.");
 Require(LocalizationService.T("Action.CancelPolling") == "取消轮询", "Chinese polling cancel action should describe canceling sensor polling.");
-Require(LocalizationService.T("Tray.RestoreDefault").Contains("戴尔出厂设置转速", StringComparison.Ordinal), "Chinese tray restore action should name Dell factory fan speed.");
+Require(LocalizationService.T("Tray.RestoreDefault").Contains("Dell 出厂设置转速", StringComparison.Ordinal), "Chinese tray restore action should preserve the Dell brand name.");
 Require(LocalizationService.T("Tray.RefreshSensors") == "刷新传感器", "Chinese tray refresh action should be translated.");
-Require(LocalizationService.T("Tray.OpenIdrac") == "打开远程管理网页", "Chinese tray iDRAC action should be translated.");
+Require(LocalizationService.T("Tray.OpenIdrac") == "打开 iDRAC 网页", "Chinese tray iDRAC action should preserve the iDRAC product name.");
 Require(LocalizationService.T("Tray.OpenLogs") == "打开日志文件夹", "Chinese tray logs action should be translated.");
 Require(LocalizationService.T("Tray.StopAuto") == "停止自动策略", "Chinese tray stop-auto action should be translated.");
 Require(LocalizationService.T("Control.IndividualEnabledWarning").Contains("0x00 不是 0% 转速", StringComparison.Ordinal), "Chinese individual fan enabled warning should explain that 0x00 is not 0% fan speed.");
@@ -258,6 +325,33 @@ try
     Require(
         settingsStore.Load().SensorRefreshSeconds == 1,
         "Saving a 1-second SDR polling interval should remain supported.");
+    Require(
+        !Directory.EnumerateFiles(tempSettingsDirectory, ".settings-*.tmp").Any(),
+        "A successful settings replacement should not leave temporary files behind.");
+
+    using (File.Open(settingsStore.SettingsPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+    {
+        Exception? saveFailure = null;
+        try
+        {
+            settingsStore.Save(new AppSettings { SensorRefreshSeconds = 2 });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            saveFailure = ex;
+        }
+
+        Require(
+            saveFailure is not null,
+            "A locked active settings file should expose the replacement failure instead of reporting a successful save.");
+    }
+
+    Require(
+        settingsStore.Load().SensorRefreshSeconds == 1,
+        "A failed settings replacement should preserve the previously active settings file.");
+    Require(
+        !Directory.EnumerateFiles(tempSettingsDirectory, ".settings-*.tmp").Any(),
+        "A failed settings replacement should clean its unique temporary file.");
 
     settingsStore.Save(new AppSettings { Presets = savedPresets });
     var loaded = settingsStore.Load();
@@ -323,8 +417,13 @@ finally
 RunAppLogServiceChecks();
 RunLogLevelStyleChecks();
 RunHeroMetricSeverityStyleChecks();
+RunSensorReadingAvailabilityChecks();
+RunDashboardSensorPresentationChecks();
+RunDashboardTileViewModelBehaviorChecks();
+RunDashboardSnapshotFreshnessChecks();
 RunPollingSkipLogGateChecks();
 RunIpmiCommandNoRetrySourceChecks();
+RunFanCommandSafetyRecoveryChecks();
 RunAutoPolicySamplingOwnershipSourceChecks();
 RunAutoPolicyUnchangedTargetSkipSourceChecks();
 RunAutoPolicyFailureContextSourceChecks();
@@ -335,6 +434,7 @@ RunHeroBannerDividerLayoutXamlChecks();
 RunHeroThermalModeStatusXamlChecks();
 RunNoPartialOverviewDisplaySourceChecks();
 RunDashboardTileInPlaceUpdateChecks();
+RunDashboardSensorIconXamlChecks();
 RunFanIconXamlChecks();
 RunPowerHealthLayoutXamlChecks();
 RunContentScrollWidthXamlChecks();
@@ -351,8 +451,20 @@ RunOverviewSectionOrderXamlChecks();
 RunSettingsCommandBarXamlChecks();
 RunTrayMenuSourceChecks();
 RunDashboardChartLayoutChecks();
+RunWebView2UserDataSourceChecks();
+RunUserCommandLogFlushSourceChecks();
+RunReleaseVersionMetadataChecks();
+RunTestHarnessFailureExitSourceChecks();
 
 Console.WriteLine("Preset model checks passed.");
+return 0;
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("Preset model checks failed.");
+    Console.Error.WriteLine(ex);
+    return 1;
+}
 
 static void RunIpmiTemperatureLookupChecks()
 {
@@ -394,6 +506,7 @@ static void RunIpmiCommandNoRetrySourceChecks()
     var settingsSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Models", "AppSettings.cs")));
     var traceSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Services", "CommandTraceEventArgs.cs")));
     var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var projectSource = File.ReadAllText(FindRepositoryFile("DellR730xdFanControlCenter.csproj"));
 
     Require(
         !settingsSource.Contains("FanControlRawCommandRetry", StringComparison.Ordinal) &&
@@ -405,6 +518,170 @@ static void RunIpmiCommandNoRetrySourceChecks()
         !traceSource.Contains("MaxAttempts", StringComparison.Ordinal) &&
         !pageSource.Contains("FormatCommandAttemptText", StringComparison.Ordinal),
         "Command logs should report the single real ipmitool execution without attempt/retry fields.");
+    Require(
+        projectSource.Contains("<Platform Condition=\"'$(Platform)' == 'AnyCPU'\">x64</Platform>", StringComparison.Ordinal),
+        "Direct dotnet tooling should map the unsupported WinUI AnyCPU default to x64 instead of loading duplicate generated sources.");
+}
+
+static void RunFanCommandSafetyRecoveryChecks()
+{
+    using var temp = TempDirectory.Create("R730xdFanCommandSafetyRecoveryTests");
+    var logPath = Path.Combine(temp.Path, "fake-ipmi-commands.log");
+    var environmentVariables = new[]
+    {
+        "R730XD_FAKE_IPMI_LOG_PATH",
+        "R730XD_FAKE_IPMI_MANUAL_EXIT_CODE",
+        "R730XD_FAKE_IPMI_SPEED_EXIT_CODE",
+        "R730XD_FAKE_IPMI_AUTO_EXIT_CODE",
+    };
+    var previousValues = environmentVariables.ToDictionary(
+        name => name,
+        Environment.GetEnvironmentVariable,
+        StringComparer.Ordinal);
+
+    try
+    {
+        Environment.SetEnvironmentVariable("R730XD_FAKE_IPMI_LOG_PATH", logPath);
+        var processPath = Environment.ProcessPath;
+        Require(
+            !string.IsNullOrWhiteSpace(processPath) && File.Exists(processPath),
+            "The test executable must be available as a real child-process ipmitool substitute.");
+        var profile = new IdracProfile
+        {
+            Host = "test-idrac.invalid",
+            UserName = "test-user",
+            Password = "test-password",
+            IpmiToolPath = processPath!,
+            CommandTimeoutSeconds = 5,
+        };
+
+        File.Delete(logPath);
+        ConfigureFakeIpmiExitCodes(manual: 0, speed: 17, automatic: 0);
+        var recoveredService = new IpmiCommandService();
+        var recoveredTrace = new List<CommandTraceEventArgs>();
+        recoveredService.CommandCompleted += (_, trace) => recoveredTrace.Add(trace);
+        var recoveredFailure = CaptureException(
+            () => recoveredService.SetAllFansManualSpeedAsync(profile, 35, CancellationToken.None).GetAwaiter().GetResult());
+        Require(
+            recoveredFailure.GetType().Name == "FanCommandSafetyRecoveryException",
+            "A rejected fan percentage followed by successful Dell automatic recovery should surface the dedicated recovery exception.");
+        RequireSequence(
+            logPath,
+            ["EnterManual", "SetFanSpeed", "RestoreDellAuto"],
+            "A failed percentage command must trigger exactly one Dell automatic recovery after the confirmed manual-mode command.");
+        Require(
+            recoveredTrace.Count == 3 &&
+            recoveredTrace[0].Succeeded &&
+            !recoveredTrace[1].Succeeded &&
+            recoveredTrace[2].Succeeded,
+            "Command tracing must preserve the real success/failure/success result of all three child processes.");
+
+        File.Delete(logPath);
+        ConfigureFakeIpmiExitCodes(manual: 0, speed: 18, automatic: 19);
+        var failedRecoveryService = new IpmiCommandService();
+        var failedRecovery = CaptureException(
+            () => failedRecoveryService.SetAllFansManualSpeedAsync(profile, 36, CancellationToken.None).GetAwaiter().GetResult());
+        Require(
+            failedRecovery.InnerException is AggregateException aggregate && aggregate.InnerExceptions.Count == 2,
+            "When Dell automatic recovery also fails, the terminal exception must retain both the percentage failure and recovery failure.");
+        RequireSequence(
+            logPath,
+            ["EnterManual", "SetFanSpeed", "RestoreDellAuto"],
+            "A failed recovery must still be attempted exactly once and must never retry the rejected percentage command.");
+
+        File.Delete(logPath);
+        ConfigureFakeIpmiExitCodes(manual: 20, speed: 0, automatic: 0);
+        var manualFailureService = new IpmiCommandService();
+        _ = CaptureException(
+            () => manualFailureService.SetAllFansManualSpeedAsync(profile, 37, CancellationToken.None).GetAwaiter().GetResult());
+        RequireSequence(
+            logPath,
+            ["EnterManual"],
+            "Dell automatic recovery must not run when entering manual mode itself was never confirmed successful.");
+
+        var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+        Require(
+            pageSource.Contains("catch (FanCommandSafetyRecoveryException", StringComparison.Ordinal) &&
+            pageSource.Contains("MarkActivePreset(\"dell-auto\", persistRunningState: true)", StringComparison.Ordinal),
+            "The UI failure boundary must visibly fail the requested command while aligning its summary and LastRunning state with the confirmed Dell automatic recovery.");
+    }
+    finally
+    {
+        foreach (var variable in environmentVariables)
+        {
+            Environment.SetEnvironmentVariable(variable, previousValues[variable]);
+        }
+    }
+}
+
+static int RunFakeIpmiProcess(string[] commandArguments, string logPath)
+{
+    var rawIndex = Array.FindIndex(commandArguments, argument => string.Equals(argument, "raw", StringComparison.Ordinal));
+    var rawArguments = rawIndex >= 0 ? commandArguments[(rawIndex + 1)..] : [];
+    string action;
+    string exitCodeVariable;
+    if (rawArguments.SequenceEqual(["0x30", "0x30", "0x01", "0x00"], StringComparer.OrdinalIgnoreCase))
+    {
+        action = "EnterManual";
+        exitCodeVariable = "R730XD_FAKE_IPMI_MANUAL_EXIT_CODE";
+    }
+    else if (rawArguments.Length == 5 &&
+             rawArguments.Take(3).SequenceEqual(["0x30", "0x30", "0x02"], StringComparer.OrdinalIgnoreCase))
+    {
+        action = "SetFanSpeed";
+        exitCodeVariable = "R730XD_FAKE_IPMI_SPEED_EXIT_CODE";
+    }
+    else if (rawArguments.SequenceEqual(["0x30", "0x30", "0x01", "0x01"], StringComparer.OrdinalIgnoreCase))
+    {
+        action = "RestoreDellAuto";
+        exitCodeVariable = "R730XD_FAKE_IPMI_AUTO_EXIT_CODE";
+    }
+    else
+    {
+        action = "UnexpectedCommand";
+        exitCodeVariable = string.Empty;
+    }
+
+    Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+    File.AppendAllText(logPath, action + Environment.NewLine);
+    var configuredExitCode = string.IsNullOrEmpty(exitCodeVariable)
+        ? 97
+        : int.TryParse(Environment.GetEnvironmentVariable(exitCodeVariable), out var parsedExitCode)
+            ? parsedExitCode
+            : 0;
+    if (configuredExitCode != 0)
+    {
+        Console.Error.WriteLine($"Fake ipmitool rejected {action} with exit code {configuredExitCode}.");
+    }
+
+    return configuredExitCode;
+}
+
+static void ConfigureFakeIpmiExitCodes(int manual, int speed, int automatic)
+{
+    Environment.SetEnvironmentVariable("R730XD_FAKE_IPMI_MANUAL_EXIT_CODE", manual.ToString(CultureInfo.InvariantCulture));
+    Environment.SetEnvironmentVariable("R730XD_FAKE_IPMI_SPEED_EXIT_CODE", speed.ToString(CultureInfo.InvariantCulture));
+    Environment.SetEnvironmentVariable("R730XD_FAKE_IPMI_AUTO_EXIT_CODE", automatic.ToString(CultureInfo.InvariantCulture));
+}
+
+static Exception CaptureException(Action action)
+{
+    try
+    {
+        action();
+    }
+    catch (Exception ex)
+    {
+        return ex;
+    }
+
+    throw new InvalidOperationException("The operation was expected to fail, but it completed successfully.");
+}
+
+static void RequireSequence(string path, IReadOnlyList<string> expected, string message)
+{
+    var actual = File.Exists(path) ? File.ReadAllLines(path) : [];
+    Require(actual.SequenceEqual(expected, StringComparer.Ordinal), $"{message} Actual: [{string.Join(", ", actual)}].");
 }
 
 static void RunAutoPolicySamplingOwnershipSourceChecks()
@@ -425,12 +702,14 @@ static void RunAutoPolicySamplingOwnershipSourceChecks()
 static void RunAutoPolicyUnchangedTargetSkipSourceChecks()
 {
     var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
-    var tickStartIndex = source.IndexOf("private async Task RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
+    var tickStartIndex = source.IndexOf("private async Task<bool> RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
     var percentIndex = source.IndexOf("var percent = CalculateFanPercentForAutoTick", tickStartIndex, StringComparison.Ordinal);
     var skipIndex = source.IndexOf("ShouldSkipUnchangedAutoPolicyFanCommand", percentIndex, StringComparison.Ordinal);
     var commandIndex = source.IndexOf("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken)", percentIndex, StringComparison.Ordinal);
     var rememberIndex = source.IndexOf("RememberAutoPolicyFanTarget(targetKey, percent)", commandIndex, StringComparison.Ordinal);
     var postCommandRefreshIndex = source.IndexOf("await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken)", commandIndex, StringComparison.Ordinal);
+    var readSensorsIndex = source.IndexOf("var readings = await _ipmi.ReadSensorsAsync(profile, cancellationToken)", tickStartIndex, StringComparison.Ordinal);
+    var clearStaleIndex = source.IndexOf("ClearStaleFailureStatusAfterSensorRefreshSuccess();", readSensorsIndex, StringComparison.Ordinal);
 
     Require(
         tickStartIndex >= 0 &&
@@ -444,12 +723,23 @@ static void RunAutoPolicyUnchangedTargetSkipSourceChecks()
         source.Contains("BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, \"SkipUnchangedFanPercent\")", StringComparison.Ordinal) &&
         source.Contains("ClearAutoPolicyFanTargetCache();", StringComparison.Ordinal),
         "Unchanged auto-policy skips should be logged explicitly, and manual/Dell/stop paths should clear the cached automatic fan target.");
+    Require(
+        source.Contains("ForceNextAutoPolicyFanCommand();", StringComparison.Ordinal) &&
+        source.Contains("!_forceNextAutoPolicyFanCommand", StringComparison.Ordinal) &&
+        source.Contains("[\"forceFanCommand\"] = _forceNextAutoPolicyFanCommand.ToString(CultureInfo.InvariantCulture)", StringComparison.Ordinal) &&
+        source.Contains("ClearForcedAutoPolicyFanCommand();", StringComparison.Ordinal),
+        "Starting or restoring an automatic policy should force the first fan command so a stale in-memory target cannot mask the real BMC state.");
+    Require(
+        readSensorsIndex > tickStartIndex &&
+        clearStaleIndex > readSensorsIndex &&
+        clearStaleIndex < skipIndex,
+        "A successful auto-policy SDR read should clear stale top-level failure banners before any unchanged-target skip can return.");
 }
 
 static void RunAutoPolicyFailureContextSourceChecks()
 {
     var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
-    var autoPolicyStart = source.IndexOf("private async Task RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
+    var autoPolicyStart = source.IndexOf("private async Task<bool> RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
     var autoPolicyEnd = source.IndexOf("private int CalculateAutoFanPercent", autoPolicyStart, StringComparison.Ordinal);
     var autoPolicyBody = autoPolicyStart >= 0 && autoPolicyEnd > autoPolicyStart
         ? source[autoPolicyStart..autoPolicyEnd]
@@ -624,6 +914,7 @@ static void RunHeroThermalModeStatusXamlChecks()
 static void RunNoPartialOverviewDisplaySourceChecks()
 {
     var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var overviewBody = ExtractMethodBody(source, "UpdateOverviewMetricSummaries");
 
     Require(
         !source.Contains(".Take(14)", StringComparison.Ordinal),
@@ -631,6 +922,18 @@ static void RunNoPartialOverviewDisplaySourceChecks()
     Require(
         !source.Contains("items.Take(2)", StringComparison.Ordinal),
         "Overview summary detail text should display every item it receives instead of only the first two.");
+    Require(
+        overviewBody.Contains("SensorReadingAvailability.IsDisplayable", StringComparison.Ordinal),
+        "Overview tiles and summaries should exclude unavailable SDR rows through the shared display-only availability policy.");
+    Require(
+        overviewBody.Contains("!IsTemperatureSensor(sensor) && !IsFanSensor(sensor)", StringComparison.Ordinal),
+        "The status board should include every valid non-temperature/non-fan SDR item instead of a partial power/health allow-list.");
+    Require(
+        source.Contains("var sensors = Sensors.Where(SensorReadingAvailability.IsDisplayable).ToList();", StringComparison.Ordinal),
+        "Chart snapshots should use the same real valid SDR rows as native boards without changing the raw control-data collection.");
+    Require(
+        source.Contains("foreach (var sensor in Sensors.Where(SensorReadingAvailability.IsDisplayable))", StringComparison.Ordinal),
+        "The detailed sensor table should list every valid SDR row and omit unavailable rows.");
 }
 
 static void RunDashboardTileInPlaceUpdateChecks()
@@ -648,6 +951,53 @@ static void RunDashboardTileInPlaceUpdateChecks()
         tileSource.Contains("OnPropertyChanged(nameof(ValueBrush))", StringComparison.Ordinal) &&
         tileSource.Contains("OnPropertyChanged(nameof(IconBackgroundBrush))", StringComparison.Ordinal),
         "Dashboard tile view model should notify brush bindings when color hex values change.");
+    var presentationProperties = new[]
+    {
+        (Type: "DashboardIconKind", Name: "IconKind", Field: "_iconKind"),
+        (Type: "DashboardVisualState", Name: "VisualState", Field: "_visualState"),
+        (Type: "DashboardMotionKind", Name: "MotionKind", Field: "_motionKind"),
+        (Type: "double", Name: "NormalizedLevel", Field: "_normalizedLevel"),
+        (Type: "double", Name: "MotionPeriodSeconds", Field: "_motionPeriodSeconds"),
+        (Type: "bool", Name: "IsMotionActive", Field: "_isMotionActive"),
+        (Type: "bool", Name: "IsDataFresh", Field: "_isDataFresh"),
+    };
+    Require(
+        presentationProperties.All(property =>
+            tileSource.Contains($"public {property.Type} {property.Name}", StringComparison.Ordinal) &&
+            tileSource.Contains($"set => SetField(ref {property.Field}, value);", StringComparison.Ordinal)),
+        "Dashboard tile presentation properties should notify bindings through SetField.");
+    Require(
+        tileSource.Contains("private DashboardIconKind _iconKind = DashboardIconKind.GenericStatus;", StringComparison.Ordinal) &&
+        tileSource.Contains("private DashboardVisualState _visualState = DashboardVisualState.Unavailable;", StringComparison.Ordinal) &&
+        tileSource.Contains("private DashboardMotionKind _motionKind = DashboardMotionKind.None;", StringComparison.Ordinal),
+        "Dashboard tile presentation should default to a neutral unavailable icon with no motion.");
+    Require(
+        presentationProperties.All(property =>
+            tileSource.Contains($"{property.Name} = next.{property.Name};", StringComparison.Ordinal)),
+        "Dashboard tile in-place updates should copy every presentation and freshness property.");
+    var legacyTileAnimationMembers = new[]
+    {
+        "TemperatureIconOpacity",
+        "FanIconOpacity",
+        "PowerIconOpacity",
+        "VoltageIconOpacity",
+        "CurrentIconOpacity",
+        "HealthIconOpacity",
+        "IsFanAnimated",
+        "FanRotationSeconds",
+        "ElectricalIconOpacity",
+        "IsElectricalAnimated",
+        "ElectricalPulseSeconds",
+    };
+    Require(
+        legacyTileAnimationMembers.All(member => !tileSource.Contains(member, StringComparison.Ordinal)),
+        "DashboardTileViewModel should remove every page-level opacity, storyboard, and legacy animation property after Composition owns motion.");
+    Require(
+        tileSource.Contains("public string AutomationVisualStateText", StringComparison.Ordinal) &&
+        tileSource.Contains("public string AutomationFreshnessText", StringComparison.Ordinal) &&
+        tileSource.Contains("AutomationVisualStateText = next.AutomationVisualStateText;", StringComparison.Ordinal) &&
+        tileSource.Contains("AutomationFreshnessText = next.AutomationFreshnessText;", StringComparison.Ordinal),
+        "Dashboard tile updates should carry localized semantic and freshness text into the computed automation name.");
 
     var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
     Require(
@@ -656,11 +1006,516 @@ static void RunDashboardTileInPlaceUpdateChecks()
     Require(
         source.Contains(".UpdateFrom(nextTile)", StringComparison.Ordinal),
         "Dashboard tile refresh should update existing tile view models in place when sensor identity is unchanged.");
+
+    var buildTileStart = source.IndexOf(
+        "private DashboardTileViewModel BuildDashboardTile(SensorReading sensor)",
+        StringComparison.Ordinal);
+    var buildTileEnd = source.IndexOf(
+        "private string BuildDashboardTileValue(SensorReading sensor)",
+        buildTileStart,
+        StringComparison.Ordinal);
+    Require(
+        buildTileStart >= 0 && buildTileEnd > buildTileStart,
+        "Dashboard tile construction source should remain discoverable for presentation integration checks.");
+    var buildTileBody = source[buildTileStart..buildTileEnd];
+    Require(
+        CountOccurrences(buildTileBody, "DashboardSensorPresentation.FromSensor(sensor)") == 1,
+        "Dashboard tile construction should resolve sensor presentation exactly once per tile.");
+    Require(
+        new[]
+        {
+            "IconKind = presentation.IconKind,",
+            "VisualState = presentation.VisualState,",
+            "MotionKind = presentation.MotionKind,",
+            "NormalizedLevel = presentation.NormalizedLevel,",
+            "MotionPeriodSeconds = presentation.MotionPeriodSeconds,",
+            "IsMotionActive = presentation.IsMotionActive,",
+            "IsDataFresh = _dashboardSnapshotFreshness.IsFresh,",
+            "AutomationVisualStateText = GetDashboardAutomationVisualStateText(presentation.VisualState),",
+            "AutomationFreshnessText = _dashboardSnapshotFreshness.IsFresh ? string.Empty : T(\"State.Disconnected\"),",
+            "AccentHex = presentation.AccentHex,",
+            "ValueHex = presentation.AccentHex,",
+        }.All(fragment => buildTileBody.Contains(fragment, StringComparison.Ordinal)),
+        "Dashboard tile construction should copy the resolved presentation and mark successful snapshot data fresh.");
+    Require(
+        !buildTileBody.Contains("IsDataFresh = true", StringComparison.Ordinal),
+        "Dashboard tile construction should use snapshot freshness instead of marking cached sensor data fresh.");
+    Require(
+        legacyTileAnimationMembers.All(member => !buildTileBody.Contains(member, StringComparison.Ordinal)) &&
+        !buildTileBody.Contains("CalculateFanRotationSeconds", StringComparison.Ordinal) &&
+        !buildTileBody.Contains("CalculateElectricalPulseSeconds", StringComparison.Ordinal),
+        "Dashboard tile construction should pass only presentation fields and leave all motion to DashboardSensorIcon.");
+
+    var automationVisualStateBody = ExtractMethodBody(source, "GetDashboardAutomationVisualStateText");
+    Require(
+        automationVisualStateBody.Contains("DashboardVisualState.Information => T(\"Log.Info\")", StringComparison.Ordinal) &&
+        automationVisualStateBody.Contains("DashboardVisualState.Inactive => T(\"SensorValue.Inactive\")", StringComparison.Ordinal) &&
+        automationVisualStateBody.Contains("DashboardVisualState.Unavailable => T(\"SensorValue.Unknown\")", StringComparison.Ordinal) &&
+        automationVisualStateBody.Contains("DashboardVisualState.Warning => T(\"Log.Warn\")", StringComparison.Ordinal) &&
+        automationVisualStateBody.Contains("DashboardVisualState.Critical => T(\"Log.Error\")", StringComparison.Ordinal) &&
+        automationVisualStateBody.Contains("DashboardVisualState.Normal => string.Empty", StringComparison.Ordinal),
+        "Dashboard accessibility state text should announce inactive, information, unknown, warning, and error states while omitting only normal noise.");
+
+    var freshnessBody = ExtractMethodBody(source, "SetDashboardTileFreshness");
+    Require(
+        freshnessBody.Contains("_dashboardSnapshotFreshness.MarkStale();", StringComparison.Ordinal) &&
+        freshnessBody.Contains("TemperatureTiles", StringComparison.Ordinal) &&
+        freshnessBody.Contains("FanTiles", StringComparison.Ordinal) &&
+        freshnessBody.Contains("PowerTiles", StringComparison.Ordinal) &&
+        freshnessBody.Contains("tile.IsDataFresh = isFresh;", StringComparison.Ordinal) &&
+        freshnessBody.Contains("tile.AutomationFreshnessText = isFresh ? string.Empty : T(\"State.Disconnected\");", StringComparison.Ordinal),
+        "Dashboard freshness updates should cover every existing dashboard tile collection.");
+    Require(
+        !freshnessBody.Contains("ReplaceTiles(", StringComparison.Ordinal) &&
+        !freshnessBody.Contains(".Clear(", StringComparison.Ordinal) &&
+        !freshnessBody.Contains(".Add(", StringComparison.Ordinal),
+        "Dashboard freshness updates should not rebuild retained tile collections.");
+
+    var replaceSensorsBody = ExtractMethodBody(source, "ReplaceSensors");
+    Require(
+        source.Contains("private readonly DashboardSnapshotFreshness _dashboardSnapshotFreshness = new();", StringComparison.Ordinal) &&
+        replaceSensorsBody.Contains("_dashboardSnapshotFreshness.MarkFresh();", StringComparison.Ordinal) &&
+        CountOccurrences(source, "_dashboardSnapshotFreshness.MarkFresh();") == 1,
+        "Only a real sensor snapshot replacement should mark dashboard data fresh before cached tiles are rebuilt.");
+    Require(
+        !source.Contains("GetDashboardTileStyle(", StringComparison.Ordinal),
+        "Dashboard tile construction should not retain the obsolete severity helper after presentation resolution replaces it.");
+
+    var stopPollingBody = ExtractMethodBody(source, "StopSensorPolling");
+    var timerStopIndex = stopPollingBody.IndexOf("_sensorPollingTimer.Stop();", StringComparison.Ordinal);
+    var disconnectedIndex = stopPollingBody.IndexOf("_hasDisconnected = true;", StringComparison.Ordinal);
+    var markStaleIndex = stopPollingBody.IndexOf("SetDashboardTileFreshness(false);", StringComparison.Ordinal);
+    Require(
+        timerStopIndex >= 0 &&
+        disconnectedIndex > timerStopIndex &&
+        markStaleIndex > disconnectedIndex,
+        "Stopping sensor polling should mark retained dashboard tiles stale after the timer and disconnect state are updated.");
+}
+
+static void RunDashboardTileViewModelBehaviorChecks()
+{
+    var tile = new DashboardTileViewModel();
+    var changedProperties = new List<string?>();
+    tile.PropertyChanged += (_, args) => changedProperties.Add(args.PropertyName);
+
+    var assignments = new (string PropertyName, Action Assign)[]
+    {
+        (nameof(DashboardTileViewModel.IconKind), () => tile.IconKind = DashboardIconKind.Fan),
+        (nameof(DashboardTileViewModel.VisualState), () => tile.VisualState = DashboardVisualState.Warning),
+        (nameof(DashboardTileViewModel.MotionKind), () => tile.MotionKind = DashboardMotionKind.FanRotation),
+        (nameof(DashboardTileViewModel.NormalizedLevel), () => tile.NormalizedLevel = 0.5),
+        (nameof(DashboardTileViewModel.MotionPeriodSeconds), () => tile.MotionPeriodSeconds = 0.4),
+        (nameof(DashboardTileViewModel.IsMotionActive), () => tile.IsMotionActive = true),
+        (nameof(DashboardTileViewModel.IsDataFresh), () => tile.IsDataFresh = true),
+    };
+    foreach (var assignment in assignments)
+    {
+        var beforeChange = changedProperties.Count;
+        assignment.Assign();
+        Require(
+            changedProperties.Count == beforeChange + 1 &&
+            changedProperties[^1] == assignment.PropertyName,
+            $"Changing {assignment.PropertyName} should raise PropertyChanged exactly once for that property.");
+
+        assignment.Assign();
+        Require(
+            changedProperties.Count == beforeChange + 1,
+            $"Assigning the same {assignment.PropertyName} value should not raise PropertyChanged again.");
+    }
+
+    changedProperties.Clear();
+    tile.AccentHex = "#FF123456";
+    Require(
+        changedProperties.SequenceEqual(
+        [
+            nameof(DashboardTileViewModel.AccentHex),
+            nameof(DashboardTileViewModel.AccentBrush),
+            nameof(DashboardTileViewModel.IconBackgroundBrush),
+        ]),
+        "Changing AccentHex should notify the hex value and both dependent brushes exactly once.");
+
+    var accessibleTile = new DashboardTileViewModel
+    {
+        Title = "CPU 1 Temp",
+        Value = "64",
+        Unit = "degrees C",
+        Status = "ok",
+    };
+    Require(
+        accessibleTile.AutomationName == "CPU 1 Temp, 64 degrees C, ok",
+        "Dashboard tile automation names should combine title, value with unit, and status into one concise announcement.");
+
+    var accessibilityNotifications = new List<string?>();
+    accessibleTile.PropertyChanged += (_, args) => accessibilityNotifications.Add(args.PropertyName);
+    var accessibleAssignments = new (string PropertyName, Action Assign, string ExpectedName)[]
+    {
+        (nameof(DashboardTileViewModel.Title), () => accessibleTile.Title = "CPU 2 Temp", "CPU 2 Temp, 64 degrees C, ok"),
+        (nameof(DashboardTileViewModel.Value), () => accessibleTile.Value = "67", "CPU 2 Temp, 67 degrees C, ok"),
+        (nameof(DashboardTileViewModel.Unit), () => accessibleTile.Unit = "C", "CPU 2 Temp, 67 C, ok"),
+        (nameof(DashboardTileViewModel.Status), () => accessibleTile.Status = "warning", "CPU 2 Temp, 67 C, warning"),
+    };
+    foreach (var assignment in accessibleAssignments)
+    {
+        accessibilityNotifications.Clear();
+        assignment.Assign();
+        Require(
+            accessibilityNotifications.SequenceEqual(
+            [
+                assignment.PropertyName,
+                nameof(DashboardTileViewModel.AutomationName),
+            ]) &&
+            accessibleTile.AutomationName == assignment.ExpectedName,
+            $"Changing {assignment.PropertyName} should notify its dependent automation name exactly once.");
+
+        accessibilityNotifications.Clear();
+        assignment.Assign();
+        Require(
+            accessibilityNotifications.Count == 0,
+            $"Assigning the same {assignment.PropertyName} should not repeat its automation-name notification.");
+    }
+
+    var staleCriticalTile = new DashboardTileViewModel
+    {
+        Title = "Voltage 1",
+        Value = "180",
+        Unit = "Volts",
+        Status = "critical",
+        AutomationVisualStateText = "Error",
+        AutomationFreshnessText = "Disconnected",
+    };
+    Require(
+        staleCriticalTile.AutomationName == "Voltage 1, 180 Volts, critical, Error, Disconnected",
+        "Dashboard automation names should announce both the semantic critical state and stale/disconnected freshness.");
+
+    var semanticNotifications = new List<string?>();
+    staleCriticalTile.PropertyChanged += (_, args) => semanticNotifications.Add(args.PropertyName);
+    staleCriticalTile.AutomationVisualStateText = "Warn";
+    Require(
+        semanticNotifications.SequenceEqual(
+        [
+            nameof(DashboardTileViewModel.AutomationVisualStateText),
+            nameof(DashboardTileViewModel.AutomationName),
+        ]) &&
+        staleCriticalTile.AutomationName == "Voltage 1, 180 Volts, critical, Warn, Disconnected",
+        "Changing localized semantic automation text should notify the field and computed automation name exactly once.");
+
+    semanticNotifications.Clear();
+    staleCriticalTile.AutomationFreshnessText = string.Empty;
+    Require(
+        semanticNotifications.SequenceEqual(
+        [
+            nameof(DashboardTileViewModel.AutomationFreshnessText),
+            nameof(DashboardTileViewModel.AutomationName),
+        ]) &&
+        staleCriticalTile.AutomationName == "Voltage 1, 180 Volts, critical, Warn",
+        "Clearing stale automation text after a fresh snapshot should notify Narrator and remove the disconnected announcement.");
+
+    var existing = new DashboardTileViewModel { Id = "sensor-1" };
+    var tiles = new List<DashboardTileViewModel> { existing };
+    var next = new DashboardTileViewModel
+    {
+        Id = "sensor-1",
+        IconKind = DashboardIconKind.Power,
+        VisualState = DashboardVisualState.Critical,
+        MotionKind = DashboardMotionKind.WarningPulse,
+        NormalizedLevel = 0.75,
+        MotionPeriodSeconds = 1.25,
+        IsMotionActive = true,
+        IsDataFresh = true,
+        AutomationVisualStateText = "Error",
+        AutomationFreshnessText = "Disconnected",
+    };
+
+    tiles[0].UpdateFrom(next);
+    Require(ReferenceEquals(existing, tiles[0]), "Dashboard tile refresh should preserve the bound tile object identity.");
+    Require(
+        existing.IconKind == next.IconKind &&
+        existing.VisualState == next.VisualState &&
+        existing.MotionKind == next.MotionKind &&
+        existing.NormalizedLevel == next.NormalizedLevel &&
+        existing.MotionPeriodSeconds == next.MotionPeriodSeconds &&
+        existing.IsMotionActive == next.IsMotionActive &&
+        existing.IsDataFresh == next.IsDataFresh &&
+        existing.AutomationVisualStateText == next.AutomationVisualStateText &&
+        existing.AutomationFreshnessText == next.AutomationFreshnessText,
+        "Dashboard tile in-place refresh should copy every presentation and freshness value.");
+}
+
+static void RunDashboardSensorIconXamlChecks()
+{
+    var controlPath = FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml"));
+    var controlSource = File.ReadAllText(controlPath);
+    var controlCode = File.ReadAllText(FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml.cs")));
+    var controlXaml = XDocument.Parse(controlSource);
+    var mainPageXaml = XDocument.Load(FindRepositoryFile("MainPage.xaml"));
+    XNamespace ui = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+    XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+    XNamespace controls = "using:DellR730xdFanControlCenter.Controls";
+
+    var root = controlXaml.Root ?? throw new InvalidOperationException("DashboardSensorIcon XAML should have a root element.");
+    Require(
+        root.Name == ui + "UserControl" &&
+        root.Attribute(x + "Name")?.Value == "Root" &&
+        root.Attribute("AutomationProperties.AccessibilityView")?.Value == "Raw",
+        "DashboardSensorIcon should expose one Raw automation root so the named card remains the only Narrator content element.");
+    var boundVectorBrushes = controlXaml
+        .Descendants()
+        .Attributes()
+        .Where(attribute =>
+            (attribute.Name.LocalName == "Fill" || attribute.Name.LocalName == "Stroke") &&
+            attribute.Value.StartsWith("{Binding ", StringComparison.Ordinal))
+        .Select(attribute => attribute.Value)
+        .ToArray();
+    Require(
+        boundVectorBrushes.Length > 0 &&
+        boundVectorBrushes.All(value => value == "{Binding EffectiveAccentBrush, ElementName=Root}") &&
+        !controlSource.Contains("{Binding AccentBrush, ElementName=Root}", StringComparison.Ordinal),
+        "DashboardSensorIcon vectors should bind to EffectiveAccentBrush so high contrast can replace semantic colors with the system foreground.");
+
+    var primaryGroupNames = Enum.GetNames<DashboardIconKind>()
+        .Select(kind => $"{kind}Group")
+        .ToArray();
+    foreach (var groupName in primaryGroupNames)
+    {
+        var group = controlXaml
+            .Descendants(ui + "Grid")
+            .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == groupName);
+        Require(
+            group?.Attribute("Visibility")?.Value == "Collapsed",
+            $"DashboardSensorIcon should declare {groupName} once and keep it collapsed until IconKind selects it.");
+    }
+
+    var storageGroupNames = new[] { "StorageDriveGroup", "RaidControllerGroup", "StorageCacheGroup" };
+    Require(
+        storageGroupNames.All(groupName => controlXaml
+            .Descendants(ui + "Grid")
+            .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == groupName)?
+            .Attribute("Visibility")?.Value == "Collapsed"),
+        "Drive, RAID controller, and cache sensors should each have a dedicated vector icon group.");
+    Require(
+        storageGroupNames.All(groupName => controlCode.Contains($"DashboardIconKind.{groupName[..^5]} => {groupName}", StringComparison.Ordinal)),
+        "DashboardSensorIcon should route each storage icon kind to its matching vector group.");
+
+    var fanRotor = controlXaml
+        .Descendants(ui + "Grid")
+        .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == "FanRotor");
+    var fanPath = fanRotor?
+        .Descendants(ui + "Path")
+        .Select(element => element.Attribute("Data")?.Value ?? string.Empty)
+        .SingleOrDefault(data => data.StartsWith("M12,3 C13.8", StringComparison.Ordinal)) ?? string.Empty;
+    Require(
+        fanRotor?.Attribute("Width")?.Value == "24" &&
+        fanRotor.Attribute("Height")?.Value == "24" &&
+        fanRotor.Attribute("RenderTransformOrigin") is null &&
+        fanPath.Contains(" M21,12 ", StringComparison.Ordinal) &&
+        fanPath.Contains(" M3,12 ", StringComparison.Ordinal),
+        "DashboardSensorIcon should preserve the centered 24x24 four-blade FanRotor geometry without a competing XAML transform origin.");
+
+    Require(
+        controlXaml.Descendants().Any(element => element.Attribute(x + "Name")?.Value == "TemperatureLevel"),
+        "Temperature icon should expose a named TemperatureLevel for level scaling.");
+    var utilizationShapes = new[] { "CpuUsageGroup", "MemoryUsageGroup", "IoUsageGroup", "SystemUsageGroup" }
+        .Select(groupName => controlXaml
+            .Descendants(ui + "Grid")
+            .Single(element => element.Attribute(x + "Name")?.Value == groupName)
+            .Descendants(ui + "Path")
+            .Select(path => path.Attribute("Data")?.Value ?? string.Empty)
+            .Where(data => !string.IsNullOrWhiteSpace(data))
+            .Aggregate(string.Empty, (current, data) => current + "|" + data))
+        .ToArray();
+    Require(
+        utilizationShapes.All(shape => !string.IsNullOrWhiteSpace(shape)) &&
+        utilizationShapes.Distinct(StringComparer.Ordinal).Count() == utilizationShapes.Length,
+        "CPU, memory, IO, and system utilization icons should use four distinct vector silhouettes.");
+
+    Require(
+        controlXaml.Descendants(ui + "Path").Any(element => element.Attribute(x + "Name")?.Value == "VoltageNeedle") &&
+        controlXaml.Descendants().Any(element => element.Attribute(x + "Name")?.Value == "CurrentFlowMarker") &&
+        controlXaml.Descendants().Any(element => element.Attribute(x + "Name")?.Value == "PowerActivityElement"),
+        "Voltage, current, and power icons should expose their named motion targets for the later Composition layer.");
+
+    var outerRing = controlXaml
+        .Descendants(ui + "Ellipse")
+        .Single(element => element.Attribute(x + "Name")?.Value == "OuterRing");
+    Require(
+        outerRing.Attribute("Width")?.Value == "22" && outerRing.Attribute("Height")?.Value == "22",
+        "The sensor icon outer ring should stay inside the 24x24 viewport so its stroke is not clipped.");
+
+    var voltageNeedle = controlXaml
+        .Descendants(ui + "Path")
+        .Single(element => element.Attribute(x + "Name")?.Value == "VoltageNeedle");
+    Require(
+        voltageNeedle.Attribute("RenderTransformOrigin") is null &&
+        voltageNeedle.Element(ui + "Path.RenderTransform") is null &&
+        !controlXaml.Descendants(ui + "RotateTransform").Any(),
+        "VoltageNeedle should leave rotation entirely to Composition without a competing XAML RotateTransform.");
+    Require(
+        !controlXaml.Descendants(ui + "ScaleTransform").Any(),
+        "Level fills should leave scaling entirely to Composition without competing XAML ScaleTransforms.");
+
+    var badgeGroupNames = new[]
+    {
+        "NormalBadgeGroup",
+        "InformationBadgeGroup",
+        "InactiveBadgeGroup",
+        "UnavailableBadgeGroup",
+        "WarningBadgeGroup",
+        "CriticalBadgeGroup",
+        "StaleBadgeGroup",
+    };
+    foreach (var groupName in badgeGroupNames)
+    {
+        var group = controlXaml
+            .Descendants(ui + "Grid")
+            .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == groupName);
+        Require(
+            group?.Attribute("Visibility")?.Value == "Collapsed" &&
+            group.Descendants().Any(element => element.Name == ui + "Path" || element.Name == ui + "Ellipse"),
+            $"DashboardSensorIcon should define a collapsed vector {groupName} status badge.");
+    }
+
+    var distinctiveBadgePaths = new[]
+    {
+        "UnavailableBadgeGroup",
+        "CriticalBadgeGroup",
+        "StaleBadgeGroup",
+    }
+        .Select(groupName => controlXaml
+            .Descendants(ui + "Grid")
+            .Single(element => element.Attribute(x + "Name")?.Value == groupName)
+            .Descendants(ui + "Path")
+            .Select(path => path.Attribute("Data")?.Value ?? string.Empty)
+            .Where(data => !string.IsNullOrWhiteSpace(data))
+            .Aggregate(string.Empty, (current, data) => current + "|" + data))
+        .ToArray();
+    Require(
+        distinctiveBadgePaths.All(pathData => !string.IsNullOrWhiteSpace(pathData)) &&
+        distinctiveBadgePaths.Distinct(StringComparer.Ordinal).Count() == distinctiveBadgePaths.Length,
+        "Unavailable, critical, and stale badges should have distinct question-mark, exclamation, and clock path semantics.");
+
+    var dependencyProperties = new[]
+    {
+        "AccentBrush",
+        "IconKind",
+        "VisualState",
+        "MotionKind",
+        "NormalizedLevel",
+        "MotionPeriodSeconds",
+        "IsMotionActive",
+        "IsDataFresh",
+    };
+    Require(
+        dependencyProperties.All(property =>
+            controlCode.Contains($"{property}Property = DependencyProperty.Register(", StringComparison.Ordinal) &&
+            controlCode.Contains($"nameof({property})", StringComparison.Ordinal)),
+        "DashboardSensorIcon should expose every tile presentation input as a dependency property.");
+    Require(
+        controlCode.Contains("private static readonly DependencyProperty EffectiveAccentBrushProperty", StringComparison.Ordinal) &&
+        controlCode.Contains("nameof(EffectiveAccentBrush)", StringComparison.Ordinal) &&
+        controlCode.Contains("typeof(Brush)", StringComparison.Ordinal) &&
+        controlCode.Contains("ThemeSettings.CreateForWindowId", StringComparison.Ordinal) &&
+        controlCode.Contains("_themeSettings.HighContrast", StringComparison.Ordinal) &&
+        !controlCode.Contains("AccessibilitySettings", StringComparison.Ordinal) &&
+        controlCode.Contains("UIColorType.Foreground", StringComparison.Ordinal) &&
+        controlCode.Contains("EffectiveAccentBrush = _isHighContrast ? _systemForegroundBrush : AccentBrush;", StringComparison.Ordinal),
+        "DashboardSensorIcon should use per-window ThemeSettings and the current system foreground for its effective high-contrast brush.");
+    Require(
+        controlCode.Contains("private readonly UIElement[] _primaryGroups;", StringComparison.Ordinal) &&
+        controlCode.Contains("private readonly UIElement[] _badgeGroups;", StringComparison.Ordinal) &&
+        controlCode.Contains("private bool _visualUpdateQueued;", StringComparison.Ordinal) &&
+        controlCode.Contains("private bool _isLoaded;", StringComparison.Ordinal) &&
+        controlCode.Contains("private long _lifecycleGeneration;", StringComparison.Ordinal) &&
+        controlCode.Contains("control.QueueVisualUpdate();", StringComparison.Ordinal) &&
+        !controlCode.Contains("control.ApplyVisuals();", StringComparison.Ordinal) &&
+        controlCode.Contains("DispatcherQueue.TryEnqueue", StringComparison.Ordinal) &&
+        controlCode.Contains("generation != _lifecycleGeneration", StringComparison.Ordinal) &&
+        controlCode.Contains("foreach (var group in _primaryGroups)", StringComparison.Ordinal) &&
+        controlCode.Contains("foreach (var group in _badgeGroups)", StringComparison.Ordinal) &&
+        !controlCode.Contains("foreach (var group in new UIElement[]", StringComparison.Ordinal),
+        "DashboardSensorIcon should cache visual groups and coalesce dependency-property callbacks through one DispatcherQueue visual update.");
+    Require(
+        controlCode.Contains("StartAnimation(\"Scale\"", StringComparison.Ordinal) &&
+        controlCode.Contains("StartAnimation(\"RotationAngleInDegrees\"", StringComparison.Ordinal) &&
+        controlCode.Contains("MotionKind == DashboardMotionKind.GaugeTransition", StringComparison.Ordinal),
+        "Composition should transition level Scale and the trusted voltage gauge angle while unit-only MotionKind.None stays static.");
+    Require(
+        controlCode.Contains("private const double StaleIconOpacity = 0.65;", StringComparison.Ordinal) &&
+        controlCode.Contains("IconLayer.Opacity = !IsDataFresh && !_isHighContrast ? StaleIconOpacity : 1;", StringComparison.Ordinal) &&
+        controlCode.Contains("foreach (var group in _badgeGroups)", StringComparison.Ordinal) &&
+        controlCode.Contains("StaleBadgeGroup.Visibility = Visibility.Visible;", StringComparison.Ordinal),
+        "Stale dashboard data should remain fully opaque in high contrast, use at least 0.65 opacity otherwise, and force the dedicated clock badge.");
+    Require(
+        !controlSource.Contains("Storyboard", StringComparison.Ordinal) &&
+        !controlSource.Contains("EnableDependentAnimation", StringComparison.Ordinal) &&
+        !controlCode.Contains("Storyboard", StringComparison.Ordinal) &&
+        !controlCode.Contains("EnableDependentAnimation", StringComparison.Ordinal),
+        "DashboardSensorIcon Task 3 should apply static visuals only, without XAML storyboards or dependent animation.");
+
+    var hardwareTileTemplate = mainPageXaml
+        .Descendants(ui + "DataTemplate")
+        .Single(element => element.Attribute(x + "Key")?.Value == "HardwareTileTemplate");
+    var icon = hardwareTileTemplate.Descendants(controls + "DashboardSensorIcon").SingleOrDefault();
+    Require(icon is not null, "HardwareTileTemplate should render the reusable DashboardSensorIcon control.");
+    foreach (var property in dependencyProperties)
+    {
+        Require(
+            icon!.Attribute(property)?.Value == $"{{Binding {property}}}",
+            $"HardwareTileTemplate should bind DashboardSensorIcon.{property} to the tile view model.");
+    }
+
+    var templateSource = hardwareTileTemplate.ToString(SaveOptions.DisableFormatting);
+    Require(
+        !new[]
+        {
+            "TemperatureIconOpacity",
+            "FanIconOpacity",
+            "PowerIconOpacity",
+            "VoltageIconOpacity",
+            "CurrentIconOpacity",
+            "HealthIconOpacity",
+            "OnDashboardTileFanIcon",
+            "OnDashboardTileElectricalIcon",
+        }.Any(fragment => templateSource.Contains(fragment, StringComparison.Ordinal)),
+        "HardwareTileTemplate should not retain the old opacity icon stack or page-level icon event handlers.");
+    var automationPresenter = hardwareTileTemplate.Elements(ui + "ContentControl").Single();
+    Require(
+        automationPresenter.Attribute("AutomationProperties.AccessibilityView")?.Value == "Content" &&
+        automationPresenter.Attribute("AutomationProperties.Name")?.Value == "{Binding AutomationName}",
+        "The hardware card should expose one named ContentControl automation peer.");
+    Require(
+        automationPresenter.Elements(ui + "Border").Single().Attribute("AutomationProperties.AccessibilityView")?.Value == "Raw",
+        "The visual border inside the named card presenter should stay out of the Content automation view.");
+    Require(
+        !mainPageXaml.Descendants(ui + "DataTemplate").Any(element => element.Attribute(x + "Key")?.Value == "HardwareStatusRowTemplate"),
+        "The unused HardwareStatusRowTemplate should be removed rather than keeping a second obsolete icon implementation.");
+}
+
+static void RunDashboardSnapshotFreshnessChecks()
+{
+    var freshness = new DashboardSnapshotFreshness();
+    Require(!freshness.IsFresh, "Dashboard snapshot freshness should start stale before the first successful SDR read.");
+
+    freshness.MarkFresh();
+    Require(freshness.IsFresh, "A successful sensor replacement should mark the dashboard snapshot fresh.");
+
+    freshness.MarkStale();
+    var cachedRebuild = new DashboardTileViewModel { IsDataFresh = freshness.IsFresh };
+    Require(
+        !cachedRebuild.IsDataFresh,
+        "Rebuilding a tile from cached sensors after polling stops should keep the tile stale.");
+
+    freshness.MarkFresh();
+    var refreshedTile = new DashboardTileViewModel { IsDataFresh = freshness.IsFresh };
+    Require(
+        refreshedTile.IsDataFresh,
+        "Building a tile after a real successful sensor replacement should mark the tile fresh.");
 }
 
 static void RunFanIconXamlChecks()
 {
     var xaml = XDocument.Load(FindRepositoryFile("MainPage.xaml"));
+    var controlXaml = XDocument.Load(FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml")));
+    var controlSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml.cs")));
     XNamespace ui = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
     const string oldShareLikeFanPath = "M12,2 C14.2,2";
@@ -671,13 +1526,10 @@ static void RunFanIconXamlChecks()
     var fanNavigationIcon = fanNavigationItem.Descendants(ui + "PathIcon").Single();
     var fanNavigationPath = fanNavigationIcon.Attribute("Data")?.Value ?? string.Empty;
 
-    var hardwareTileTemplate = xaml
-        .Descendants(ui + "DataTemplate")
-        .Single(element => element.Attribute(x + "Key")?.Value == "HardwareTileTemplate");
-    var fanTileRotor = hardwareTileTemplate
+    var fanTileRotor = controlXaml
         .Descendants(ui + "Grid")
-        .Single(element => element.Attribute(x + "Name")?.Value == "FanTileRotor");
-    var fanTilePath = hardwareTileTemplate
+        .Single(element => element.Attribute(x + "Name")?.Value == "FanRotor");
+    var fanTilePath = controlXaml
         .Descendants(ui + "Path")
         .Select(element => element.Attribute("Data")?.Value ?? string.Empty)
         .SingleOrDefault(data => data.StartsWith("M12,3 C13.8", StringComparison.Ordinal)) ?? string.Empty;
@@ -687,8 +1539,9 @@ static void RunFanIconXamlChecks()
         fanTileRotor.Attribute("Height")?.Value == "24",
         "Fan RPM dashboard rotor should use the same 24x24 box as the fan path so rotation stays centered.");
     Require(
-        fanTileRotor.Attribute("RenderTransformOrigin")?.Value == "0.5,0.5",
-        "Fan RPM dashboard rotor should rotate around the center of its 24x24 box.");
+        fanTileRotor.Attribute("RenderTransformOrigin") is null &&
+        controlSource.Contains("_fanVisual.CenterPoint = new Vector3(12, 12, 0);", StringComparison.Ordinal),
+        "Fan RPM dashboard rotor should use the Composition center of its 24x24 box without a competing XAML origin.");
     Require(
         !string.IsNullOrWhiteSpace(fanTilePath),
         "Fan RPM dashboard tiles should keep the previous centered four-blade fan path inline.");
@@ -699,22 +1552,26 @@ static void RunFanIconXamlChecks()
         "Fan RPM dashboard tiles should keep the previous horizontal/vertical centered fan geometry.");
     Require(
         fanNavigationPath != fanTilePath,
-        "Fan control navigation icon can differ from the Fan RPM dashboard icon; only the navigation icon should use the X-arranged blade geometry.");
+        "Fan control navigation icon should add a compact fan housing while keeping the dashboard rotor visually distinct.");
     Require(
-        fanNavigationPath.Contains("M13.55,10.45", StringComparison.Ordinal) &&
-        fanNavigationPath.Contains("19.15,4.85", StringComparison.Ordinal) &&
-        fanNavigationPath.Contains("19.15,19.15", StringComparison.Ordinal) &&
-        fanNavigationPath.Contains("4.85,19.15", StringComparison.Ordinal) &&
-        fanNavigationPath.Contains("4.85,4.85", StringComparison.Ordinal),
-        "Fan control navigation icon should use the centered X-arranged four-blade geometry.");
+        fanNavigationPath.StartsWith("F1 M12,1.5 A10.5,10.5", StringComparison.Ordinal) &&
+        fanNavigationPath.Contains("M12,3.25 A8.75,8.75", StringComparison.Ordinal),
+        "Fan control navigation icon should use an outlined circular housing that reads as a physical fan at navigation size.");
     Require(
+        fanNavigationPath.Contains("M12.1,4.25", StringComparison.Ordinal) &&
+        fanNavigationPath.Contains("M19.75,12.1", StringComparison.Ordinal) &&
+        fanNavigationPath.Contains("M11.9,19.75", StringComparison.Ordinal) &&
+        fanNavigationPath.Contains("M4.25,11.9", StringComparison.Ordinal) &&
+        fanNavigationPath.Contains("M12,9.85 A2.15,2.15", StringComparison.Ordinal),
+        "Fan control navigation icon should use four centered curved blades and a hub rather than diagonal X-arranged blades.");
+    Require(
+        !fanNavigationPath.Contains("M13.55,10.45", StringComparison.Ordinal) &&
+        !fanNavigationPath.Contains("19.15,4.85", StringComparison.Ordinal) &&
         !fanNavigationPath.Contains("M13.35,10.25", StringComparison.Ordinal) &&
-        !fanNavigationPath.Contains("20.75,2.85", StringComparison.Ordinal),
-        "Fan control navigation icon should not use the oversized X-arranged blade geometry.");
-    Require(
+        !fanNavigationPath.Contains("20.75,2.85", StringComparison.Ordinal) &&
         !fanNavigationPath.Contains(" M21,12 ", StringComparison.Ordinal) &&
         !fanNavigationPath.Contains(" M3,12 ", StringComparison.Ordinal),
-        "Fan control navigation icon should not use the horizontal/vertical cross blade layout.");
+        "Fan control navigation icon should retain neither previous diagonal X geometry nor the dashboard cross geometry.");
     Require(
         !fanNavigationPath.Contains(oldShareLikeFanPath, StringComparison.Ordinal),
         "Fan control navigation should not use the old three-node/share-like fan glyph.");
@@ -726,7 +1583,9 @@ static void RunFanIconXamlChecks()
 static void RunPowerHealthLayoutXamlChecks()
 {
     var xaml = XDocument.Load(FindRepositoryFile("MainPage.xaml"));
+    var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
     XNamespace ui = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+    XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
     XNamespace local = "using:DellR730xdFanControlCenter";
 
     var powerHealthTitle = xaml
@@ -748,12 +1607,36 @@ static void RunPowerHealthLayoutXamlChecks()
         "Power and health board should keep binding to PowerTiles.");
 
     Require(
-        powerHealthGrid.Attribute("MaxHeight")?.Value == "420" &&
-        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollMode")?.Value == "Enabled" &&
-        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollBarVisibility")?.Value == "Auto" &&
+        powerHealthGrid.Attribute("MaxHeight") is null &&
+        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollMode")?.Value == "Disabled" &&
+        powerHealthGrid.Attribute("ScrollViewer.VerticalScrollBarVisibility")?.Value == "Disabled" &&
         powerHealthGrid.Attribute("ScrollViewer.HorizontalScrollMode")?.Value == "Disabled" &&
         powerHealthGrid.Attribute("ScrollViewer.HorizontalScrollBarVisibility")?.Value == "Disabled",
-        "Power and health board should keep a finite scroll-owned viewport so live hardware rows do not all measure under the page ScrollViewer.");
+        "Power and health board should expand all valid cards and leave vertical scrolling to the native page ScrollViewer.");
+
+    var singlePageScrollCollections = xaml
+        .Descendants()
+        .Where(element =>
+            element.Name == ui + "GridView" ||
+            (element.Name == ui + "ListView" && element.Attribute("ItemsSource")?.Value == "{x:Bind LocalizedSensors, Mode=OneWay}"))
+        .Where(element =>
+            element.Attribute("ItemsSource")?.Value is "{x:Bind TemperatureTiles, Mode=OneWay}" or
+                "{x:Bind FanTiles, Mode=OneWay}" or
+                "{x:Bind PowerTiles, Mode=OneWay}" or
+                "{x:Bind LocalizedSensors, Mode=OneWay}")
+        .ToArray();
+    Require(
+        singlePageScrollCollections.Length == 4 &&
+        singlePageScrollCollections.All(element =>
+            element.Attribute("MaxHeight") is null &&
+            element.Attribute("ScrollViewer.VerticalScrollMode")?.Value == "Disabled" &&
+            element.Attribute("ScrollViewer.VerticalScrollBarVisibility")?.Value == "Disabled"),
+        "Overview tile boards and the detailed sensor list should not create nested vertical scrollbars.");
+    Require(
+        !pageSource.Contains("TemperatureGridView.MaxHeight", StringComparison.Ordinal) &&
+        !pageSource.Contains("FanGridView.MaxHeight", StringComparison.Ordinal) &&
+        !pageSource.Contains("PowerHealthGridView.MaxHeight", StringComparison.Ordinal),
+        "Responsive layout code should not restore nested tile-board height caps at runtime.");
 
     var wrapGrid = powerHealthGrid
         .Descendants(ui + "ItemsWrapGrid")
@@ -840,11 +1723,11 @@ static void RunDpiTextWrappingXamlChecks()
         !xamlSource.Contains("IsDynamicOverflowEnabled=\"False\"", StringComparison.Ordinal),
         "Preset cards and command bars should not keep desktop-only fixed widths or disabled overflow behavior.");
     Require(
-        pageSource.Contains("TemperatureGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 300 : double.PositiveInfinity;", StringComparison.Ordinal) &&
-        pageSource.Contains("FanGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 260 : double.PositiveInfinity;", StringComparison.Ordinal) &&
-        pageSource.Contains("PowerHealthGridView.MaxHeight = layoutSize == ResponsiveLayoutSize.Large ? 420 : 560;", StringComparison.Ordinal) &&
+        !pageSource.Contains("TemperatureGridView.MaxHeight", StringComparison.Ordinal) &&
+        !pageSource.Contains("FanGridView.MaxHeight", StringComparison.Ordinal) &&
+        !pageSource.Contains("PowerHealthGridView.MaxHeight", StringComparison.Ordinal) &&
         pageSource.Contains("VisualizationWebView.MinHeight = layoutSize == ResponsiveLayoutSize.Large ? 1520 : 3200;", StringComparison.Ordinal),
-        "Nested boards and the chart WebView should size intentionally, while the long power/health board keeps a finite viewport for responsive scrolling.");
+        "Tile boards should expand into the native page scroll surface while the chart WebView keeps an intentional responsive height.");
 
     foreach (var binding in new[]
     {
@@ -875,11 +1758,14 @@ static void RunCurveEditorInteractionPerformanceChecks()
     var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
     var temperatureMoveBody = ExtractMethodBody(pageSource, "OnNewCurveCanvasPointerMoved");
     var powerMoveBody = ExtractMethodBody(pageSource, "OnNewPowerCurveCanvasPointerMoved");
+    var hoverOverlayBody = ExtractMethodBody(pageSource, "DrawCurveHoverOverlay");
 
     Require(
         pageSource.Contains("_pendingVisualizationWheelShouldAnimate", StringComparison.Ordinal) &&
+        pageSource.Contains("VisualizationMouseWheelTickDeltaY", StringComparison.Ordinal) &&
+        pageSource.Contains("deltaY += wheelTicks * VisualizationMouseWheelTickDeltaY;", StringComparison.Ordinal) &&
         pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: !animate);", StringComparison.Ordinal),
-        "Wheel events forwarded from the chart WebView should preserve smooth platform scrolling for discrete wheel input without animating every precision touchpad delta.");
+        "Wheel events forwarded from the chart WebView should normalize discrete mouse input and still use animated ChangeView instead of direct presenter wheel calls.");
     Require(
         pageSource.Contains("_syncingTemperatureCurveInputsFromCanvas", StringComparison.Ordinal) &&
         pageSource.Contains("_syncingPowerCurveInputsFromCanvas", StringComparison.Ordinal),
@@ -889,12 +1775,25 @@ static void RunCurveEditorInteractionPerformanceChecks()
         xamlSource.Contains("PointerExited=\"OnNewCurveCanvasPointerExited\"", StringComparison.Ordinal) &&
         xamlSource.Contains("PointerEntered=\"OnNewPowerCurveCanvasPointerEntered\"", StringComparison.Ordinal) &&
         xamlSource.Contains("PointerExited=\"OnNewPowerCurveCanvasPointerExited\"", StringComparison.Ordinal) &&
+        xamlSource.Contains("x:Name=\"NewCurveHoverReadoutText\"", StringComparison.Ordinal) &&
+        xamlSource.Contains("x:Name=\"NewPowerCurveHoverReadoutText\"", StringComparison.Ordinal) &&
         pageSource.Contains("_temperatureCurveHoverPosition", StringComparison.Ordinal) &&
         pageSource.Contains("_powerCurveHoverPosition", StringComparison.Ordinal) &&
         pageSource.Contains("DrawCurveHoverOverlay", StringComparison.Ordinal) &&
-        pageSource.Contains("风扇速度", StringComparison.Ordinal) &&
+        pageSource.Contains("CalculateFanPercentValue", StringComparison.Ordinal) &&
         pageSource.Contains("FromCanvasX(position.X", StringComparison.Ordinal),
-        "Curve editors should show live hover crosshair coordinates with input values and fan speed before the user clicks.");
+        "Curve editors should show live curve output in stable readout rows instead of covering the pointer with a floating label.");
+    Require(
+        hoverOverlayBody.Contains("IsHitTestVisible = false", StringComparison.Ordinal) &&
+        !hoverOverlayBody.Contains("new Border", StringComparison.Ordinal) &&
+        !hoverOverlayBody.Contains("new TextBlock", StringComparison.Ordinal),
+        "Curve crosshairs and markers should never intercept pointer input, and hover text should stay outside the canvas.");
+    Require(
+        pageSource.Contains("DrawCurveChartGrid", StringComparison.Ordinal) &&
+        pageSource.Contains("new Polygon", StringComparison.Ordinal) &&
+        pageSource.Contains("CurvePreviewSampleCount", StringComparison.Ordinal) &&
+        pageSource.Contains("DrawCurveAxisLabel", StringComparison.Ordinal),
+        "Curve charts should use a filled plot, dense shared preview sampling, and readable axis tick labels.");
     Require(
         temperatureMoveBody.Contains("DrawNewCurveCanvas(BuildTemperatureCurveCanvasPreviewPoints(), useSmoothPreview: false);", StringComparison.Ordinal) &&
         !temperatureMoveBody.Contains("UpdateNewCurvePreview(", StringComparison.Ordinal) &&
@@ -911,11 +1810,47 @@ static void RunCurveEditorInteractionPerformanceChecks()
         pageSource.Contains("ScrollPresetIntoView(savedPresetId);", StringComparison.Ordinal) &&
         pageSource.Contains("PresetGridView.ScrollIntoView(preset, ScrollIntoViewAlignment.Leading);", StringComparison.Ordinal),
         "Editing a curve preset should scroll to the matching editor, and saving should scroll back to the saved preset card.");
+    Require(
+        !xamlSource.Contains("Localization.Key=\"Hero.Subtitle\"", StringComparison.Ordinal) &&
+        !xamlSource.Contains("Localization.Key=\"Overview.VisualizationHelp\"", StringComparison.Ordinal) &&
+        !xamlSource.Contains("Localization.Key=\"Overview.TempBoardHelp\"", StringComparison.Ordinal) &&
+        !xamlSource.Contains("Localization.Key=\"Control.CurvePresetHelp\"", StringComparison.Ordinal) &&
+        !xamlSource.Contains("x:Name=\"PowerCurveHelpText\"", StringComparison.Ordinal) &&
+        !xamlSource.Contains("Localization.Key=\"Control.SmartAutoHelp\"", StringComparison.Ordinal) &&
+        !xamlSource.Contains("x:Name=\"NewCurvePreviewText\"", StringComparison.Ordinal) &&
+        !xamlSource.Contains("x:Name=\"NewPowerCurvePreviewText\"", StringComparison.Ordinal),
+        "Operational pages should not keep visible how-to paragraphs or ASCII curve previews after the controls make the interaction clear.");
+    Require(
+        !xamlSource.Contains("x:Name=\"IndividualFanInfoBar\"", StringComparison.Ordinal) &&
+        xamlSource.Contains("x:Name=\"IndividualFanStatusPanel\"", StringComparison.Ordinal) &&
+        xamlSource.Contains("x:Name=\"IndividualFanStatusToggle\"", StringComparison.Ordinal) &&
+        xamlSource.Contains("x:Name=\"IndividualFanRiskButton\"", StringComparison.Ordinal) &&
+        xamlSource.Contains("Click=\"OnOpenIndividualFanSettingsClick\"", StringComparison.Ordinal) &&
+        pageSource.Contains("AutomationProperties.SetHelpText(IndividualFanStatusPanel, safetyMessage);", StringComparison.Ordinal) &&
+        pageSource.Contains("ToolTipService.SetToolTip(IndividualFanRiskButton, safetyMessage);", StringComparison.Ordinal),
+        "Individual fan control should use a compact state row while preserving the full firmware warning in tooltip and accessibility text.");
+
+    XNamespace xamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+    var xamlDocument = XDocument.Parse(xamlSource);
+    var statusPanel = xamlDocument
+        .Descendants()
+        .Single(element => element.Attribute(xamlNamespace + "Name")?.Value == "IndividualFanStatusPanel");
+    var statusColumns = statusPanel
+        .Elements()
+        .Single(element => element.Name.LocalName == "Grid.ColumnDefinitions")
+        .Elements()
+        .Select(element => element.Attribute("Width")?.Value)
+        .ToArray();
+    Require(
+        statusColumns.SequenceEqual(new[] { "Auto", "Auto", "Auto", "Auto", "*" }, StringComparer.Ordinal) &&
+        statusPanel.Descendants().Single(element => element.Attribute(xamlNamespace + "Name")?.Value == "IndividualFanStatusText").Attribute("MaxWidth")?.Value == "420",
+        "The compact individual-fan toggle, risk, and settings actions should stay beside the status text instead of being pushed beyond the visible card edge.");
 }
 
 static void RunRequestScrollResponsivenessChecks()
 {
     var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var pageXaml = File.ReadAllText(FindRepositoryFile("MainPage.xaml"));
     var dashboardHtml = File.ReadAllText(FindRepositoryFile(Path.Combine("Assets", "Charts", "dashboard.html")));
     var wheelHandlerStart = dashboardHtml.IndexOf("window.addEventListener(\"wheel\"", StringComparison.Ordinal);
     var wheelHandlerEnd = dashboardHtml.IndexOf("}, { capture: true, passive: false });", wheelHandlerStart, StringComparison.Ordinal);
@@ -949,13 +1884,26 @@ static void RunRequestScrollResponsivenessChecks()
         "Chart WebView payloads should send a bounded sampled history instead of cloning and serializing the entire retained history on every refresh.");
     Require(
         pageSource.Contains("_pendingVisualizationWheelDeltaY", StringComparison.Ordinal) &&
+        pageSource.Contains("_pendingVisualizationWheelTicks", StringComparison.Ordinal) &&
         pageSource.Contains("_pendingVisualizationWheelShouldAnimate", StringComparison.Ordinal) &&
-        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate)", StringComparison.Ordinal),
-        "Forwarded WebView wheel messages should coalesce scroll distance and whether the host should use platform smoothing before calling ScrollViewer.ChangeView.");
+        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate, wheelTicks)", StringComparison.Ordinal),
+        "Forwarded WebView wheel messages should coalesce pixel distance, discrete wheel ticks, and whether the host should use platform smoothing before scrolling the outer page.");
+    Require(
+        pageXaml.Contains("PointerWheelChanged=\"OnContentPanelPointerWheelChanged\"", StringComparison.Ordinal) &&
+        pageSource.Contains("private void OnContentPanelPointerWheelChanged", StringComparison.Ordinal) &&
+        pageSource.Contains("e.GetCurrentPoint(ContentPanel).Properties.MouseWheelDelta", StringComparison.Ordinal) &&
+        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate, wheelTicks);", StringComparison.Ordinal) &&
+        pageSource.Contains("e.Handled = true;", StringComparison.Ordinal),
+        "Native page wheel input and chart WebView wheel messages should converge on the same queued scroll path and distance model.");
+    Require(
+        !pageSource.Contains("MouseWheelDown", StringComparison.Ordinal) &&
+        !pageSource.Contains("MouseWheelUp", StringComparison.Ordinal) &&
+        !pageSource.Contains("TryApplyPlatformMouseWheelScroll", StringComparison.Ordinal),
+        "Forwarded chart mouse-wheel input should not call ScrollContentPresenter.MouseWheelUp/Down because that path produces visible jump scrolling when invoked directly.");
     Require(
         pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: !animate);", StringComparison.Ordinal) &&
         !pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: true);", StringComparison.Ordinal),
-        "Forwarded chart mouse-wheel scrolling should not force every host scroll step to jump without animation.");
+        "Forwarded chart mouse-wheel and precision scrolling should not force host scroll steps to jump without animation.");
     Require(
         pageSource.Contains("_localizedSensorsDirty", StringComparison.Ordinal) &&
         pageSource.Contains("RefreshLocalizedSensorRowsIfVisible", StringComparison.Ordinal) &&
@@ -963,15 +1911,17 @@ static void RunRequestScrollResponsivenessChecks()
         "Sensor table localization rows should be deferred while the Sensors page is hidden so request completion does not refresh an off-screen ListView during overview scrolling.");
     Require(
         dashboardHtml.Contains("let pendingHostWheelDeltaY = 0;", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("let pendingHostWheelTicks = 0;", StringComparison.Ordinal) &&
         dashboardHtml.Contains("let pendingHostWheelShouldAnimate = false;", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("const wheelTicks = getHostWheelTicks(event, deltaY);", StringComparison.Ordinal) &&
         dashboardHtml.Contains("const shouldAnimateHostWheel = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(event.deltaY) >= 80;", StringComparison.Ordinal) &&
         dashboardHtml.Contains("requestAnimationFrame(postPendingHostWheelDelta);", StringComparison.Ordinal),
-        "The chart WebView should coalesce wheel forwarding to one host message per animation frame while preserving whether the input was a discrete wheel gesture.");
+        "The chart WebView should coalesce wheel forwarding to one host message per animation frame while preserving whether the input was a discrete wheel gesture and how many native wheel ticks it represents.");
     Require(
         !wheelHandlerBody.Contains("window.chrome.webview.postMessage", StringComparison.Ordinal),
         "The chart WebView should not post one host wheel message for every raw wheel event.");
     Require(
-        dashboardHtml.Contains("window.chrome.webview.postMessage({ type: \"wheel\", deltaY, animate });", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("window.chrome.webview.postMessage({ type: \"wheel\", deltaY, animate, wheelTicks });", StringComparison.Ordinal) &&
         dashboardHtml.Contains("zoomOnMouseWheel: false", StringComparison.Ordinal) &&
         dashboardHtml.Contains("moveOnMouseWheel: false", StringComparison.Ordinal) &&
         dashboardHtml.Contains("moveOnMouseMove: false", StringComparison.Ordinal),
@@ -997,7 +1947,8 @@ static void RunRequestIoResponsivenessChecks()
     Require(
         logSource.Contains("Channel.CreateUnbounded<AppLogRecord>", StringComparison.Ordinal) &&
         logSource.Contains("Task.Run(ProcessWriteQueueAsync)", StringComparison.Ordinal) &&
-        logSource.Contains("WriteFailed?.Invoke(this, ex);", StringComparison.Ordinal),
+        logSource.Contains("NotifyWriteFailed(ex);", StringComparison.Ordinal) &&
+        logSource.Contains("handler.GetInvocationList()", StringComparison.Ordinal),
         "Runtime logging should queue disk writes to a single background worker and surface write failures instead of blocking the UI thread.");
     Require(
         pageSource.Contains("_appLog.WriteFailed += OnAppLogWriteFailed;", StringComparison.Ordinal) &&
@@ -1044,10 +1995,11 @@ static void RunGlobalPollingResponsivenessChecks()
         addVolatileLogBody.Contains("Logs.Insert(0, entry);", StringComparison.Ordinal),
         "Visible runtime-log ListView updates should be deferred while the overview page is hidden instead of changing an off-screen bound collection on every command completion.");
     Require(
-        pageSource.Contains("private async Task ConnectAndStartPollingAsync(bool restoreRunningState = true)", StringComparison.Ordinal) &&
-        pageSource.Contains("if (connected && restoreRunningState)", StringComparison.Ordinal) &&
-        pageSource.Contains("await ConnectAndStartPollingAsync(restoreRunningState: false);", StringComparison.Ordinal),
-        "A background sensor polling failure should visibly reconnect with mc info + sdr elist after releasing the IPMI lock, without reapplying saved fan presets or hiding the original failure.");
+        pageSource.Contains("private async Task ConnectAndStartPollingAsync(bool restoreRunningState = true, bool scheduleRetryOnFailure = true)", StringComparison.Ordinal) &&
+        pageSource.Contains("if (connected && restoreRunningState && IsFanControlIntentCurrent(restoreIntentVersion))", StringComparison.Ordinal) &&
+        pageSource.Contains("await ConnectAndStartPollingAsync(restoreRunningState: false, scheduleRetryOnFailure: true);", StringComparison.Ordinal) &&
+        pageSource.Contains("ScheduleSensorPollingRetry(pollingFailure.Message);", StringComparison.Ordinal),
+        "A background sensor polling failure should visibly retry mc info + sdr elist after releasing the IPMI lock, without reapplying saved fan presets or hiding the original failure.");
 }
 
 static void RunHardwareTileValueLayoutXamlChecks()
@@ -1059,16 +2011,23 @@ static void RunHardwareTileValueLayoutXamlChecks()
     var hardwareTileTemplate = xaml
         .Descendants(ui + "DataTemplate")
         .Single(element => element.Attribute(x + "Key")?.Value == "HardwareTileTemplate");
-    var hardwareTileBorder = hardwareTileTemplate
+    var hardwareTilePresenter = hardwareTileTemplate
+        .Elements(ui + "ContentControl")
+        .Single();
+    var hardwareTileBorder = hardwareTilePresenter
         .Elements(ui + "Border")
         .Single();
     Require(
-        hardwareTileBorder.Attribute("Width")?.Value == "250" &&
-        hardwareTileBorder.Attribute("MinHeight")?.Value == "138",
+        hardwareTilePresenter.Attribute("Width")?.Value == "250" &&
+        hardwareTilePresenter.Attribute("MinHeight")?.Value == "138",
         "Hardware cards should leave enough width and height for labeled sensor metadata without cramped wrapping.");
     Require(
         hardwareTileBorder.Attribute("Margin") is null,
         "Hardware tile template should not own external spacing because repeater and grid containers size items independently.");
+    Require(
+        hardwareTileBorder.Attribute("AutomationProperties.AccessibilityView")?.Value == "Raw" &&
+        hardwareTileBorder.Attribute("AutomationProperties.Name") is null,
+        "The named ContentControl should own the accessible card while its visual border stays Raw.");
     RequireGridViewOwnsHardwareTileSpacing(xaml, ui, "TemperatureTiles", "Temperature tile grid should own hardware card spacing after the shared template margin is removed.");
     RequireGridViewOwnsHardwareTileSpacing(xaml, ui, "FanTiles", "Fan tile grid should own hardware card spacing after the shared template margin is removed.");
 
@@ -1099,43 +2058,242 @@ static void RequireGridViewOwnsHardwareTileSpacing(XDocument xaml, XNamespace ui
         setters.Any(setter => setter.Attribute("Property")?.Value == "Padding" && setter.Attribute("Value")?.Value == "0") &&
         setters.Any(setter => setter.Attribute("Property")?.Value == "Margin" && setter.Attribute("Value")?.Value == "0,0,10,10") &&
         setters.Any(setter => setter.Attribute("Property")?.Value == "HorizontalContentAlignment" && setter.Attribute("Value")?.Value == "Left") &&
-        setters.Any(setter => setter.Attribute("Property")?.Value == "VerticalContentAlignment" && setter.Attribute("Value")?.Value == "Top"),
+        setters.Any(setter => setter.Attribute("Property")?.Value == "VerticalContentAlignment" && setter.Attribute("Value")?.Value == "Top") &&
+        setters.Any(setter => setter.Attribute("Property")?.Value == "AutomationProperties.AccessibilityView" && setter.Attribute("Value")?.Value == "Raw") &&
+        !setters.Any(setter => setter.Attribute("Property")?.Value == "AutomationProperties.Name"),
         message);
 }
 
 static void RunFanAnimationSpeedChecks()
 {
+    var controlSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml.cs")));
+    var controlXaml = File.ReadAllText(FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml")));
+    var mainPageXaml = File.ReadAllText(FindRepositoryFile("MainPage.xaml"));
     var mainPageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
-    var xaml = File.ReadAllText(FindRepositoryFile("MainPage.xaml"));
+    var tileSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Models", "DashboardTileViewModel.cs")));
 
     Require(
-        mainPageSource.Contains("const double MaximumFanAnimationRpm = 18000;", StringComparison.Ordinal) &&
-        mainPageSource.Contains("const double FastestFanRotationSeconds = 0.11;", StringComparison.Ordinal) &&
-        mainPageSource.Contains("const double SlowestFanRotationSeconds = 5.2;", StringComparison.Ordinal),
-        "Fan animation timing should define explicit slowest/full-speed bounds, with full-speed animation twice as fast as the old 0.22 second floor.");
+        controlSource.Contains("Loaded += OnControlLoaded;", StringComparison.Ordinal) &&
+        controlSource.Contains("Unloaded += OnControlUnloaded;", StringComparison.Ordinal) &&
+        controlSource.Contains("private bool _isLoaded;", StringComparison.Ordinal) &&
+        controlSource.Contains("private long _lifecycleGeneration;", StringComparison.Ordinal),
+        "DashboardSensorIcon should own an explicit Loaded/Unloaded lifecycle with generation-guarded queued work.");
+
+    var loadedBody = ExtractMethodBody(controlSource, "OnControlLoaded");
+    var unloadedBody = ExtractMethodBody(controlSource, "OnControlUnloaded");
     Require(
-        !mainPageSource.Contains("Math.Sqrt(normalized)", StringComparison.Ordinal) &&
-        mainPageSource.Contains("var slowestRotationsPerSecond = 1 / SlowestFanRotationSeconds;", StringComparison.Ordinal) &&
-        mainPageSource.Contains("var fastestRotationsPerSecond = 1 / FastestFanRotationSeconds;", StringComparison.Ordinal) &&
-        mainPageSource.Contains("var rotationsPerSecond = slowestRotationsPerSecond + (normalized * (fastestRotationsPerSecond - slowestRotationsPerSecond));", StringComparison.Ordinal) &&
-        mainPageSource.Contains("return Math.Round(1 / rotationsPerSecond, 2);", StringComparison.Ordinal),
-        "Fan animation speed should grow linearly with RPM instead of using a nonlinear duration curve.");
+        loadedBody.Contains("ThemeSettings.CreateForWindowId", StringComparison.Ordinal) &&
+        loadedBody.Contains("AppWindow.GetFromWindowId", StringComparison.Ordinal) &&
+        loadedBody.Contains("_themeSettings.Changed += OnThemeSettingsChanged;", StringComparison.Ordinal) &&
+        loadedBody.Contains("_uiSettings.AnimationsEnabledChanged += OnAnimationsEnabledChanged;", StringComparison.Ordinal) &&
+        loadedBody.Contains("_appWindow.Changed += OnAppWindowChanged;", StringComparison.Ordinal) &&
+        loadedBody.Contains("AcquireCompositionResources();", StringComparison.Ordinal) &&
+        loadedBody.Contains("ApplyVisuals();", StringComparison.Ordinal),
+        "Loaded should acquire per-window settings, visibility, Composition visuals, and force one accurate visual application.");
     Require(
-        mainPageSource.Contains("nameof(DashboardTileViewModel.FanRotationSeconds)", StringComparison.Ordinal) &&
-        mainPageSource.Contains("nameof(DashboardTileViewModel.IsFanAnimated)", StringComparison.Ordinal) &&
-        mainPageSource.Contains("nameof(DashboardTileViewModel.FanIconOpacity)", StringComparison.Ordinal),
-        "Fan animation should listen for live tile speed and visibility changes instead of only restarting on DataContext changes.");
+        unloadedBody.Contains("_isLoaded = false;", StringComparison.Ordinal) &&
+        unloadedBody.Contains("_lifecycleGeneration++;", StringComparison.Ordinal) &&
+        unloadedBody.Contains("_themeSettings.Changed -= OnThemeSettingsChanged;", StringComparison.Ordinal) &&
+        unloadedBody.Contains("_uiSettings.AnimationsEnabledChanged -= OnAnimationsEnabledChanged;", StringComparison.Ordinal) &&
+        unloadedBody.Contains("_appWindow.Changed -= OnAppWindowChanged;", StringComparison.Ordinal) &&
+        unloadedBody.Contains("StopAllCompositionAnimations();", StringComparison.Ordinal) &&
+        unloadedBody.Contains("ReleaseCompositionResources();", StringComparison.Ordinal),
+        "Unloaded should invalidate queued work, detach every system event, stop animations, and release Composition references.");
+
     Require(
-        mainPageSource.Contains(".PropertyChanged += state.TilePropertyChangedHandler", StringComparison.Ordinal) &&
-        mainPageSource.Contains(".PropertyChanged -= state.TilePropertyChangedHandler", StringComparison.Ordinal),
-        "Fan animation should attach and detach a tile property-change handler so RPM refreshes immediately retime the storyboard without leaking handlers.");
+        controlSource.Contains("using Microsoft.UI.Composition;", StringComparison.Ordinal) &&
+        controlSource.Contains("using Microsoft.UI.System;", StringComparison.Ordinal) &&
+        controlSource.Contains("using Microsoft.UI.Windowing;", StringComparison.Ordinal) &&
+        controlSource.Contains("using Microsoft.UI.Xaml.Hosting;", StringComparison.Ordinal) &&
+        controlSource.Contains("ElementCompositionPreview.GetElementVisual", StringComparison.Ordinal) &&
+        controlSource.Contains("ElementCompositionPreview.SetIsTranslationEnabled(CurrentFlowMarker, true);", StringComparison.Ordinal) &&
+        !controlSource.Contains("AccessibilitySettings", StringComparison.Ordinal),
+        "Dashboard motion should use lifted WinAppSDK Composition and supported per-window ThemeSettings APIs only.");
+    var lifecycleQueueBody = ExtractMethodBody(controlSource, "QueueLifecycleUpdate");
+    var visualQueueBody = ExtractMethodBody(controlSource, "QueueVisualUpdate");
     Require(
-        mainPageSource.IndexOf("var currentAngle = GetDashboardTileRotationAngle(element);", StringComparison.Ordinal) <
-        mainPageSource.IndexOf("state.Storyboard?.Stop();", StringComparison.Ordinal),
-        "Fan animation should capture the current angle before stopping the old storyboard so live speed changes do not visibly jump backward.");
+        controlSource.Contains("OnThemeSettingsChanged", StringComparison.Ordinal) &&
+        controlSource.Contains("OnAnimationsEnabledChanged", StringComparison.Ordinal) &&
+        controlSource.Contains("DispatcherQueue.TryEnqueue", StringComparison.Ordinal) &&
+        controlSource.Contains("generation != _lifecycleGeneration", StringComparison.Ordinal) &&
+        lifecycleQueueBody.IndexOf("if (!_isLoaded)", StringComparison.Ordinal) >= 0 &&
+        lifecycleQueueBody.IndexOf("if (!_isLoaded)", StringComparison.Ordinal) <
+        lifecycleQueueBody.IndexOf("DispatcherQueue.TryEnqueue", StringComparison.Ordinal) &&
+        visualQueueBody.IndexOf("if (!_isLoaded)", StringComparison.Ordinal) >= 0 &&
+        visualQueueBody.IndexOf("if (!_isLoaded)", StringComparison.Ordinal) <
+        visualQueueBody.IndexOf("DispatcherQueue.TryEnqueue", StringComparison.Ordinal),
+        "System callbacks and DP refreshes should marshal through generation-guarded DispatcherQueue work and stop queuing after unload.");
     Require(
-        xaml.Contains("Unloaded=\"OnDashboardTileFanIconUnloaded\"", StringComparison.Ordinal),
-        "Fan animation should detach its property-change observer when the tile icon is unloaded.");
+        controlSource.Contains("event EventHandler<DashboardSensorIconVisualFailureEventArgs>? VisualUpdateFailed", StringComparison.Ordinal) &&
+        lifecycleQueueBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        lifecycleQueueBody.Contains("ReportVisualUpdateFailure(ex);", StringComparison.Ordinal) &&
+        visualQueueBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        visualQueueBody.Contains("ReportVisualUpdateFailure(ex);", StringComparison.Ordinal) &&
+        controlSource.Contains("throw new InvalidOperationException(\"Dashboard sensor visual update failed without an error handler.\", exception);", StringComparison.Ordinal),
+        "Every queued visual callback should report a real failure through a required top-level boundary instead of swallowing it or escaping silently.");
+    Require(
+        controlSource.Contains("args.DidVisibilityChange", StringComparison.Ordinal) &&
+        controlSource.Contains("_appWindow.IsVisible", StringComparison.Ordinal) &&
+        controlSource.Contains("PauseContinuousAnimations();", StringComparison.Ordinal) &&
+        controlSource.Contains("ResumeContinuousAnimations();", StringComparison.Ordinal),
+        "AppWindow visibility changes should pause hidden-window continuous motion and resume it when visible.");
+
+    var fanBody = ExtractMethodBody(controlSource, "UpdateFanAnimation");
+    var startFanBody = ExtractMethodBody(controlSource, "StartFanAnimation");
+    var fanRateBody = ExtractMethodBody(controlSource, "SetFanPlaybackRate");
+    var getFanRateBody = ExtractMethodBody(controlSource, "GetFanPlaybackRate");
+    Require(
+        controlSource.Contains("_fanVisual.CenterPoint = new Vector3(12, 12, 0);", StringComparison.Ordinal) &&
+        controlSource.Contains("CreateScalarKeyFrameAnimation()", StringComparison.Ordinal) &&
+        controlSource.Contains("CreateLinearEasingFunction()", StringComparison.Ordinal) &&
+        controlSource.Contains("Duration = TimeSpan.FromSeconds(1)", StringComparison.Ordinal) &&
+        controlSource.Contains("IterationBehavior = AnimationIterationBehavior.Forever", StringComparison.Ordinal) &&
+        controlSource.Contains("_fanAnimationController = _compositor.CreateAnimationController();", StringComparison.Ordinal) &&
+        CountOccurrences(controlSource, "_fanVisual.StartAnimation(\"RotationAngleInDegrees\", fanAnimation, _fanAnimationController);") == 1,
+        "Fan rotation should use one centered, linear, one-second forever Composition animation with one retained controller.");
+    Require(
+        startFanBody.Contains("GetFanPlaybackRate(periodSeconds)", StringComparison.Ordinal) &&
+        startFanBody.IndexOf("GetFanPlaybackRate(periodSeconds)", StringComparison.Ordinal) <
+        startFanBody.IndexOf("CreateAnimationController()", StringComparison.Ordinal),
+        "Fan startup should reject an invalid period before retaining or starting a Composition controller.");
+    Require(
+        fanBody.Contains("MotionKind == DashboardMotionKind.FanRotation", StringComparison.Ordinal) &&
+        fanBody.Contains("MotionPeriodSeconds", StringComparison.Ordinal) &&
+        fanBody.Contains("StopFanAnimation();", StringComparison.Ordinal) &&
+        fanBody.Contains("ResumeFanAnimation();", StringComparison.Ordinal),
+        "Fan rotation should reset to the cross when intent ends and retain phase only for temporary pauses.");
+    Require(
+        fanRateBody.Contains("GetFanPlaybackRate(periodSeconds)", StringComparison.Ordinal) &&
+        fanRateBody.Contains("_fanAnimationController.PlaybackRate = playbackRate;", StringComparison.Ordinal) &&
+        !fanRateBody.Contains("StopAnimation", StringComparison.Ordinal),
+        "Fan retiming should validate controller playback bounds and update only PlaybackRate on the existing controller.");
+    Require(
+        getFanRateBody.Contains("double.IsFinite(periodSeconds)", StringComparison.Ordinal) &&
+        getFanRateBody.Contains("1f / (float)periodSeconds", StringComparison.Ordinal) &&
+        getFanRateBody.Contains("AnimationController.MinPlaybackRate", StringComparison.Ordinal) &&
+        getFanRateBody.Contains("AnimationController.MaxPlaybackRate", StringComparison.Ordinal) &&
+        getFanRateBody.Contains("throw new ArgumentOutOfRangeException(nameof(periodSeconds)", StringComparison.Ordinal),
+        "Invalid or non-finite fan periods should fail explicitly instead of starting fallback motion.");
+
+    Require(
+        controlSource.Contains("StartAnimation(\"Scale\"", StringComparison.Ordinal) &&
+        controlSource.Contains("StopAnimation(\"Scale\")", StringComparison.Ordinal) &&
+        controlSource.Contains("StartAnimation(\"RotationAngleInDegrees\"", StringComparison.Ordinal) &&
+        controlSource.Contains("StopAnimation(\"RotationAngleInDegrees\")", StringComparison.Ordinal) &&
+        controlSource.Contains("-55f + ((float)normalizedLevel * 110f)", StringComparison.Ordinal),
+        "Level and trusted gauge transitions should use one-shot Composition Scale and RotationAngleInDegrees with explicit stops.");
+    Require(
+        controlSource.Contains("MotionKind == DashboardMotionKind.GaugeTransition", StringComparison.Ordinal) &&
+        controlSource.Contains("SetVoltageAngle(normalizedLevel, animate: false);", StringComparison.Ordinal),
+        "Unit-only voltage MotionKind.None should land directly on the static 0.5 gauge angle without threshold animation.");
+    var normalizedLevelBody = ExtractMethodBody(controlSource, "ApplyNormalizedLevel");
+    Require(
+        CountOccurrences(normalizedLevelBody, "IsMotionActive") >= 2,
+        "Level and gauge transitions should require the explicit IsMotionActive contract instead of inferring motion from MotionKind alone.");
+
+    var currentBody = ExtractMethodBody(controlSource, "UpdateCurrentFlowAnimation");
+    Require(
+        currentBody.Contains("MotionKind == DashboardMotionKind.CurrentFlow", StringComparison.Ordinal) &&
+        controlSource.Contains("StartAnimation(\"Translation\"", StringComparison.Ordinal) &&
+        controlSource.Contains("StartAnimation(\"Opacity\"", StringComparison.Ordinal) &&
+        controlSource.Contains("StopAnimation(\"Translation\")", StringComparison.Ordinal) &&
+        controlSource.Contains("StopAnimation(\"Opacity\")", StringComparison.Ordinal) &&
+        controlSource.Contains("CurrentFlowMarker.Translation = Vector3.Zero;", StringComparison.Ordinal) &&
+        !controlSource.Contains("RelativeOffsetAdjustment", StringComparison.Ordinal),
+        "Current flow should animate Translation plus Opacity, stop both explicitly, and restore layout-neutral static values.");
+
+    var powerBody = ExtractMethodBody(controlSource, "UpdatePowerActivityAnimation");
+    var startPowerBody = ExtractMethodBody(controlSource, "StartPowerActivityAnimation");
+    Require(
+        powerBody.Contains("MotionKind == DashboardMotionKind.PowerActivity", StringComparison.Ordinal) &&
+        startPowerBody.Contains("_powerActivityVisual.StartAnimation(\"Opacity\"", StringComparison.Ordinal) &&
+        !startPowerBody.Contains("\"Scale\"", StringComparison.Ordinal) &&
+        controlSource.Contains("_powerActivityVisual.StopAnimation(\"Opacity\");", StringComparison.Ordinal) &&
+        controlSource.Contains("_powerActivityVisual.Opacity = 1;", StringComparison.Ordinal),
+        "Power activity should use only a subtle opacity breath and restore full opacity without implying capacity through scale.");
+
+    var alertBody = ExtractMethodBody(controlSource, "UpdateAlertPulseAnimation");
+    Require(
+        alertBody.Contains("VisualState is DashboardVisualState.Warning or DashboardVisualState.Critical", StringComparison.Ordinal) &&
+        alertBody.Contains("IsMotionActive", StringComparison.Ordinal) &&
+        !alertBody.Contains("MotionKind", StringComparison.Ordinal) &&
+        controlSource.Contains("_outerRingVisual.StartAnimation(\"Opacity\"", StringComparison.Ordinal) &&
+        controlSource.Contains("_outerRingVisual.StopAnimation(\"Opacity\");", StringComparison.Ordinal) &&
+        controlSource.Contains("_outerRingVisual.Opacity = _isHighContrast ? 1 : OuterRingBaseOpacity;", StringComparison.Ordinal),
+        "Every motion-active warning or critical state should pulse only the outer ring, including numeric sensors whose primary motion kind is not WarningPulse.");
+
+    var stopAllBody = ExtractMethodBody(controlSource, "StopAllCompositionAnimations");
+    Require(
+        stopAllBody.Contains("StopFanAnimation();", StringComparison.Ordinal) &&
+        stopAllBody.Contains("visual.StopAnimation(\"Scale\")", StringComparison.Ordinal) &&
+        stopAllBody.Contains("_voltageNeedleVisual.StopAnimation(\"RotationAngleInDegrees\")", StringComparison.Ordinal) &&
+        stopAllBody.Contains("StopCurrentFlowAnimation();", StringComparison.Ordinal) &&
+        stopAllBody.Contains("StopPowerActivityAnimation();", StringComparison.Ordinal) &&
+        stopAllBody.Contains("StopAlertPulseAnimation();", StringComparison.Ordinal) &&
+        controlSource.Contains("_fanVisual.StopAnimation(\"RotationAngleInDegrees\")", StringComparison.Ordinal) &&
+        controlSource.Contains("_currentFlowVisual.StopAnimation(\"Translation\")", StringComparison.Ordinal) &&
+        controlSource.Contains("_currentFlowVisual.StopAnimation(\"Opacity\")", StringComparison.Ordinal) &&
+        controlSource.Contains("_powerActivityVisual.StopAnimation(\"Opacity\")", StringComparison.Ordinal) &&
+        controlSource.Contains("_outerRingVisual.StopAnimation(\"Opacity\")", StringComparison.Ordinal),
+        "Unload cleanup should explicitly stop every Composition property that Task 4 can animate.");
+
+    Require(
+        controlSource.Contains("!_isHighContrast", StringComparison.Ordinal) &&
+        controlSource.Contains("_animationsEnabled", StringComparison.Ordinal) &&
+        controlSource.Contains("IsDataFresh", StringComparison.Ordinal) &&
+        controlSource.Contains("IconLayer.Opacity = !IsDataFresh && !_isHighContrast ? StaleIconOpacity : 1;", StringComparison.Ordinal),
+        "Every motion path should respect freshness, system animation preference, window visibility, and high contrast while preserving static state.");
+
+    var forbiddenPageAnimationTokens = new[]
+    {
+        "DashboardTileFanAnimationState",
+        "OnDashboardTileFanIcon",
+        "OnDashboardTileElectricalIcon",
+        "StartDashboardTileFanAnimation",
+        "StopDashboardTileFanAnimation",
+        "GetDashboardTileRotationAngle",
+        "StartDashboardTileElectricalAnimation",
+        "CalculateFanRotationSeconds",
+        "CalculateElectricalPulseSeconds",
+        "Storyboard",
+        "DoubleAnimation",
+        "element.Tag",
+        "Microsoft.UI.Xaml.Media.Animation",
+    };
+    Require(
+        forbiddenPageAnimationTokens.All(token => !mainPageSource.Contains(token, StringComparison.Ordinal)),
+        "MainPage should contain no legacy dashboard storyboard, Tag state, timing helper, handler, or animation namespace.");
+    Require(
+        mainPageXaml.Contains("VisualUpdateFailed=\"OnDashboardSensorIconVisualUpdateFailed\"", StringComparison.Ordinal) &&
+        mainPageSource.Contains("private void OnDashboardSensorIconVisualUpdateFailed", StringComparison.Ordinal) &&
+        mainPageSource.Contains("ShowFailure(args.Exception);", StringComparison.Ordinal),
+        "Dashboard sensor visual failures should reach MainPage's visible and logged failure path.");
+    Require(
+        !controlXaml.Contains("Storyboard", StringComparison.Ordinal) &&
+        !controlXaml.Contains("DoubleAnimation", StringComparison.Ordinal) &&
+        !controlXaml.Contains("EnableDependentAnimation", StringComparison.Ordinal) &&
+        !controlSource.Contains("Storyboard", StringComparison.Ordinal) &&
+        !controlSource.Contains("DoubleAnimation", StringComparison.Ordinal) &&
+        !controlSource.Contains("EnableDependentAnimation", StringComparison.Ordinal),
+        "DashboardSensorIcon should use Composition exclusively without XAML dependent animations.");
+
+    var legacyViewModelTokens = new[]
+    {
+        "TemperatureIconOpacity",
+        "FanIconOpacity",
+        "PowerIconOpacity",
+        "VoltageIconOpacity",
+        "CurrentIconOpacity",
+        "HealthIconOpacity",
+        "IsFanAnimated",
+        "FanRotationSeconds",
+        "ElectricalIconOpacity",
+        "IsElectricalAnimated",
+        "ElectricalPulseSeconds",
+    };
+    Require(
+        legacyViewModelTokens.All(token => !tileSource.Contains(token, StringComparison.Ordinal)),
+        "DashboardTileViewModel should retain only semantic presentation fields after Composition replaces legacy page animation.");
 }
 
 static void RunPostFanCommandRefreshChecks()
@@ -1165,19 +2323,16 @@ static void RunPostFanCommandRefreshChecks()
 
 static void RunElectricalIconXamlChecks()
 {
-    var xaml = XDocument.Load(FindRepositoryFile("MainPage.xaml"));
+    var xaml = XDocument.Load(FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml")));
     XNamespace ui = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
     XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
 
-    var hardwareTileTemplate = xaml
-        .Descendants(ui + "DataTemplate")
-        .Single(element => element.Attribute(x + "Key")?.Value == "HardwareTileTemplate");
-    var voltageIcon = hardwareTileTemplate
+    var voltageIcon = xaml
         .Descendants(ui + "Grid")
-        .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == "VoltageTilePulse");
-    var currentIcon = hardwareTileTemplate
+        .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == "VoltageGroup");
+    var currentIcon = xaml
         .Descendants(ui + "Grid")
-        .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == "CurrentTilePulse");
+        .SingleOrDefault(element => element.Attribute(x + "Name")?.Value == "CurrentGroup");
     var voltagePathData = voltageIcon is null
         ? string.Empty
         : string.Join(" ", voltageIcon.Descendants(ui + "Path").Select(element => element.Attribute("Data")?.Value ?? string.Empty));
@@ -1192,11 +2347,13 @@ static void RunElectricalIconXamlChecks()
         currentIcon is not null && !currentPathData.Contains("M4,13 C6,7 10,7 12,13", StringComparison.Ordinal),
         "Current dashboard tile should use the refined current-flow icon instead of the old cramped wave arrow.");
 
-    var mainPageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var controlSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Controls", "DashboardSensorIcon.xaml.cs")));
     Require(
-        mainPageSource.Contains("From = 0.98", StringComparison.Ordinal) &&
-        mainPageSource.Contains("To = 1.06", StringComparison.Ordinal),
-        "Electrical icon pulse should be subtle enough to avoid distorted voltage/current glyphs.");
+        controlSource.Contains("UpdateCurrentFlowAnimation", StringComparison.Ordinal) &&
+        controlSource.Contains("UpdatePowerActivityAnimation", StringComparison.Ordinal) &&
+        !controlSource.Contains("From = 0.98", StringComparison.Ordinal) &&
+        !controlSource.Contains("To = 1.06", StringComparison.Ordinal),
+        "Electrical icons should use their dedicated Composition motion instead of the old shared scale pulse.");
 }
 
 static void RunOverviewSectionOrderXamlChecks()
@@ -1281,6 +2438,11 @@ static void RunTrayMenuSourceChecks()
     var traySource = File.ReadAllText(FindRepositoryFile(Path.Combine("Services", "TrayIconManager.cs")));
     var windowSource = File.ReadAllText(FindRepositoryFile("MainWindow.xaml.cs"));
     var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var wndProcStart = traySource.IndexOf("private IntPtr WndProc", StringComparison.Ordinal);
+    var wndProcEnd = traySource.IndexOf("private void ShowContextMenu", wndProcStart, StringComparison.Ordinal);
+    var wndProcBody = wndProcStart >= 0 && wndProcEnd > wndProcStart
+        ? traySource[wndProcStart..wndProcEnd]
+        : string.Empty;
 
     Require(
         !traySource.Contains("BuildFanControlMenu", StringComparison.Ordinal) &&
@@ -1311,13 +2473,79 @@ static void RunTrayMenuSourceChecks()
         pageSource.Contains("public Task RefreshSensorsFromTrayAsync()", StringComparison.Ordinal) &&
         pageSource.Contains("public Task OpenIdracFromTrayAsync()", StringComparison.Ordinal) &&
         pageSource.Contains("public void OpenLogFolderFromTray()", StringComparison.Ordinal) &&
-        pageSource.Contains("public void StopAutoPolicyFromTray()", StringComparison.Ordinal),
+        pageSource.Contains("public void StopAutoPolicyFromTray()", StringComparison.Ordinal) &&
+        pageSource.Contains("public void ReportTrayCommandFailure(Exception ex)", StringComparison.Ordinal),
         "MainPage should expose explicit tray-safe wrappers for non-navigation tray actions.");
+    Require(
+        windowSource.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        windowSource.Contains("page.ReportTrayCommandFailure(ex);", StringComparison.Ordinal),
+        "Async tray commands should surface exceptions through MainPage instead of letting dispatcher async-void failures escape unhandled.");
+    Require(
+        traySource.Contains("public event EventHandler<Exception>? CommandFailed;", StringComparison.Ordinal) &&
+        wndProcBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        wndProcBody.Contains("CommandFailed?.Invoke(this, ex);", StringComparison.Ordinal),
+        "The native tray callback should catch settings, menu, and command exceptions and forward the real failure to the main page boundary.");
+    Require(
+        windowSource.Contains("trayIcon.CommandFailed +=", StringComparison.Ordinal) &&
+        ExtractMethodBody(windowSource, "RunPageAction").Contains("if (!DispatcherQueue.TryEnqueue", StringComparison.Ordinal) &&
+        ExtractMethodBody(windowSource, "RunPageCommand").Contains("if (!DispatcherQueue.TryEnqueue", StringComparison.Ordinal),
+        "Tray dispatcher enqueue failures should be surfaced explicitly instead of silently dropping user commands.");
+    Require(
+        windowSource.IndexOf("RootFrame.Navigate(typeof(MainPage));", StringComparison.Ordinal) <
+            windowSource.IndexOf("_trayIcon = CreateTrayIcon();", StringComparison.Ordinal),
+        "MainPage should be created before the native tray callback is registered so startup tray failures always have a visible page boundary.");
 }
 
 static void RunRuntimeStatePersistenceSourceChecks()
 {
     var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var appSource = File.ReadAllText(FindRepositoryFile("App.xaml.cs"));
+    var pollingTickStart = source.IndexOf("private async void OnSensorPollingTimerTick", StringComparison.Ordinal);
+    var pollingTickEnd = source.IndexOf("private async Task<TimeSpan> RefreshSensorsCoreAsync", pollingTickStart, StringComparison.Ordinal);
+    var pollingTickBody = pollingTickStart >= 0 && pollingTickEnd > pollingTickStart
+        ? source[pollingTickStart..pollingTickEnd]
+        : string.Empty;
+    var connectStart = source.IndexOf("private async Task ConnectAndStartPollingAsync", StringComparison.Ordinal);
+    var connectEnd = source.IndexOf("private async Task StartSensorPollingAsync", connectStart, StringComparison.Ordinal);
+    var connectBody = connectStart >= 0 && connectEnd > connectStart
+        ? source[connectStart..connectEnd]
+        : string.Empty;
+    var applyCurveStart = source.IndexOf("private async Task ApplyCurvePresetAsync", StringComparison.Ordinal);
+    var applyCurveEnd = source.IndexOf("private async void OnStartAutoPolicyClick", applyCurveStart, StringComparison.Ordinal);
+    var applyCurveBody = applyCurveStart >= 0 && applyCurveEnd > applyCurveStart
+        ? source[applyCurveStart..applyCurveEnd]
+        : string.Empty;
+    var curveFirstTickIndex = applyCurveBody.IndexOf("await RunAutoPolicyOnceCoreAsync(token, intentVersion)", StringComparison.Ordinal);
+    var curveMarkActiveIndex = applyCurveBody.IndexOf("MarkActivePreset(curvePreset.Id);", StringComparison.Ordinal);
+    var curvePersistIndex = applyCurveBody.IndexOf("PersistRunningPresetState(curvePreset.Id);", StringComparison.Ordinal);
+    var startSmartStart = source.IndexOf("private async Task StartSmartAutoPolicyAsync", StringComparison.Ordinal);
+    var startSmartEnd = source.IndexOf("private void OnStopAutoPolicyClick", startSmartStart, StringComparison.Ordinal);
+    var startSmartBody = startSmartStart >= 0 && startSmartEnd > startSmartStart
+        ? source[startSmartStart..startSmartEnd]
+        : string.Empty;
+    var smartFirstTickIndex = startSmartBody.IndexOf("await RunAutoPolicyOnceCoreAsync(token, intentVersion)", StringComparison.Ordinal);
+    var smartPersistIndex = startSmartBody.IndexOf("PersistSmartAutoRunningState();", StringComparison.Ordinal);
+    var stopAutoPolicyBody = ExtractMethodBody(source, "StopAutoPolicy");
+    var stopAutoFailureBody = ExtractMethodBody(source, "StopAutoPolicyAfterFailure");
+    var stopAutoEmergencyBody = source.Contains("private void StopAutoPolicyAfterEmergencyDellAuto()", StringComparison.Ordinal)
+        ? ExtractMethodBody(source, "StopAutoPolicyAfterEmergencyDellAuto")
+        : string.Empty;
+    var connectBodyForIntent = ExtractMethodBody(source, "ConnectAndStartPollingAsync");
+    var deletePresetBody = ExtractMethodBody(source, "OnDeletePresetClick");
+    var autoPolicyTimerBody = ExtractMethodBody(source, "OnAutoPolicyTimerTick");
+    var autoPolicyCoreBody = ExtractMethodBody(source, "RunAutoPolicyOnceCoreAsync");
+    var transientSensorFailureBody = source.Contains("private async Task ContinueAutoPolicyAfterTransientSensorReadFailureAsync", StringComparison.Ordinal)
+        ? ExtractMethodBody(source, "ContinueAutoPolicyAfterTransientSensorReadFailureAsync")
+        : string.Empty;
+    var applyAllFansBody = ExtractMethodBody(source, "ApplyAllFansAsync");
+    var setSingleFanBody = ExtractMethodBody(source, "OnSetSingleFanClick");
+    var applyManualPresetBody = ExtractMethodBody(source, "ApplyManualPresetAsync");
+    var restoreDefaultManualBody = ExtractMethodBody(source, "RestoreDefaultManualAsync");
+    var resetDellAutomaticBody = ExtractMethodBody(source, "ResetDellAutomaticModeAsync");
+    var runUiCommandBody = ExtractMethodBody(source, "RunUiCommandAsync");
+    var stopAutoManualOverrideBody = source.Contains("private void StopAutoPolicyForManualOverride()", StringComparison.Ordinal)
+        ? ExtractMethodBody(source, "StopAutoPolicyForManualOverride")
+        : string.Empty;
     Require(
         source.Contains("await RestoreLastRunningStateAsync()", StringComparison.Ordinal) &&
         source.Contains("LastRunningPresetId", StringComparison.Ordinal) &&
@@ -1329,12 +2557,134 @@ static void RunRuntimeStatePersistenceSourceChecks()
         source.Contains("ClearPersistedRunningState()", StringComparison.Ordinal),
         "Running preset, smart-auto, and stopped states should be written explicitly instead of existing only in memory.");
     Require(
+        source.Contains("private readonly DispatcherTimer _sensorPollingRetryTimer = new();", StringComparison.Ordinal) &&
+        source.Contains("_sensorPollingRetryTimer.Tick += OnSensorPollingRetryTimerTick;", StringComparison.Ordinal) &&
+        source.Contains("private async void OnSensorPollingRetryTimerTick", StringComparison.Ordinal) &&
+        source.Contains("ScheduleSensorPollingRetry(pollingFailure.Message);", StringComparison.Ordinal) &&
+        source.Contains("ConnectAndStartPollingAsync(restoreRunningState: false, scheduleRetryOnFailure: true)", StringComparison.Ordinal) &&
+        source.Contains("StopSensorPollingRetry();", StringComparison.Ordinal) &&
+        source.Contains("StopSensorPollingRetry(clearRunning: !_sensorPollingRetryRunning);", StringComparison.Ordinal) &&
+        source.Contains("private void StopSensorPollingRetry(bool clearRunning = true)", StringComparison.Ordinal) &&
+        !pollingTickBody.Contains("await ConnectAndStartPollingAsync(restoreRunningState: false);", StringComparison.Ordinal) &&
+        connectBody.Contains("scheduleRetryOnFailure", StringComparison.Ordinal),
+        "Background sensor polling failures should keep scheduling visible reconnect attempts until one succeeds or the user cancels polling.");
+    Require(
+        curveFirstTickIndex >= 0 &&
+        curveMarkActiveIndex > curveFirstTickIndex &&
+        curvePersistIndex > curveFirstTickIndex &&
+        !applyCurveBody.Contains("SetModeSummary(\"Mode.CurveAuto\"", StringComparison.Ordinal) &&
+        smartFirstTickIndex >= 0 &&
+        smartPersistIndex > smartFirstTickIndex &&
+        !startSmartBody.Contains("SetModeSummary(\"Mode.SmartAuto\"", StringComparison.Ordinal),
+        "Curve and smart auto modes should become visibly active only after the first real auto-policy tick succeeds.");
+    Require(
+        source.Contains("private async Task<bool> RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal) &&
+        applyCurveBody.Contains("if (!await RunAutoPolicyOnceCoreAsync(token, intentVersion))", StringComparison.Ordinal) &&
+        startSmartBody.Contains("if (!await RunAutoPolicyOnceCoreAsync(token, intentVersion))", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("return false;", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("return true;", StringComparison.Ordinal),
+        "Auto-policy ticks should report whether the policy may continue, so emergency Dell-auto protection cannot be followed by first-tick success persistence.");
+    Require(
+        applyCurveBody.Contains("SetModeSummary(\"Mode.CurveStarting\", curvePreset.DisplayName);", StringComparison.Ordinal) &&
+        applyCurveBody.IndexOf("SetModeSummary(\"Mode.CurveStarting\", curvePreset.DisplayName);", StringComparison.Ordinal) < curveFirstTickIndex &&
+        applyCurveBody.Contains("SetAutoPolicyPendingSummary();", StringComparison.Ordinal) &&
+        startSmartBody.Contains("SetModeSummary(\"Mode.SmartStarting\");", StringComparison.Ordinal) &&
+        startSmartBody.IndexOf("SetModeSummary(\"Mode.SmartStarting\");", StringComparison.Ordinal) < smartFirstTickIndex &&
+        startSmartBody.Contains("SetAutoPolicyPendingSummary();", StringComparison.Ordinal) &&
+        source.Contains("private void SetAutoPolicyPendingSummary()", StringComparison.Ordinal) &&
+        source.Contains("string.Equals(key, \"Mode.CurveStarting\", StringComparison.Ordinal)", StringComparison.Ordinal) &&
+        source.Contains("string.Equals(key, \"Mode.SmartStarting\", StringComparison.Ordinal)", StringComparison.Ordinal),
+        "While the first auto-policy tick is waiting on IPMI or running, the UI should show a pending automatic mode instead of stale manual mode, without marking the policy as fully active.");
+    Require(
+        source.Contains("private void ResetAutoPolicyModeSummary()", StringComparison.Ordinal) &&
+        stopAutoPolicyBody.Contains("ResetAutoPolicyModeSummary();", StringComparison.Ordinal) &&
+        stopAutoFailureBody.Contains("ResetAutoPolicyModeSummary();", StringComparison.Ordinal),
+        "Stopping or failing an auto policy should clear stale curve/smart mode text so the UI cannot report automatic fan control after the timer has stopped.");
+    Require(
+        source.Contains("private long _fanControlIntentVersion;", StringComparison.Ordinal) &&
+        source.Contains("private long _activeAutoPolicyIntentVersion;", StringComparison.Ordinal) &&
+        source.Contains("private long BeginFanControlIntent()", StringComparison.Ordinal) &&
+        source.Contains("private bool IsFanControlIntentCurrent(long intentVersion)", StringComparison.Ordinal) &&
+        connectBodyForIntent.Contains("var restoreIntentVersion = CurrentFanControlIntentVersion();", StringComparison.Ordinal) &&
+        connectBodyForIntent.Contains("restoreRunningState && IsFanControlIntentCurrent(restoreIntentVersion)", StringComparison.Ordinal) &&
+        applyCurveBody.Contains("var intentVersion = BeginFanControlIntent();", StringComparison.Ordinal) &&
+        applyCurveBody.Contains("_activeAutoPolicyIntentVersion = intentVersion;", StringComparison.Ordinal) &&
+        startSmartBody.Contains("var intentVersion = BeginFanControlIntent();", StringComparison.Ordinal) &&
+        startSmartBody.Contains("_activeAutoPolicyIntentVersion = intentVersion;", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("var intentVersion = _activeAutoPolicyIntentVersion;", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("!IsFanControlIntentCurrent(intentVersion)", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("ThrowIfFanControlIntentSuperseded(intentVersion, T(\"Status.AutoStarted\"));", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.IndexOf("ThrowIfFanControlIntentSuperseded(intentVersion, T(\"Status.AutoStarted\"));", StringComparison.Ordinal) <
+        autoPolicyCoreBody.IndexOf("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);", StringComparison.Ordinal),
+        "Fan-control commands should use a latest-user-intent version so startup restore, queued auto starts, and in-flight auto ticks cannot override a newer manual or Dell-auto command.");
+    Require(
+        source.Contains("private void StopAutoPolicyForManualOverride()", StringComparison.Ordinal) &&
+        ContainsBefore(runUiCommandBody, "beforeWaitForIpmiLock?.Invoke();", "await _ipmiOperationLock.WaitAsync") &&
+        applyAllFansBody.Contains("beforeWaitForIpmiLock: StopAutoPolicyForManualOverride", StringComparison.Ordinal) &&
+        setSingleFanBody.Contains("beforeWaitForIpmiLock: StopAutoPolicyForManualOverride", StringComparison.Ordinal) &&
+        applyManualPresetBody.Contains("beforeWaitForIpmiLock: StopAutoPolicyForManualOverride", StringComparison.Ordinal) &&
+        restoreDefaultManualBody.Contains("beforeWaitForIpmiLock: StopAutoPolicyForManualOverride", StringComparison.Ordinal) &&
+        resetDellAutomaticBody.Contains("beforeWaitForIpmiLock: StopAutoPolicyForManualOverride", StringComparison.Ordinal) &&
+        stopAutoManualOverrideBody.Contains("_autoPolicyTimer.Stop();", StringComparison.Ordinal) &&
+        stopAutoManualOverrideBody.Contains("SetAutoPolicySummary(false);", StringComparison.Ordinal) &&
+        stopAutoManualOverrideBody.Contains("ClearPersistedRunningState();", StringComparison.Ordinal) &&
+        stopAutoManualOverrideBody.Contains("ClearAutoPolicyFanTargetCache();", StringComparison.Ordinal) &&
+        stopAutoManualOverrideBody.Contains("ClearForcedAutoPolicyFanCommand();", StringComparison.Ordinal),
+        "Manual fan and Dell automatic commands should stop software auto policy before waiting for the IPMI lock so later temperature-based ticks cannot overwrite the user command.");
+    Require(
+        deletePresetBody.Contains("InvalidateFanControlIntent();", StringComparison.Ordinal) &&
+        deletePresetBody.Contains("StopAutoPolicyForManualOverride();", StringComparison.Ordinal),
+        "Deleting the currently running curve preset should fully stop and persistently clear automatic fan control instead of only stopping the timer.");
+    Require(
+        source.Contains("private void StopAutoPolicyAfterEmergencyDellAuto()", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("StopAutoPolicyAfterEmergencyDellAuto();", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("ShowStatus(emergencyMessage, InfoBarSeverity.Warning);", StringComparison.Ordinal) &&
+        stopAutoEmergencyBody.Contains("_autoPolicyTimer.Stop();", StringComparison.Ordinal) &&
+        stopAutoEmergencyBody.Contains("_activeAutoPolicyIntentVersion = 0;", StringComparison.Ordinal) &&
+        stopAutoEmergencyBody.Contains("SetAutoPolicySummary(false);", StringComparison.Ordinal) &&
+        stopAutoEmergencyBody.Contains("ClearAutoPolicyFanTargetCache();", StringComparison.Ordinal) &&
+        stopAutoEmergencyBody.Contains("ClearForcedAutoPolicyFanCommand();", StringComparison.Ordinal) &&
+        stopAutoEmergencyBody.Contains("MarkActivePreset(\"dell-auto\", persistRunningState: true);", StringComparison.Ordinal) &&
+        !stopAutoEmergencyBody.Contains("ResetAutoPolicyModeSummary();", StringComparison.Ordinal),
+        "Emergency Dell-auto protection should stop the software auto timer, persist Dell auto as the active hardware mode, clear auto caches, and show a visible warning so stale curve/smart-auto state cannot keep running.");
+    Require(
+        source.Contains("private sealed class AutoPolicyTransientSensorReadException", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.ReadSensors", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("throw new AutoPolicyTransientSensorReadException(ex);", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("catch (AutoPolicyTransientSensorReadException ex)", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("await ContinueAutoPolicyAfterTransientSensorReadFailureAsync(ex, intentVersion);", StringComparison.Ordinal) &&
+        !autoPolicyTimerBody.Contains("catch (Exception ex)\r\n        {\r\n            StopAutoPolicyAfterFailure();\r\n            ShowFailure(ex);\r\n        }", StringComparison.Ordinal) &&
+        transientSensorFailureBody.Contains("IsFanControlIntentCurrent(intentVersion)", StringComparison.Ordinal) &&
+        !transientSensorFailureBody.Contains("StopAutoPolicyAfterFailure()", StringComparison.Ordinal) &&
+        !transientSensorFailureBody.Contains("ClearPersistedRunningState()", StringComparison.Ordinal),
+        "Already-running auto policy ticks should keep retrying after transient SDR/RMCP+ sensor-read failures instead of clearing the running preset and falling back to manual mode.");
+    Require(
         source.Contains("if (shouldReapply)", StringComparison.Ordinal) &&
         source.Contains("await ApplyPresetAsync(savedPreset)", StringComparison.Ordinal),
         "Saving the active preset or active curve should immediately re-apply it instead of requiring another Switch click.");
     Require(
+        source.Contains("ClearStaleFailureStatusAfterSensorRefreshSuccess()", StringComparison.Ordinal) &&
+        source.Contains("StatusInfoBar.Severity != InfoBarSeverity.Error", StringComparison.Ordinal) &&
+        source.Contains("StatusInfoBar.IsOpen = false", StringComparison.Ordinal),
+        "A real successful sensor refresh should close stale top-level failure banners while preserving the logged failure record.");
+    Require(
         !source.Contains("waitForIpmiLock: false", StringComparison.Ordinal),
         "User-triggered fan mode changes should wait for the current IPMI command instead of showing a busy error.");
+    Require(
+        appSource.Contains("NormalizeProcessWorkingDirectory()", StringComparison.Ordinal) &&
+        appSource.Contains("Directory.SetCurrentDirectory(applicationDirectory)", StringComparison.Ordinal),
+        "Startup should normalize the process working directory to the app directory so Start Menu shortcut working directories cannot affect relative paths.");
+    Require(
+        appSource.Contains("EnsureSingleInstance()", StringComparison.Ordinal) &&
+        appSource.Contains("Process.GetProcessesByName(currentProcess.ProcessName)", StringComparison.Ordinal) &&
+        appSource.Contains("SingleInstanceMutexName", StringComparison.Ordinal) &&
+        appSource.Contains("DuplicateStartupExitCode", StringComparison.Ordinal) &&
+        appSource.Contains("Environment.Exit(DuplicateStartupExitCode)", StringComparison.Ordinal) &&
+        appSource.Contains("MessageBoxW", StringComparison.Ordinal) &&
+        appSource.Contains("settings.json", StringComparison.Ordinal) &&
+        appSource.Contains("IPMI", StringComparison.Ordinal),
+        "Startup should explicitly block duplicate app instances with a non-zero exit code so settings persistence and IPMI fan commands cannot race across old and new builds.");
 }
 
 static void RunDashboardChartLayoutChecks()
@@ -1436,6 +2786,255 @@ static void RunDashboardChartLayoutChecks()
         pageSource.Contains("QueueVisualizationHistoryPersistence", StringComparison.Ordinal) &&
         pageSource.Contains("PersistVisualizationHistoryPoint", StringComparison.Ordinal),
         "Visualization history should persist timestamped chart snapshots for the last seven days.");
+    Require(
+        pageSource.Contains("RepairVisualizationHistoryFile", StringComparison.Ordinal) &&
+        pageSource.Contains("BuildVisualizationHistoryRepairPath", StringComparison.Ordinal) &&
+        pageSource.Contains(".corrupt-", StringComparison.Ordinal) &&
+        pageSource.Contains("File.Move(tempPath, historyPath, overwrite: true)", StringComparison.Ordinal) &&
+        pageSource.Contains("JsonException", StringComparison.Ordinal) &&
+        pageSource.Contains("validLines.Add(line);", StringComparison.Ordinal),
+        "Corrupt chart-history JSONL rows should be reported visibly, quarantined with the original file preserved, and removed from the active history file so startup does not fail repeatedly.");
+}
+
+static void RunWebView2UserDataSourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var initStart = source.IndexOf("private async Task InitializeVisualizationAsync", StringComparison.Ordinal);
+    var ensureIndex = source.IndexOf("await VisualizationWebView.EnsureCoreWebView2Async();", initStart, StringComparison.Ordinal);
+    var userDataIndex = source.IndexOf("Environment.SetEnvironmentVariable(\"WEBVIEW2_USER_DATA_FOLDER\", userDataFolder, EnvironmentVariableTarget.Process)", initStart, StringComparison.Ordinal);
+    Require(
+        initStart >= 0 &&
+        userDataIndex > initStart &&
+        ensureIndex > userDataIndex &&
+        source.Contains("Environment.SetEnvironmentVariable(\"WEBVIEW2_USER_DATA_FOLDER\", userDataFolder, EnvironmentVariableTarget.Process)", StringComparison.Ordinal) &&
+        source.Contains("Environment.SpecialFolder.LocalApplicationData", StringComparison.Ordinal) &&
+        source.Contains("\"WebView2\"", StringComparison.Ordinal),
+        "WebView2 user data should be placed under LocalAppData before initialization so release folders stay clean and writable.");
+}
+
+static void RunUserCommandLogFlushSourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var commandTraceSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Services", "CommandTraceEventArgs.cs")));
+    var ipmiSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Services", "IpmiCommandService.cs")));
+    var commandCompletedBody = ExtractMethodBody(source, "OnCommandCompleted");
+    var addCommandLogBody = ExtractMethodBody(source, "AddCommandLog");
+    var persistCommandIndex = commandCompletedBody.IndexOf("AddCommandLog(e);", StringComparison.Ordinal);
+    var dispatchCommandIndex = commandCompletedBody.IndexOf("DispatcherQueue.TryEnqueue", StringComparison.Ordinal);
+    Require(
+        commandTraceSource.Contains("public required DateTimeOffset StartedAt", StringComparison.Ordinal) &&
+        commandTraceSource.Contains("public required DateTimeOffset FinishedAt", StringComparison.Ordinal) &&
+        ipmiSource.Contains("StartedAt = startedAt", StringComparison.Ordinal) &&
+        ipmiSource.Contains("FinishedAt = finishedAt", StringComparison.Ordinal),
+        "IPMI command traces should preserve process start and finish timestamps instead of assigning delayed UI-dispatch timestamps.");
+    Require(
+        persistCommandIndex >= 0 &&
+        dispatchCommandIndex > persistCommandIndex &&
+        commandCompletedBody.Contains("if (!DispatcherQueue.TryEnqueue", StringComparison.Ordinal) &&
+        addCommandLogBody.Contains("Timestamp = e.FinishedAt", StringComparison.Ordinal) &&
+        addCommandLogBody.Contains("StartedAt = e.StartedAt", StringComparison.Ordinal) &&
+        addCommandLogBody.Contains("FinishedAt = e.FinishedAt", StringComparison.Ordinal),
+        "IPMI command completion records should enter the durable log queue before UI dispatch so the enclosing operation flush covers them.");
+    var runCommandStart = source.IndexOf("private async Task<bool> RunUiCommandAsync", StringComparison.Ordinal);
+    var runCommandEnd = source.IndexOf("private void ReplaceSensors", runCommandStart, StringComparison.Ordinal);
+    var runCommandBody = runCommandStart >= 0 && runCommandEnd > runCommandStart
+        ? source[runCommandStart..runCommandEnd]
+        : string.Empty;
+    var successIndex = runCommandBody.IndexOf("operation.Succeed(description);", StringComparison.Ordinal);
+    var flushAfterSuccessIndex = runCommandBody.IndexOf("await FlushAppLogAsync();", successIndex, StringComparison.Ordinal);
+    var heroSuccessIndex = runCommandBody.IndexOf("SetHeroRequestStatus(F(\"Hero.RequestSucceeded\", description));", StringComparison.Ordinal);
+    Require(
+        runCommandBody.Contains("var operationCompleted = false;", StringComparison.Ordinal) &&
+        successIndex >= 0 &&
+        flushAfterSuccessIndex > successIndex &&
+        heroSuccessIndex > flushAfterSuccessIndex &&
+        runCommandBody.Contains("if (!operationCompleted && operation is not null)", StringComparison.Ordinal),
+        "User commands should flush the terminal operation log before showing success and should not try to fail an already-completed operation after a log-write failure.");
+
+    var autoPolicyStart = source.IndexOf("private async Task<bool> RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
+    var autoPolicyEnd = source.IndexOf("private static Dictionary<string, string> BuildAutoPolicyFanCommandProperties", autoPolicyStart, StringComparison.Ordinal);
+    var autoPolicyBody = autoPolicyStart >= 0 && autoPolicyEnd > autoPolicyStart
+        ? source[autoPolicyStart..autoPolicyEnd]
+        : string.Empty;
+    Require(
+        autoPolicyBody.Contains("var operationCompleted = false;", StringComparison.Ordinal) &&
+        autoPolicyBody.Contains("await FlushAppLogAsync();", StringComparison.Ordinal) &&
+        autoPolicyBody.Contains("if (!operationCompleted)", StringComparison.Ordinal),
+        "Auto-policy ticks should treat runtime-log write failures as real operation failures, including unchanged-target and background timer paths.");
+    var emergencyStart = autoPolicyBody.IndexOf("if (cpuTemp >= _settings.EmergencyCpuTemperatureCelsius)", StringComparison.Ordinal);
+    var unchangedStart = autoPolicyBody.IndexOf("if (ShouldSkipUnchangedAutoPolicyFanCommand", StringComparison.Ordinal);
+    var appliedStart = autoPolicyBody.IndexOf("fanCommandProperties = BuildAutoPolicyFanCommandProperties", StringComparison.Ordinal);
+    var emergencyBody = emergencyStart >= 0 && unchangedStart > emergencyStart
+        ? autoPolicyBody[emergencyStart..unchangedStart]
+        : string.Empty;
+    var unchangedBody = unchangedStart >= 0 && appliedStart > unchangedStart
+        ? autoPolicyBody[unchangedStart..appliedStart]
+        : string.Empty;
+    var appliedBody = appliedStart >= 0
+        ? autoPolicyBody[appliedStart..]
+        : string.Empty;
+    Require(
+        emergencyBody.IndexOf("await FlushAppLogAsync();", StringComparison.Ordinal) < emergencyBody.IndexOf("ShowStatus(", StringComparison.Ordinal) &&
+        unchangedBody.IndexOf("await FlushAppLogAsync();", StringComparison.Ordinal) < unchangedBody.IndexOf("SetAutoModeSummary(", StringComparison.Ordinal) &&
+        appliedBody.IndexOf("await FlushAppLogAsync();", StringComparison.Ordinal) < appliedBody.IndexOf("SetAutoModeSummary(", StringComparison.Ordinal) &&
+        !autoPolicyBody.Contains("AddLog(T(\"Log.Info\"), unchangedMessage);", StringComparison.Ordinal) &&
+        !autoPolicyBody.Contains("AddLog(T(\"Log.Info\"), message);", StringComparison.Ordinal),
+        "Auto-policy terminal records should be flushed before success, unchanged-target, or emergency state is shown, without adding a second unflushed success record.");
+
+    var sensorRefreshStart = source.IndexOf("private async Task<TimeSpan> RefreshSensorsCoreAsync", StringComparison.Ordinal);
+    var sensorRefreshEnd = source.IndexOf("private async void OnSetAllFansClick", sensorRefreshStart, StringComparison.Ordinal);
+    var sensorRefreshBody = sensorRefreshStart >= 0 && sensorRefreshEnd > sensorRefreshStart
+        ? source[sensorRefreshStart..sensorRefreshEnd]
+        : string.Empty;
+    Require(
+        sensorRefreshBody.Contains("var operationCompleted = false;", StringComparison.Ordinal) &&
+        sensorRefreshBody.Contains("operationCompleted = true;", StringComparison.Ordinal) &&
+        sensorRefreshBody.Contains("await FlushAppLogAsync();", StringComparison.Ordinal) &&
+        sensorRefreshBody.Contains("if (!operationCompleted)", StringComparison.Ordinal) &&
+        sensorRefreshBody.IndexOf("await FlushAppLogAsync();", StringComparison.Ordinal) <
+            sensorRefreshBody.IndexOf("SetHeroRequestStatus(F(\"Hero.SensorRefreshSucceeded\"", StringComparison.Ordinal),
+        "Sensor refresh operations should flush their own terminal log writes before returning success, including background polling paths.");
+
+    var durableUiLogBody = ExtractMethodBody(source, "WriteDurableUiLogAsync");
+    Require(
+        durableUiLogBody.IndexOf("_appLog.Write(", StringComparison.Ordinal) < durableUiLogBody.IndexOf("await FlushAppLogAsync();", StringComparison.Ordinal) &&
+        durableUiLogBody.IndexOf("await FlushAppLogAsync();", StringComparison.Ordinal) < durableUiLogBody.IndexOf("AddVolatileLog(", StringComparison.Ordinal),
+        "Durable UI log entries should reach disk before they appear in the visible activity list.");
+    foreach (var methodName in new[]
+             {
+                 "OnSavePresetClick",
+                 "OnDeletePresetClick",
+                 "OnAddPresetClick",
+                 "OnAddCurvePresetClick",
+                 "OnAddPowerCurvePresetClick",
+                 "OnSaveSettingsClick",
+             })
+    {
+        var methodBody = ExtractMethodBody(source, methodName);
+        Require(
+            methodBody.IndexOf("await WriteDurableUiLogAsync(", StringComparison.Ordinal) >= 0 &&
+            methodBody.IndexOf("await WriteDurableUiLogAsync(", StringComparison.Ordinal) < methodBody.IndexOf("ShowStatus(", StringComparison.Ordinal),
+            $"{methodName} should flush its success log before showing success.");
+    }
+
+    Require(
+        runCommandBody.Contains("Func<string?>? successMessageFactory", StringComparison.Ordinal) &&
+        runCommandBody.IndexOf("await FlushAppLogAsync();", successIndex, StringComparison.Ordinal) <
+            runCommandBody.IndexOf("successMessageFactory?.Invoke()", StringComparison.Ordinal),
+        "UI command callbacks should defer their success message until the enclosing terminal operation log has been flushed.");
+    foreach (var methodName in new[]
+             {
+                 "RefreshSensorsAsync",
+                 "ApplyAllFansAsync",
+                 "OnSetSingleFanClick",
+                 "ApplyManualPresetAsync",
+                 "RestoreDefaultManualAsync",
+                 "ResetDellAutomaticModeAsync",
+             })
+    {
+        var methodBody = ExtractMethodBody(source, methodName);
+        Require(
+            methodBody.Contains("successMessageFactory:", StringComparison.Ordinal) &&
+            !methodBody.Contains("InfoBarSeverity.Success", StringComparison.Ordinal),
+            $"{methodName} should provide a deferred success message instead of displaying it inside the unflushed command callback.");
+    }
+
+    var latencyBody = ExtractMethodBody(source, "CheckSensorPollingLatency");
+    Require(
+        source.Contains("private async Task CheckSensorPollingLatency", StringComparison.Ordinal) &&
+        CountOccurrences(source, "await CheckSensorPollingLatency(elapsed);") == 3 &&
+        latencyBody.IndexOf("await WriteDurableUiLogAsync(", StringComparison.Ordinal) < latencyBody.IndexOf("ShowStatus(", StringComparison.Ordinal),
+        "Polling recovery should flush its recovery record before showing a successful recovery state on every sensor-refresh path.");
+}
+
+static void RunStartupFailureBoundarySourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var pageLoadedBody = ExtractMethodBody(source, "OnPageLoaded");
+    var reconnectBody = ExtractMethodBody(source, "OnSensorPollingRetryTimerTick");
+    var connectBody = ExtractMethodBody(source, "ConnectAndStartPollingAsync");
+    var startPollingBody = source.Contains("private async Task StartSensorPollingAsync", StringComparison.Ordinal)
+        ? ExtractMethodBody(source, "StartSensorPollingAsync")
+        : string.Empty;
+
+    Require(
+        source.Contains("private async void OnPageLoaded", StringComparison.Ordinal) &&
+        pageLoadedBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        pageLoadedBody.Contains("await HandlePageLoadFailureAsync(ex);", StringComparison.Ordinal) &&
+        source.Contains("private async Task HandlePageLoadFailureAsync", StringComparison.Ordinal),
+        "Page loading should keep damaged settings and invalid presets inside a top-level async exception boundary that reports the real failure.");
+    Require(
+        reconnectBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        reconnectBody.Contains("ShowFailure(ex);", StringComparison.Ordinal) &&
+        reconnectBody.Contains("StopSensorPollingRetry();", StringComparison.Ordinal),
+        "The async-void polling reconnect callback should stop and surface unexpected failures instead of escaping through DispatcherQueue.");
+    Require(
+        connectBody.Contains("await StartSensorPollingAsync();", StringComparison.Ordinal) &&
+        !connectBody.Contains("StartSensorPolling();", StringComparison.Ordinal) &&
+        startPollingBody.Contains("_appLog.Write(", StringComparison.Ordinal),
+        "Connection startup should use a log-gated asynchronous polling start instead of starting the timer inside the connection command body.");
+
+    var writeIndex = startPollingBody.IndexOf("_appLog.Write(", StringComparison.Ordinal);
+    var flushIndex = startPollingBody.IndexOf("await FlushAppLogAsync();", writeIndex, StringComparison.Ordinal);
+    var timerStartIndex = startPollingBody.IndexOf("_sensorPollingTimer.Start();", StringComparison.Ordinal);
+    Require(
+        writeIndex >= 0 && flushIndex > writeIndex && timerStartIndex > flushIndex,
+        "Sensor polling must persist and flush its start record before the background timer is allowed to run.");
+}
+
+static void RunSettingsStoreAtomicSaveSourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile(Path.Combine("Services", "SettingsStore.cs")));
+    Require(
+        source.Contains("FileMode.CreateNew", StringComparison.Ordinal) &&
+        source.Contains("FileOptions.WriteThrough", StringComparison.Ordinal) &&
+        source.Contains("stream.Flush(flushToDisk: true);", StringComparison.Ordinal) &&
+        source.Contains("File.Move(tempSettingsPath, SettingsPath, overwrite: true);", StringComparison.Ordinal) &&
+        source.Contains("finally", StringComparison.Ordinal) &&
+        !source.Contains("File.WriteAllText(SettingsPath", StringComparison.Ordinal),
+        "SettingsStore should durably write a unique temporary file and atomically replace settings.json instead of truncating the active file in place.");
+}
+
+static void RunSingleInstanceRaceSourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile("App.xaml.cs"));
+    var methodStart = source.IndexOf("private static void EnsureSingleInstance", StringComparison.Ordinal);
+    var methodEnd = source.IndexOf("private static void StopDuplicateStartup", methodStart, StringComparison.Ordinal);
+    var body = methodStart >= 0 && methodEnd > methodStart
+        ? source[methodStart..methodEnd]
+        : string.Empty;
+    var mutexIndex = body.IndexOf("new Mutex(initiallyOwned: true", StringComparison.Ordinal);
+    var processScanIndex = body.IndexOf("Process.GetProcessesByName", StringComparison.Ordinal);
+    Require(
+        mutexIndex >= 0 && processScanIndex > mutexIndex &&
+        body.Contains("FileVersionInfo", StringComparison.Ordinal) &&
+        body.Contains("createdNew", StringComparison.Ordinal),
+        "Single-instance startup should acquire the mutex before legacy-process discovery and ignore same-version startup races.");
+}
+
+static void RunReleaseVersionMetadataChecks()
+{
+    var project = File.ReadAllText(FindRepositoryFile("DellR730xdFanControlCenter.csproj"));
+    var manifest = File.ReadAllText(FindRepositoryFile("Package.appxmanifest"));
+    Require(
+        project.Contains("<Version>1.1.0</Version>", StringComparison.Ordinal) &&
+        project.Contains("<AssemblyVersion>1.1.0.0</AssemblyVersion>", StringComparison.Ordinal) &&
+        project.Contains("<FileVersion>1.1.0.0</FileVersion>", StringComparison.Ordinal) &&
+        project.Contains("<InformationalVersion>1.1.0</InformationalVersion>", StringComparison.Ordinal),
+        "Release binaries should carry an explicit application version so fixed builds are distinguishable from 1.0.0 artifacts.");
+    Require(
+        manifest.Contains("Version=\"1.1.0.0\"", StringComparison.Ordinal),
+        "MSIX package identity version should be bumped with release fixes so Windows can install an update instead of rejecting same-version packages.");
+}
+
+static void RunTestHarnessFailureExitSourceChecks()
+{
+    var source = File.ReadAllText(FindRepositoryFile("Program.cs"));
+    Require(
+        source.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        source.Contains("Preset model checks failed.", StringComparison.Ordinal) &&
+        source.Contains("return 1;", StringComparison.Ordinal),
+        "PresetModelTests should convert assertion failures into an explicit non-zero test result instead of an unhandled exception recorded as APPCRASH.");
 }
 
 static int FindOverviewSectionRow(XDocument xaml, XNamespace ui, XNamespace local, string localizationKey)
@@ -1456,8 +3055,47 @@ static int FindOverviewSectionRow(XDocument xaml, XNamespace ui, XNamespace loca
 
 static string ExtractMethodBody(string source, string methodName)
 {
-    var signature = $"private void {methodName}";
-    var signatureStart = source.IndexOf(signature, StringComparison.Ordinal);
+    var signatureStart = source.IndexOf($"private void {methodName}", StringComparison.Ordinal);
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private async void {methodName}", StringComparison.Ordinal);
+    }
+
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private Task {methodName}", StringComparison.Ordinal);
+    }
+
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private async Task {methodName}", StringComparison.Ordinal);
+    }
+
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private Task<bool> {methodName}", StringComparison.Ordinal);
+    }
+
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private async Task<bool> {methodName}", StringComparison.Ordinal);
+    }
+
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private string {methodName}", StringComparison.Ordinal);
+    }
+
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private static void {methodName}", StringComparison.Ordinal);
+    }
+
+    if (signatureStart < 0)
+    {
+        signatureStart = source.IndexOf($"private static float {methodName}", StringComparison.Ordinal);
+    }
+
     if (signatureStart < 0)
     {
         throw new InvalidOperationException($"Unable to find method: {methodName}");
@@ -1487,6 +3125,13 @@ static string ExtractMethodBody(string source, string methodName)
     }
 
     throw new InvalidOperationException($"Unable to find method body end: {methodName}");
+}
+
+static bool ContainsBefore(string source, string first, string second)
+{
+    var firstIndex = source.IndexOf(first, StringComparison.Ordinal);
+    var secondIndex = source.IndexOf(second, StringComparison.Ordinal);
+    return firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex;
 }
 
 static string FindRepositoryFile(string fileName)
@@ -1541,6 +3186,404 @@ static void RunHeroMetricSeverityStyleChecks()
     Require(HeroMetricSeverityStyle.ForCurrentAmps(9).SemanticName == "Critical", "9 A should be critical for the hero current metric.");
 
     Require(HeroMetricSeverityStyle.ForTemperature(null).SemanticName == "Unknown", "Missing hero values should use the unknown metric color.");
+}
+
+static void RunSensorReadingAvailabilityChecks()
+{
+    static SensorReading Reading(
+        string key,
+        string status = "ok",
+        string value = "",
+        double? numericValue = null)
+    {
+        return new SensorReading
+        {
+            Key = key,
+            Status = status,
+            Value = value,
+            NumericValue = numericValue,
+        };
+    }
+
+    Require(SensorReadingAvailability.IsDisplayable(Reading("CPU Usage", numericValue: 0)), "A real zero-percent performance reading should remain visible.");
+    Require(SensorReadingAvailability.IsDisplayable(Reading("ROMB Battery")), "An ok discrete battery sensor with an empty numeric reading should remain visible.");
+    Require(SensorReadingAvailability.IsDisplayable(Reading("Drive 0", value: "Drive Present")), "A real present-drive status should remain visible.");
+    Require(!SensorReadingAvailability.IsDisplayable(Reading("Memory RAID", "ns", "No Reading")), "An unscanned Memory RAID placeholder should not be displayed.");
+    Require(!SensorReadingAvailability.IsDisplayable(Reading("ROMB Battery", "ns", "Disabled")), "A disabled non-scannable ROMB placeholder should not be displayed.");
+    Require(!SensorReadingAvailability.IsDisplayable(Reading("Drive 15", "ok", "Disabled")), "An explicitly disabled item should not be displayed as live hardware.");
+    Require(!SensorReadingAvailability.IsDisplayable(Reading("Unknown", "na", "N/A")), "An unavailable SDR row should not be displayed.");
+    Require(SensorReadingAvailability.IsDisplayable(Reading("Storage Alert", "cr", "No Reading")), "A real critical SDR status should remain visible even when it has no numeric reading.");
+    Require(!SensorReadingAvailability.IsDisplayable(Reading("CPU Usage", numericValue: double.NaN)), "A non-finite numeric reading should not be displayed.");
+    Require(!SensorReadingAvailability.IsDisplayable(Reading("", "", "")), "A completely empty SDR row should not be displayed.");
+}
+
+static void RunDashboardSensorPresentationChecks()
+{
+    static DashboardSensorPresentation Present(
+        string key,
+        double? numericValue = null,
+        string unit = "",
+        string status = "ok",
+        string value = "")
+    {
+        return DashboardSensorPresentation.FromSensor(new SensorReading
+        {
+            Key = key,
+            NumericValue = numericValue,
+            Unit = unit,
+            Status = status,
+            Value = value,
+        });
+    }
+
+    var kindCases = new (string Key, DashboardIconKind Kind, double? NumericValue)[]
+    {
+        ("Temp", DashboardIconKind.Temperature, 52),
+        ("Fan1 RPM", DashboardIconKind.Fan, 3600),
+        ("CPU Usage", DashboardIconKind.CpuUsage, 25),
+        ("MEM Usage", DashboardIconKind.MemoryUsage, 40),
+        ("IO Usage", DashboardIconKind.IoUsage, 10),
+        ("SYS Usage", DashboardIconKind.SystemUsage, 30),
+        ("Pwr Consumption", DashboardIconKind.Power, 420),
+        ("Voltage 1", DashboardIconKind.Voltage, 230),
+        ("Current 1", DashboardIconKind.Current, 1.8),
+        ("Intrusion", DashboardIconKind.Intrusion, null),
+        ("Fan Redundancy", DashboardIconKind.FanRedundancy, null),
+        ("PS Redundancy", DashboardIconKind.PowerRedundancy, null),
+        ("CMOS Battery", DashboardIconKind.CmosBattery, null),
+        ("ROMB Battery", DashboardIconKind.RombBattery, null),
+        ("BBU", DashboardIconKind.RombBattery, null),
+        ("Drive 0", DashboardIconKind.StorageDrive, null),
+        ("PERC Controller", DashboardIconKind.RaidController, null),
+        ("Cache Policy", DashboardIconKind.StorageCache, null),
+        ("USB Over-current", DashboardIconKind.UsbOverCurrent, null),
+        ("Power Optimized", DashboardIconKind.PowerPolicy, null),
+        ("Vendor Event", DashboardIconKind.GenericStatus, null),
+    };
+    foreach (var testCase in kindCases)
+    {
+        var presentation = DashboardSensorPresentation.FromSensor(new SensorReading
+        {
+            Key = testCase.Key,
+            Status = "ok",
+            NumericValue = testCase.NumericValue,
+        });
+        Require(presentation.IconKind == testCase.Kind, $"Raw sensor key '{testCase.Key}' should resolve to {testCase.Kind}.");
+    }
+
+    var nearMatch = DashboardSensorPresentation.FromSensor(new SensorReading
+    {
+        Key = "CPU Usage Detail",
+        Unit = "percent",
+        Status = "ok",
+        NumericValue = 45,
+    });
+    Require(
+        nearMatch.IconKind == DashboardIconKind.GenericStatus && nearMatch.VisualState == DashboardVisualState.Normal,
+        "Classification should keep an unmatched ok sensor on a healthy generic state icon instead of guessing a metric type or threshold.");
+
+    foreach (var fallback in new[]
+             {
+                 (Unit: "degrees C", Kind: DashboardIconKind.Temperature),
+                 (Unit: "RPM", Kind: DashboardIconKind.Fan),
+                 (Unit: "Watts", Kind: DashboardIconKind.Power),
+                 (Unit: "Volts", Kind: DashboardIconKind.Voltage),
+                 (Unit: "Amps", Kind: DashboardIconKind.Current),
+             })
+    {
+        Require(
+            Present("Vendor Reading", 25, fallback.Unit).IconKind == fallback.Kind,
+            $"An otherwise unknown sensor with the unambiguous {fallback.Unit} unit should use {fallback.Kind}.");
+    }
+
+    foreach (var fallback in new[]
+             {
+                 (Unit: "Watts", Kind: DashboardIconKind.Power, Value: 420d),
+                 (Unit: "Volts", Kind: DashboardIconKind.Voltage, Value: 230d),
+                 (Unit: "Amps", Kind: DashboardIconKind.Current, Value: 1.5d),
+             })
+    {
+        var unitOnlyElectrical = Present("Vendor Reading", fallback.Value, fallback.Unit);
+        Require(
+            unitOnlyElectrical.IconKind == fallback.Kind &&
+            unitOnlyElectrical.VisualState == DashboardVisualState.Information &&
+            unitOnlyElectrical.MotionKind == DashboardMotionKind.None &&
+            !unitOnlyElectrical.IsMotionActive &&
+            unitOnlyElectrical.NormalizedLevel == 0.5,
+            $"An unknown {fallback.Unit} sensor should keep the electrical icon but use neutral informational presentation without trusted hardware thresholds.");
+
+        var nonFiniteUnitOnlyElectrical = Present("Vendor Reading", double.NaN, fallback.Unit);
+        Require(
+            nonFiniteUnitOnlyElectrical.VisualState == DashboardVisualState.Unavailable &&
+            nonFiniteUnitOnlyElectrical.MotionKind == DashboardMotionKind.None &&
+            nonFiniteUnitOnlyElectrical.NormalizedLevel == 0,
+            $"A non-finite unknown {fallback.Unit} sensor should remain unavailable rather than receiving neutral electrical presentation.");
+    }
+
+    var knownVoltagePresentation = Present("Voltage 1", 230, "Volts");
+    Require(
+        knownVoltagePresentation.VisualState == DashboardVisualState.Normal &&
+        knownVoltagePresentation.MotionKind == DashboardMotionKind.GaugeTransition &&
+        knownVoltagePresentation.IsMotionActive &&
+        Math.Abs(knownVoltagePresentation.NormalizedLevel - (40d / 70d)) < 0.000001,
+        "A known Voltage 1 sensor should retain trusted voltage severity, gauge motion, and 190-260 V normalization.");
+
+    var unitOnlyCritical = Present("Vendor Reading", 230, "Volts", status: "cr");
+    var unitOnlyWarning = Present("Vendor Reading", 230, "Volts", status: "nc");
+    var unitOnlyDisabled = Present("Vendor Reading", 230, "Volts", status: "ok", value: "Disabled");
+    Require(
+        unitOnlyCritical.VisualState == DashboardVisualState.Critical &&
+        unitOnlyCritical.MotionKind == DashboardMotionKind.WarningPulse &&
+        unitOnlyCritical.IsMotionActive,
+        "A unit-only Volts sensor should still honor a trusted critical status code before neutral threshold-free presentation.");
+    Require(
+        unitOnlyWarning.VisualState == DashboardVisualState.Warning &&
+        unitOnlyWarning.MotionKind == DashboardMotionKind.WarningPulse &&
+        unitOnlyWarning.IsMotionActive,
+        "A unit-only Volts sensor should still honor a trusted warning status code.");
+    Require(
+        unitOnlyDisabled.VisualState == DashboardVisualState.Inactive &&
+        unitOnlyDisabled.MotionKind == DashboardMotionKind.None &&
+        !unitOnlyDisabled.IsMotionActive,
+        "A unit-only Volts sensor should still honor an explicit Disabled value before neutral presentation.");
+
+    var numericFanWarning = Present("Fan1 RPM", 3600, "RPM", status: "nc");
+    var numericTemperatureCritical = Present("Temp 3.1", 65, "degrees C", status: "cr");
+    var numericVoltageWarning = Present("Voltage 1", 250, "Volts", status: "nc");
+    Require(
+        numericFanWarning.VisualState == DashboardVisualState.Warning &&
+        numericFanWarning.MotionKind == DashboardMotionKind.FanRotation &&
+        numericFanWarning.MotionPeriodSeconds > 0 &&
+        numericFanWarning.IsMotionActive,
+        "A fan warning should preserve the real RPM rotation while adding warning state.");
+    Require(
+        numericTemperatureCritical.VisualState == DashboardVisualState.Critical &&
+        numericTemperatureCritical.MotionKind == DashboardMotionKind.LevelTransition &&
+        numericTemperatureCritical.NormalizedLevel == 0.65 &&
+        numericTemperatureCritical.IsMotionActive,
+        "A temperature critical status should preserve its real level transition while adding critical state.");
+    Require(
+        numericVoltageWarning.VisualState == DashboardVisualState.Warning &&
+        numericVoltageWarning.MotionKind == DashboardMotionKind.GaugeTransition &&
+        Math.Abs(numericVoltageWarning.NormalizedLevel - (60d / 70d)) < 0.000001 &&
+        numericVoltageWarning.IsMotionActive,
+        "A known-voltage warning should preserve its trusted gauge position while adding warning state.");
+
+    var ambiguousPercent = Present("Vendor Usage", 25, "percent");
+    Require(
+        ambiguousPercent.IconKind == DashboardIconKind.GenericStatus && ambiguousPercent.VisualState == DashboardVisualState.Normal,
+        "An unknown ok percent sensor should keep a healthy generic icon because percent alone cannot select a CPU, memory, IO, or system icon.");
+    Require(
+        Present("CPU Usage", 25, "Watts").IconKind == DashboardIconKind.CpuUsage &&
+        Present("Pwr Consumption", 25, "RPM").IconKind == DashboardIconKind.Power &&
+        Present("Voltage 1", 25, "degrees C").IconKind == DashboardIconKind.Voltage,
+        "Exact raw keys should win over misleading fallback units.");
+
+    foreach (var unavailable in new[]
+             {
+                  new SensorReading { Key = "CPU Usage", Status = "ns", NumericValue = 30 },
+                  new SensorReading { Key = "Voltage 1", Status = "na", NumericValue = 230 },
+                  new SensorReading { Key = "Fan Redundancy", Status = "ok", Value = "No Reading" },
+                  new SensorReading { Key = "Fan Redundancy", Status = "ok", Value = "Unknown" },
+                  new SensorReading { Key = "Vendor Battery", Status = "ok", Value = "Unknown" },
+              })
+    {
+        var presentation = DashboardSensorPresentation.FromSensor(unavailable);
+        Require(
+            presentation.VisualState == DashboardVisualState.Unavailable && presentation.MotionKind == DashboardMotionKind.None && !presentation.IsMotionActive,
+            "ns, na, No Reading, and Unknown sensors should be unavailable without motion.");
+    }
+
+    foreach (var inactiveValue in new[] { "Disabled", "Inactive" })
+    {
+        var presentation = Present("Power Optimized", status: "ok", value: inactiveValue);
+        Require(presentation.VisualState == DashboardVisualState.Inactive, $"{inactiveValue} sensors should be inactive.");
+    }
+
+    foreach (var policyValue in new[] { "OEM", "Dell policy", "custom policy" })
+    {
+        var policy = Present("Power Optimized", value: policyValue);
+        Require(
+            policy.VisualState == DashboardVisualState.Information && policy.MotionKind == DashboardMotionKind.None,
+            $"The standalone '{policyValue}' power policy reading should be informational and static.");
+    }
+
+    var vendorSpecificPolicy = Present("Power Optimized", value: "Vendor specific");
+    Require(
+        vendorSpecificPolicy.VisualState == DashboardVisualState.Information && vendorSpecificPolicy.MotionKind == DashboardMotionKind.None,
+        "A vendor-specific power policy reading should be informational and static.");
+
+    foreach (var status in new[] { "cr", "nr", "lc", "lcr", "lnr", "uc", "ucr", "unr", "critical" })
+    {
+        var presentation = Present("Fan Redundancy", status: status, value: "Disabled");
+        Require(
+            presentation.VisualState == DashboardVisualState.Critical && presentation.MotionKind == DashboardMotionKind.WarningPulse,
+            $"Critical iDRAC status '{status}' should take precedence over a Disabled discrete value.");
+    }
+
+    foreach (var status in new[] { "nc", "lnc", "unc", "warning" })
+    {
+        var presentation = Present("Fan Redundancy", status: status, value: "Inactive");
+        Require(
+            presentation.VisualState == DashboardVisualState.Warning && presentation.MotionKind == DashboardMotionKind.WarningPulse,
+            $"Warning iDRAC status '{status}' should take precedence over an Inactive discrete value.");
+    }
+
+    foreach (var unavailable in new[]
+             {
+                 Present("Fan Redundancy", status: "ns", value: "Failure Disabled"),
+                 Present("Fan Redundancy", status: "na", value: "Failure Disabled"),
+             })
+    {
+        Require(unavailable.VisualState == DashboardVisualState.Unavailable, "ns and na should remain higher priority than severity or inactive state text.");
+    }
+    Require(
+        Present("Fan Redundancy", status: "cr", value: "No Reading").VisualState == DashboardVisualState.Critical,
+        "A real critical SDR status should remain critical even when no numeric reading is available.");
+
+    var degraded = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Fan Redundancy", Status = "Degraded" });
+    var lost = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "PS Redundancy", Status = "ok", Value = "Redundancy Lost" });
+    var failed = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "CMOS Battery", Status = "Failure" });
+    var overCurrent = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "USB Over-current", Status = "ok", Value = "State Asserted" });
+    Require(degraded.VisualState == DashboardVisualState.Warning, "Degraded redundancy should be a warning.");
+    Require(lost.VisualState == DashboardVisualState.Critical, "Lost redundancy should be critical.");
+    Require(failed.VisualState == DashboardVisualState.Critical, "Confirmed hardware failure should be critical.");
+    Require(overCurrent.VisualState == DashboardVisualState.Critical, "An asserted USB over-current event should be critical.");
+    Require(
+        new[] { degraded, lost, failed, overCurrent }.All(item => item.MotionKind == DashboardMotionKind.WarningPulse && item.IsMotionActive),
+        "Warning and critical discrete health states should pulse.");
+
+    var normalHealth = DashboardSensorPresentation.FromSensor(new SensorReading
+    {
+        Key = "Fan Redundancy",
+        Status = "ok",
+        Value = "Fully Redundant",
+    });
+    Require(
+        normalHealth.VisualState == DashboardVisualState.Normal && normalHealth.MotionKind == DashboardMotionKind.None && !normalHealth.IsMotionActive,
+        "Normal discrete health should not run continuous motion.");
+
+    var genericRedundancyNormal = Present("Redundancy", status: "ok", value: "Fully Redundant");
+    var genericRedundancyInactive = Present("Redundancy", status: "ok", value: "Disabled");
+    var genericRedundancyWarning = Present("Redundancy", status: "nc", value: "Degraded");
+    var genericRedundancyCritical = Present("Redundancy", status: "cr", value: "Redundancy Lost");
+    Require(
+        genericRedundancyNormal.IconKind == DashboardIconKind.GenericStatus &&
+        genericRedundancyNormal.VisualState == DashboardVisualState.Normal &&
+        genericRedundancyNormal.MotionKind == DashboardMotionKind.None,
+        "An unmatched ok redundancy sensor without a trusted type-specific rule should retain a healthy generic static state.");
+    Require(
+        genericRedundancyInactive.IconKind == DashboardIconKind.GenericStatus &&
+        genericRedundancyInactive.VisualState == DashboardVisualState.Inactive &&
+        genericRedundancyInactive.MotionKind == DashboardMotionKind.None,
+        "The bare Redundancy key returned by iDRAC should show Disabled as an inactive static state.");
+    Require(
+        genericRedundancyWarning.IconKind == DashboardIconKind.GenericStatus &&
+        genericRedundancyWarning.VisualState == DashboardVisualState.Warning &&
+        genericRedundancyWarning.MotionKind == DashboardMotionKind.WarningPulse,
+        "An unmatched redundancy warning should keep the generic icon and warning pulse.");
+    Require(
+        genericRedundancyCritical.IconKind == DashboardIconKind.GenericStatus &&
+        genericRedundancyCritical.VisualState == DashboardVisualState.Critical &&
+        genericRedundancyCritical.MotionKind == DashboardMotionKind.WarningPulse,
+        "An unmatched redundancy failure should keep the generic icon and critical pulse.");
+
+    var percentageLow = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "CPU Usage", Status = "ok", NumericValue = -5 });
+    var percentageMid = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "MEM Usage", Status = "ok", NumericValue = 50 });
+    var percentageHigh = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "IO Usage", Status = "ok", NumericValue = 130 });
+    var temperature = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Temp 3.1", Status = "ok", NumericValue = 75 });
+    Require(percentageLow.NormalizedLevel == 0 && percentageMid.NormalizedLevel == 0.5 && percentageHigh.NormalizedLevel == 1, "Percentage levels should clamp to 0..1.");
+    Require(temperature.NormalizedLevel == 0.75 && temperature.MotionKind == DashboardMotionKind.LevelTransition, "Temperature level should normalize Celsius against 100 and transition between levels.");
+    Require(temperature.AccentHex == HeroMetricSeverityStyle.ForTemperature(75).ForegroundHex, "Temperature accent should reuse hero metric severity styling.");
+
+    var voltageBelowRange = Present("Voltage 1", 180);
+    var voltageAtMinimum = Present("Voltage 1", 190);
+    var voltageAtMidpoint = Present("Voltage 1", 225);
+    var voltageAtMaximum = Present("Voltage 1", 260);
+    var voltageAboveRange = Present("Voltage 1", 280);
+    Require(
+        voltageBelowRange.NormalizedLevel == 0 && voltageAtMinimum.NormalizedLevel == 0,
+        "Voltage at or below the 190 V display floor should normalize to zero.");
+    Require(
+        voltageAtMidpoint.NormalizedLevel == 0.5,
+        "Voltage at the 225 V midpoint of the 190-260 V display range should normalize to 0.5.");
+    Require(
+        voltageAtMaximum.NormalizedLevel == 1 && voltageAboveRange.NormalizedLevel == 1,
+        "Voltage at or above the 260 V display ceiling should normalize to one.");
+
+    foreach (var rpm in new double?[] { null, -1, 0 })
+    {
+        var fan = Present("Fan1 RPM", rpm);
+        Require(
+            fan.VisualState == DashboardVisualState.Inactive && fan.MotionKind == DashboardMotionKind.None && !fan.IsMotionActive &&
+            fan.NormalizedLevel == 0 && fan.MotionPeriodSeconds == 0,
+            $"Fan RPM '{rpm?.ToString(CultureInfo.InvariantCulture) ?? "null"}' should be inactive and static.");
+    }
+
+    var numericKeys = new[]
+    {
+        "Temp", "Fan1 RPM", "CPU Usage", "MEM Usage", "IO Usage", "SYS Usage", "Pwr Consumption", "Voltage 1", "Current 1",
+    };
+    foreach (var key in numericKeys)
+    {
+        foreach (var value in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+        {
+            var presentation = Present(key, value);
+            Require(
+                presentation.VisualState == DashboardVisualState.Unavailable && presentation.MotionKind == DashboardMotionKind.None && !presentation.IsMotionActive &&
+                presentation.NormalizedLevel == 0 && presentation.MotionPeriodSeconds == 0 &&
+                double.IsFinite(presentation.NormalizedLevel) && double.IsFinite(presentation.MotionPeriodSeconds),
+                $"Non-finite numeric value {value} for {key} should be unavailable with finite zero animation values.");
+        }
+    }
+
+    foreach (var value in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+    {
+        var genericNonFinite = Present("Vendor Usage", value, "percent");
+        Require(
+            genericNonFinite.IconKind == DashboardIconKind.GenericStatus &&
+            genericNonFinite.VisualState == DashboardVisualState.Unavailable &&
+            genericNonFinite.MotionKind == DashboardMotionKind.None,
+            $"A generic sensor with non-finite numeric value {value} should be unavailable instead of appearing healthy.");
+    }
+
+    var stoppedFan = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Fan1 RPM", Status = "ok", NumericValue = 0 });
+    var runningFan = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Fan1 RPM", Status = "ok", NumericValue = 9000 });
+    var fan3480 = Present("Fan1 RPM", 3480);
+    var fan3600 = Present("Fan1 RPM", 3600);
+    var maximumFan = Present("Fan1 RPM", 18000);
+    var overMaximumFan = Present("Fan1 RPM", 24000);
+    var expectedFanPeriod = 1 / ((1 / 5.2) + (0.5 * ((1 / 0.11) - (1 / 5.2))));
+    Require(
+        stoppedFan.VisualState == DashboardVisualState.Inactive && stoppedFan.MotionKind == DashboardMotionKind.None && !stoppedFan.IsMotionActive && stoppedFan.MotionPeriodSeconds == 0,
+        "A zero-RPM fan should be inactive without animation.");
+    Require(
+        runningFan.MotionKind == DashboardMotionKind.FanRotation && runningFan.IsMotionActive && Math.Abs(runningFan.MotionPeriodSeconds - expectedFanPeriod) < 0.000001,
+        "Positive fan RPM should interpolate linearly in rotations per second between 5.2 s and 0.11 s periods.");
+    Require(fan3600.MotionPeriodSeconds < fan3480.MotionPeriodSeconds, "3600 RPM should rotate faster than 3480 RPM.");
+    Require(maximumFan.MotionPeriodSeconds == 0.11, "18000 RPM should use the exact 0.11-second fastest period.");
+    Require(overMaximumFan.MotionPeriodSeconds == 0.11, "Fan RPM above 18000 should stay clamped to the exact 0.11-second fastest period.");
+    Require(runningFan.AccentHex == HeroMetricSeverityStyle.ForFanRpm(9000).ForegroundHex, "Fan accent should reuse hero metric severity styling.");
+
+    var power = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Pwr Consumption", Status = "ok", NumericValue = 550 });
+    var voltage = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Voltage 1", Status = "ok", NumericValue = 230 });
+    var current = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Current 1", Status = "ok", NumericValue = 1.5 });
+    var zeroCurrent = DashboardSensorPresentation.FromSensor(new SensorReading { Key = "Current 1", Status = "ok", NumericValue = 0 });
+    Require(power.MotionKind == DashboardMotionKind.PowerActivity && power.IsMotionActive, "Positive wattage should show power activity.");
+    Require(voltage.MotionKind == DashboardMotionKind.GaugeTransition && voltage.IsMotionActive, "Voltage should use a gauge transition.");
+    Require(current.MotionKind == DashboardMotionKind.CurrentFlow && current.IsMotionActive, "Positive current should show current flow.");
+    Require(zeroCurrent.MotionKind == DashboardMotionKind.None && !zeroCurrent.IsMotionActive, "Zero current should not show current flow.");
+    foreach (var key in new[] { "Pwr Consumption", "Current 1" })
+    {
+        foreach (var value in new[] { -1d, 0d })
+        {
+            var presentation = Present(key, value);
+            Require(presentation.MotionKind == DashboardMotionKind.None && !presentation.IsMotionActive, $"Nonpositive {key} value {value} should not animate.");
+        }
+    }
+    Require(power.AccentHex == HeroMetricSeverityStyle.ForPowerWatts(550).ForegroundHex, "Power accent should reuse hero metric severity styling.");
+    Require(voltage.AccentHex == HeroMetricSeverityStyle.ForVoltage(230).ForegroundHex, "Voltage accent should reuse hero metric severity styling.");
+    Require(current.AccentHex == HeroMetricSeverityStyle.ForCurrentAmps(1.5).ForegroundHex, "Current accent should reuse hero metric severity styling.");
 }
 
 static void RunPollingSkipLogGateChecks()
@@ -1650,6 +3693,8 @@ static void RunSensorValueLocalizationChecks()
 
 static void RunSensorDisplayNameLocalizationChecks()
 {
+    var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
+    var displayNameBody = ExtractMethodBody(pageSource, "BuildVisualizationSensorName");
     Require(LocalizationService.SensorDisplayNameTranslationKeys.Count > 0, "Sensor display-name i18n checks need registered display-name mappings.");
     var criticalSensorResourceKeys = new[]
     {
@@ -1719,6 +3764,10 @@ static void RunSensorDisplayNameLocalizationChecks()
     Require(
         LocalizationService.TranslateSensorDisplayName("Vendor future sensor", "zh-CN") == "Vendor future sensor",
         "Unknown BMC sensor names should stay raw instead of being guessed.");
+    Require(
+        !displayNameBody.Contains("SensorDisplay.HardwareEvent", StringComparison.Ordinal) &&
+        !pageSource.Contains("ShouldUseGenericHardwareEventTitle", StringComparison.Ordinal),
+        "Unknown valid SDR names such as Drive 0 should remain their real names instead of being replaced by a fabricated generic hardware-event title.");
 }
 
 static void RunSupportedLanguageCatalogChecks()
@@ -1804,9 +3853,53 @@ Require(LocalizationService.T("Dashboard.Range6Hours", "zh-CN") == "近 6 小时
 Require(LocalizationService.T("Dashboard.Range7Days", "en-US") == "Last 7 days", "English dashboard seven-day range should be localized.");
 Require(LocalizationService.T("Dashboard.RangeCustom", "zh-CN") == "自定义", "Chinese dashboard custom range should be localized.");
 Require(LocalizationService.T("Dashboard.NoHistoryData", "en-US") == "No history data in this range", "English dashboard empty history message should be localized.");
-Require(LocalizationService.T("Sensors.Id", "zh-CN") == "编号", "Chinese sensor ID header should not remain the fixed English abbreviation.");
-Require(LocalizationService.T("Sensors.Id", "zh-TW") == "編號", "Traditional Chinese sensor ID header should not remain the fixed English abbreviation.");
-Require(LocalizationService.T("Settings.Host", "zh-CN") == "管理控制器地址", "Chinese BMC/iDRAC host field should be localized.");
+    Require(LocalizationService.T("Sensors.Id", "zh-CN") == "编号", "Chinese sensor ID header should not remain the fixed English abbreviation.");
+    Require(LocalizationService.T("Sensors.Id", "zh-TW") == "編號", "Traditional Chinese sensor ID header should not remain the fixed English abbreviation.");
+    Require(LocalizationService.T("Settings.Host", "zh-CN") == "iDRAC/BMC 地址", "Chinese BMC/iDRAC host field should preserve both controller terms.");
+
+    var corruptedArabicUnits = resources["ar-SA"]
+        .Where(resource => Regex.IsMatch(resource.Value, @"[\u0600-\u06FF]°C|°C[\u0600-\u06FF]"))
+        .Select(resource => resource.Key)
+        .ToArray();
+    Require(
+        corruptedArabicUnits.Length == 0,
+        $"ar-SA contains a temperature unit embedded inside a word: {string.Join(", ", corruptedArabicUnits)}.");
+
+    var domainMistranslations = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ar-SA"] = ["المشجع", "معجب"],
+        ["bn-BD"] = ["ভক্ত"],
+        ["da-DK"] = ["alle fans", "individuelle fans", "alle fan procent", "forfriskende"],
+        ["de-DE"] = ["alle fans", "einzelne fans", "anzahl der fans", "fan-index"],
+        ["el-GR"] = ["θαυμαστ"],
+        ["es-ES"] = ["aficionad", "todos los fans", "porcentaje de fans", "regla de fans", "recuento de fans"],
+        ["fr-FR"] = ["tous les fans", "nombre de fans"],
+        ["it-IT"] = ["tutti i fan", "regola fan"],
+        ["nb-NO"] = ["alle fans", "individuelle fans", "antall fans", "fan-kommandoen", "forfriskende"],
+        ["pl-PL"] = ["wszyscy fani"],
+        ["th-TH"] = ["แฟน"],
+        ["uk-UA"] = ["шанувальник"],
+    };
+    foreach (var locale in domainMistranslations)
+    {
+        foreach (var phrase in locale.Value)
+        {
+            var offenders = resources[locale.Key]
+                .Where(resource => resource.Value.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                .Select(resource => resource.Key)
+                .ToArray();
+            Require(
+                offenders.Length == 0,
+                $"{locale.Key} translates hardware fans as admirers in: {string.Join(", ", offenders)}.");
+        }
+    }
+
+    foreach (var locale in new[] { "bs-BA", "da-DK", "de-DE", "nb-NO", "pl-PL" })
+    {
+        Require(
+            resources[locale]["Preset.DellAutoSubtitle"] != resources["en-US"]["Preset.DellAutoSubtitle"],
+            $"{locale}/Preset.DellAutoSubtitle should localize the descriptive 'BMC auto' label.");
+    }
 }
 
 static Dictionary<string, Dictionary<string, string>> GetLocalizationResources()
@@ -1814,6 +3907,207 @@ static Dictionary<string, Dictionary<string, string>> GetLocalizationResources()
     var field = typeof(LocalizationService).GetField("Resources", BindingFlags.NonPublic | BindingFlags.Static)
         ?? throw new InvalidOperationException("Unable to inspect localization resources.");
     return (Dictionary<string, Dictionary<string, string>>)field.GetValue(null)!;
+}
+
+static void RunLocalizationIntegrityChecks()
+{
+    var resources = GetLocalizationResources();
+    var reference = resources["en-US"];
+    var protectedTerms = new[]
+    {
+        "Dell",
+        "PowerEdge",
+        "iDRAC",
+        "IPMI",
+        "BMC",
+        "SDR",
+        "CPU",
+        "RPM",
+        "OEM",
+        "RMCP+",
+        "ipmitool",
+        "WebView2",
+        "ECharts",
+        "DPAPI",
+        "JSONL",
+        "°C",
+    };
+    var unitKeys = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["SensorUnit.Celsius"] = "°C",
+        ["SensorUnit.Rpm"] = "RPM",
+        ["SensorUnit.Watts"] = "W",
+        ["SensorUnit.Volts"] = "V",
+        ["SensorUnit.Amps"] = "A",
+        ["SensorUnit.Percent"] = "%",
+        ["Dashboard.TempPercentUnit"] = "°C / %",
+    };
+
+    foreach (var language in LocalizationService.SupportedLanguages)
+    {
+        var localized = resources[language.Code];
+        var missingKeys = reference.Keys.Except(localized.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(key => key).ToArray();
+        var extraKeys = localized.Keys.Except(reference.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(key => key).ToArray();
+        Require(missingKeys.Length == 0, $"{language.Code} is missing localization keys: {string.Join(", ", missingKeys)}.");
+        Require(extraKeys.Length == 0, $"{language.Code} has stale localization keys: {string.Join(", ", extraKeys)}.");
+
+        foreach (var key in reference.Keys)
+        {
+            var referenceValue = reference[key];
+            var localizedValue = localized[key];
+            var referencePlaceholders = Regex.Matches(referenceValue, @"\{\d+(?::[^}]*)?\}")
+                .Select(match => match.Value)
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToArray();
+            var localizedPlaceholders = Regex.Matches(localizedValue, @"\{\d+(?::[^}]*)?\}")
+                .Select(match => match.Value)
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToArray();
+            Require(
+                referencePlaceholders.SequenceEqual(localizedPlaceholders, StringComparer.Ordinal),
+                $"{language.Code}/{key} changed format placeholders. Expected [{string.Join(", ", referencePlaceholders)}], got [{string.Join(", ", localizedPlaceholders)}].");
+            Require(
+                !localizedValue.Contains('\uFFFD') &&
+                !localizedValue.Contains("<<<", StringComparison.Ordinal) &&
+                !localizedValue.Contains(">>>", StringComparison.Ordinal),
+                $"{language.Code}/{key} contains corrupt or generated placeholder text.");
+
+            Require(
+                !Regex.IsMatch(referenceValue, @"(?<![A-Za-z°])C(?![A-Za-z])"),
+                $"en-US/{key} must use the canonical °C unit instead of a bare C.");
+
+            foreach (Match unitMatch in Regex.Matches(
+                         referenceValue,
+                         @"(?<operand>\{\d+(?::[^}]*)?\}|\b\d+(?:\.\d+)?)\s*(?<unit>°C|W|V|A|%|s)(?![A-Za-z0-9])"))
+            {
+                var operandPattern = Regex.Escape(unitMatch.Groups["operand"].Value);
+                var unitPattern = Regex.Escape(unitMatch.Groups["unit"].Value);
+                var localizedUnitPattern = unitMatch.Groups["unit"].Value == "%"
+                    ? $@"(?:{operandPattern}\s*{unitPattern}|{unitPattern}\s*{operandPattern})"
+                    : operandPattern + @"\s*" + unitPattern + @"(?![A-Za-z0-9])";
+                Require(
+                    Regex.IsMatch(localizedValue, localizedUnitPattern),
+                    $"{language.Code}/{key} must preserve the unit expression '{unitMatch.Value}'.");
+            }
+
+            foreach (var term in protectedTerms)
+            {
+                if (referenceValue.Contains(term, StringComparison.Ordinal))
+                {
+                    Require(
+                        localizedValue.Contains(term, StringComparison.Ordinal),
+                        $"{language.Code}/{key} must preserve the technical term '{term}' exactly: {localizedValue}");
+                }
+            }
+
+            if (referenceValue.Contains("R730xd", StringComparison.OrdinalIgnoreCase))
+            {
+                Require(
+                    localizedValue.Contains("R730xd", StringComparison.OrdinalIgnoreCase),
+                    $"{language.Code}/{key} must preserve the R730xd model identifier: {localizedValue}");
+            }
+        }
+
+        foreach (var unit in unitKeys)
+        {
+            Require(
+                localized[unit.Key] == unit.Value,
+                $"{language.Code}/{unit.Key} must preserve the unit '{unit.Value}' exactly.");
+        }
+    }
+
+    var bannedMachineTranslationPhrases = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ko-KR"] = ["투표", "설문조사", "진드기"],
+        ["de-DE"] = ["Umfrage", "Häkchen"],
+        ["es-ES"] = ["encuesta", "este tic"],
+        ["fr-FR"] = ["sondage", "coche"],
+        ["it-IT"] = ["sondaggio"],
+        ["da-DK"] = ["afstemning", "flueben"],
+        ["ja-JP"] = ["投票"],
+        ["ru-RU"] = ["галочка"],
+        ["bs-BA"] = ["glasanje", "anketa", "anketiranje", "obožavatelj"],
+        ["pt-BR"] = ["fãs", "votação", "pesquisa", "marcação"],
+        ["nb-NO"] = ["avstemning", "undersøkelse", "haken"],
+        ["th-TH"] = ["สำรวจ", "หยั่งเสียง"],
+        ["tr-TR"] = ["anket", "hayran", "onay işareti"],
+        ["uk-UA"] = ["галочка"],
+        ["bn-BD"] = ["ভোট"],
+        ["el-GR"] = ["ψηφοφορία", "δημοσκόπηση", "τσιμπούρι"],
+        ["vi-VN"] = ["người hâm mộ", "bỏ phiếu", "đánh dấu"],
+        ["ar-SA"] = ["حقوق السحب الخاصة", "ipmitol", "المعجبين", "علامة التجزئة"],
+    };
+    foreach (var localePhrases in bannedMachineTranslationPhrases)
+    {
+        foreach (var phrase in localePhrases.Value)
+        {
+            var offenders = resources[localePhrases.Key]
+                .Where(resource => resource.Value.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                .Select(resource => resource.Key)
+                .ToArray();
+            Require(
+                offenders.Length == 0,
+                $"{localePhrases.Key} contains the domain-inappropriate phrase '{phrase}' in: {string.Join(", ", offenders)}.");
+        }
+    }
+
+    const string invalidLanguage = "xx-ZZ";
+    const string missingKey = "Missing.Test.Key";
+    foreach (var language in LocalizationService.SupportedLanguages)
+    {
+        Require(
+            resources[language.Code].ContainsKey("Error.UnsupportedLanguage"),
+            $"{language.Code} must localize unsupported-language failures.");
+        Require(
+            resources[language.Code].ContainsKey("Error.MissingTranslation"),
+            $"{language.Code} must localize missing-translation failures.");
+
+        LocalizationService.SetLanguage(language.Code);
+        var culture = CultureInfo.GetCultureInfo(language.Code);
+        var expectedUnsupported = string.Format(
+            culture,
+            resources[language.Code]["Error.UnsupportedLanguage"],
+            invalidLanguage);
+        var unsupportedOperations = new Action[]
+        {
+            () => LocalizationService.SetLanguage(invalidLanguage),
+            () => LocalizationService.TranslateSensorValue("ok", invalidLanguage),
+            () => LocalizationService.TranslateSensorDisplayName("temp", invalidLanguage),
+            () => LocalizationService.T("Action.Save", invalidLanguage),
+        };
+        foreach (var operation in unsupportedOperations)
+        {
+            var exception = RecordInvalidOperation(operation);
+            Require(
+                exception.Message == expectedUnsupported,
+                $"Unsupported-language failures should use the active {language.Code} resource text.");
+        }
+
+        var expectedMissing = string.Format(
+            culture,
+            resources[language.Code]["Error.MissingTranslation"],
+            language.Code,
+            missingKey);
+        Require(
+            RecordInvalidOperation(() => LocalizationService.T(missingKey, language.Code)).Message == expectedMissing,
+            $"Missing-key failures should use the requested {language.Code} resource text.");
+    }
+
+    LocalizationService.SetLanguage(LocalizationService.DefaultLanguage);
+}
+
+static InvalidOperationException RecordInvalidOperation(Action operation)
+{
+    try
+    {
+        operation();
+    }
+    catch (InvalidOperationException exception)
+    {
+        return exception;
+    }
+
+    throw new InvalidOperationException("Expected the localization operation to throw InvalidOperationException.");
 }
 
 static void RunLanguageSelectorXamlChecks()
@@ -1993,6 +4287,12 @@ static void RunPublishScriptChecks()
         msixScript.Contains("Get-AuthenticodeSignature", StringComparison.Ordinal),
         "Signed MSIX publishing should keep signature verification in addition to runtime-content validation.");
     Require(
+        msixScript.Contains("$inspectionArchivePath", StringComparison.Ordinal) &&
+        msixScript.Contains("Copy-Item -LiteralPath $package.FullName -Destination $inspectionArchivePath", StringComparison.Ordinal) &&
+        msixScript.Contains("Expand-Archive -LiteralPath $inspectionArchivePath", StringComparison.Ordinal) &&
+        !msixScript.Contains("Expand-Archive -LiteralPath $package.FullName", StringComparison.Ordinal),
+        "Windows PowerShell 5.1 MSIX inspection should copy the package to a temporary .zip before Expand-Archive instead of passing the unsupported .msix extension directly.");
+    Require(
         msixScript.Contains("Cert:\\LocalMachine\\TrustedPeople", StringComparison.Ordinal) &&
         msixScript.Contains("Cert:\\LocalMachine\\Root", StringComparison.Ordinal) &&
         msixScript.Contains("0x800B0109", StringComparison.Ordinal),
@@ -2007,10 +4307,29 @@ static void RunPublishScriptChecks()
         unpackagedScript.Contains("artifacts\\exe\\win-x64", StringComparison.Ordinal),
         "Direct exe releases should be produced only by the unpackaged publish script using WindowsPackageType=None and the dedicated artifacts/exe output.");
     Require(
+        unpackagedScript.Contains("Remove-DirectoryIfPresent -Path $resolvedOutputDirectory", StringComparison.Ordinal) &&
+        unpackagedScript.Contains("Assert-PathUnderRoot -Path $resolvedOutputDirectory", StringComparison.Ordinal),
+        "Direct exe publishing should clean the dedicated output directory before publishing so stale WebView2 user-data folders or old files cannot leak into release zips.");
+    Require(
+        msixScript.Contains("function Assert-PathUnderRoot", StringComparison.Ordinal) &&
+        msixScript.Contains("Assert-PathUnderRoot -Path $resolvedOutputDirectory", StringComparison.Ordinal) &&
+        msixScript.Contains("Assert-PathUnderRoot -Path $intermediateDirectory", StringComparison.Ordinal) &&
+        msixScript.Contains("Assert-PathUnderRoot -Path $legacyPackagedPublishDirectory", StringComparison.Ordinal),
+        "Signed MSIX publishing should reject output and recursive-cleanup paths that resolve outside the repository.");
+    Require(
         releaseZipScript.Contains("Publish-UnpackagedExe.ps1", StringComparison.Ordinal) &&
         releaseZipScript.Contains("Compress-Archive", StringComparison.Ordinal) &&
         releaseZipScript.Contains("Expand-Archive", StringComparison.Ordinal),
         "Release zip publishing should reuse the unpackaged exe script and verify the downloaded-zip shape after compression.");
+    Require(
+        releaseZipScript.Contains("function Assert-PathUnderRoot", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("Assert-PathUnderRoot -Path $resolvedReleaseOutputDirectory", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("Assert-PathUnderRoot -Path $zipPath", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("Assert-PathUnderRoot -Path $verificationDirectory", StringComparison.Ordinal),
+        "Release zip publishing should reject archive and recursive verification paths that resolve outside the repository.");
+    Require(
+        releaseZipScript.Contains("Remove-DirectoryIfPresent -Path $resolvedReleaseOutputDirectory", StringComparison.Ordinal),
+        "Release zip publishing should clean the dedicated release output directory before compression so stale downloaded builds or WebView2 user data cannot remain beside the new zip.");
     Require(
         releaseZipScript.Contains("Microsoft.WindowsAppRuntime.dll", StringComparison.Ordinal) &&
         releaseZipScript.Contains("Microsoft.ui.xaml.dll", StringComparison.Ordinal) &&
@@ -2024,8 +4343,9 @@ static void RunPublishScriptChecks()
         releaseZipScript.Contains("\".cer\"", StringComparison.Ordinal) &&
         releaseZipScript.Contains("AppxManifest.xml", StringComparison.Ordinal) &&
         releaseZipScript.Contains("Package.appxmanifest", StringComparison.Ordinal) &&
+        releaseZipScript.Contains("DellR730xdFanControlCenter.exe.WebView2", StringComparison.Ordinal) &&
         releaseZipScript.Contains("signed/package-identity files are not allowed", StringComparison.Ordinal),
-        "Release zip verification should fail when signed MSIX, certificate, or package identity files leak into the unsigned downloadable zip.");
+        "Release zip verification should fail when signed MSIX, certificate, package identity files, or WebView2 user data leak into the unsigned downloadable zip.");
     Require(
         releaseWorkflow.Contains("windows-latest", StringComparison.Ordinal) &&
         releaseWorkflow.Contains("dotnet run --project .\\Tests\\PresetModelTests\\PresetModelTests.csproj", StringComparison.Ordinal) &&
@@ -2055,14 +4375,18 @@ static void RunInfoBarAccessibilityLocalizationChecks()
     var document = XDocument.Load(FindRepositoryFile("MainPage.xaml"), LoadOptions.SetLineInfo | LoadOptions.PreserveWhitespace);
     var infoBars = document.Descendants().Where(element => element.Name.LocalName == "InfoBar").ToArray();
 
-    foreach (var infoBarName in new[] { "StatusInfoBar", "IndividualFanInfoBar" })
-    {
-        var infoBar = infoBars.SingleOrDefault(element => element.Attribute(xamlNamespace + "Name")?.Value == infoBarName);
-        Require(infoBar is not null, $"{infoBarName} should exist in MainPage.xaml.");
-        Require(
-            string.Equals(infoBar!.Attribute("IsIconVisible")?.Value, "False", StringComparison.Ordinal),
-            $"{infoBarName} should hide WinUI's default InfoBar icon so UI Automation does not expose fixed English icon names.");
-    }
+    var statusInfoBar = infoBars.SingleOrDefault(element => element.Attribute(xamlNamespace + "Name")?.Value == "StatusInfoBar");
+    Require(statusInfoBar is not null, "StatusInfoBar should exist in MainPage.xaml.");
+    Require(
+        string.Equals(statusInfoBar!.Attribute("IsIconVisible")?.Value, "False", StringComparison.Ordinal),
+        "StatusInfoBar should hide WinUI's default InfoBar icon so UI Automation does not expose a fixed English icon name.");
+
+    var individualFanStatusPanel = document
+        .Descendants()
+        .SingleOrDefault(element => element.Attribute(xamlNamespace + "Name")?.Value == "IndividualFanStatusPanel");
+    Require(
+        individualFanStatusPanel?.Attribute("AutomationProperties.Name") is not null,
+        "The compact individual-fan state should keep an accessible name after replacing its visible InfoBar.");
 }
 
 static void RunLogLevelStyleChecks()
@@ -2138,6 +4462,82 @@ static void RunAppLogServiceChecks()
         Require(root.GetProperty("eventName").GetString() == "AtomicRecord", "Log event name should be serialized.");
         Require(root.GetProperty("message").GetString()!.Contains("line two", StringComparison.Ordinal), "Multiline messages should stay inside the JSON value.");
         Require(root.GetProperty("properties").GetProperty("scope").GetString() == "atomic-jsonl", "Structured properties should be serialized.");
+    }
+
+    using (var temp = TempDirectory.Create("R730xdAppLogConcurrencyTests"))
+    {
+        const int writerCount = 8;
+        const int recordsPerWriter = 500;
+        var log = new AppLogService(temp.Path, () => baseTime);
+        var writers = Enumerable.Range(0, writerCount)
+            .Select(writer => Task.Run(() =>
+            {
+                for (var record = 0; record < recordsPerWriter; record++)
+                {
+                    log.Write(new AppLogRecord
+                    {
+                        Level = "Info",
+                        Category = "ConcurrencyTest",
+                        EventName = "ParallelWrite",
+                        Message = $"writer={writer};record={record}",
+                    });
+                }
+            }))
+            .ToArray();
+        Task.WhenAll(writers).GetAwaiter().GetResult();
+        log.FlushAsync().GetAwaiter().GetResult();
+
+        var lines = File.ReadAllLines(log.CurrentLogPath);
+        Require(lines.Length == writerCount * recordsPerWriter, "Concurrent runtime-log writers should not lose or merge JSONL records.");
+        foreach (var line in lines)
+        {
+            using var document = JsonDocument.Parse(line);
+            Require(
+                document.RootElement.GetProperty("eventName").GetString() == "ParallelWrite",
+                "Every concurrently written runtime-log line should remain valid, complete JSON.");
+        }
+    }
+
+    using (var temp = TempDirectory.Create("R730xdAppLogWriteFailureTests"))
+    {
+        var blockedDirectory = Path.Combine(temp.Path, "logs-blocked-by-file");
+        File.WriteAllText(blockedDirectory, "not a directory");
+        var log = new AppLogService(blockedDirectory, () => baseTime);
+        Exception? observedFailure = null;
+        var handlerFailureCount = 0;
+        log.WriteFailed += (_, _) =>
+        {
+            handlerFailureCount++;
+            throw new InvalidOperationException("subscriber failed");
+        };
+        log.WriteFailed += (_, ex) => observedFailure = ex;
+        log.Write(new AppLogRecord
+        {
+            Level = "Info",
+            Category = "UnitTest",
+            EventName = "BlockedLogDirectory",
+            Message = "This write must fail during the real file append.",
+        });
+        RequireThrows<InvalidOperationException>(
+            () => log.FlushAsync().GetAwaiter().GetResult(),
+            "FlushAsync should expose runtime log write failures instead of allowing callers to report success.");
+        Require(observedFailure is not null, "The WriteFailed event should still expose the underlying runtime log write exception to the UI.");
+        Require(handlerFailureCount == 1, "A failing WriteFailed subscriber should be observed exactly once for the first failed write.");
+
+        log.Write(new AppLogRecord
+        {
+            Level = "Info",
+            Category = "UnitTest",
+            EventName = "BlockedLogDirectoryAgain",
+            Message = "The write worker must keep processing after a WriteFailed subscriber throws.",
+        });
+        var secondFlush = log.FlushAsync();
+        var secondFlushCompleted = Task.WhenAny(secondFlush, Task.Delay(TimeSpan.FromSeconds(2))).GetAwaiter().GetResult() == secondFlush;
+        Require(secondFlushCompleted, "The runtime log write worker should not stop when a WriteFailed subscriber throws.");
+        RequireThrows<InvalidOperationException>(
+            () => secondFlush.GetAwaiter().GetResult(),
+            "The second failed write should still surface the real log write failure after a subscriber exception.");
+        Require(handlerFailureCount == 2, "A failing WriteFailed subscriber should be notified for each failed write without stopping later writes.");
     }
 
     using (var temp = TempDirectory.Create("R730xdAppLogOperationTests"))

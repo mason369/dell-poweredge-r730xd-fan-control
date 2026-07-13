@@ -345,6 +345,7 @@
     let customRangeEnd = "";
     let lastPayload = null;
     let pendingHostWheelDeltaY = 0;
+    let pendingHostWheelTicks = 0;
     let pendingHostWheelShouldAnimate = false;
     let hostWheelFrameRequested = false;
 
@@ -1258,10 +1259,16 @@
           return;
         }
 
+        const wheelTicks = getHostWheelTicks(event, deltaY);
         const shouldAnimateHostWheel = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(event.deltaY) >= 80;
         event.preventDefault();
         event.stopPropagation();
-        pendingHostWheelDeltaY += deltaY;
+        if (wheelTicks === 0) {
+          pendingHostWheelDeltaY += deltaY;
+        } else {
+          pendingHostWheelTicks += wheelTicks;
+        }
+
         pendingHostWheelShouldAnimate = pendingHostWheelShouldAnimate || shouldAnimateHostWheel;
         if (!hostWheelFrameRequested) {
           hostWheelFrameRequested = true;
@@ -1270,17 +1277,37 @@
       }, { capture: true, passive: false });
     }
 
+    function getHostWheelTicks(event, deltaY) {
+      if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL && Math.abs(event.deltaY) < 80) {
+        return 0;
+      }
+
+      const sign = Math.sign(deltaY);
+      if (sign === 0) {
+        return 0;
+      }
+
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 3
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? 1
+          : 100;
+      return sign * Math.max(1, Math.round(Math.abs(event.deltaY) / unit));
+    }
+
     function postPendingHostWheelDelta() {
       hostWheelFrameRequested = false;
       const deltaY = pendingHostWheelDeltaY;
+      const wheelTicks = pendingHostWheelTicks;
       const animate = pendingHostWheelShouldAnimate;
       pendingHostWheelDeltaY = 0;
+      pendingHostWheelTicks = 0;
       pendingHostWheelShouldAnimate = false;
-      if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.01) {
+      if ((!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.01) && wheelTicks === 0) {
         return;
       }
 
-      window.chrome.webview.postMessage({ type: "wheel", deltaY, animate });
+      window.chrome.webview.postMessage({ type: "wheel", deltaY, animate, wheelTicks });
     }
 
     initCharts();

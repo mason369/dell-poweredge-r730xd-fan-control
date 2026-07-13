@@ -103,6 +103,8 @@ public sealed class TrayIconManager : IDisposable
 
     public event EventHandler? ExitRequested;
 
+    public event EventHandler<Exception>? CommandFailed;
+
     public void ShowBalloon(string title, string message)
     {
         var data = CreateNotifyIconData(NifInfo);
@@ -156,16 +158,24 @@ public sealed class TrayIconManager : IDisposable
     {
         if (message == TrayCallbackMessage)
         {
-            var trayMessage = unchecked((uint)lParam.ToInt64());
-            if (trayMessage is WmLButtonDblClk)
+            try
             {
-                RestoreRequested?.Invoke(this, EventArgs.Empty);
-                return IntPtr.Zero;
-            }
+                var trayMessage = unchecked((uint)lParam.ToInt64());
+                if (trayMessage is WmLButtonDblClk)
+                {
+                    RestoreRequested?.Invoke(this, EventArgs.Empty);
+                    return IntPtr.Zero;
+                }
 
-            if (trayMessage is WmRButtonUp or WmContextMenu)
+                if (trayMessage is WmRButtonUp or WmContextMenu)
+                {
+                    ShowContextMenu();
+                    return IntPtr.Zero;
+                }
+            }
+            catch (Exception ex)
             {
-                ShowContextMenu();
+                CommandFailed?.Invoke(this, ex);
                 return IntPtr.Zero;
             }
         }

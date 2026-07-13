@@ -17,6 +17,11 @@
     <Compile Include="..\..\Models\LogLevelStyle.cs" Link="Models\LogLevelStyle.cs" />
     <Compile Include="..\..\Models\PollingSkipLogGate.cs" Link="Models\PollingSkipLogGate.cs" />
     <Compile Include="..\..\Models\HeroMetricSeverityStyle.cs" Link="Models\HeroMetricSeverityStyle.cs" />
+    <Compile Include="..\..\Models\DashboardSensorPresentation.cs" Link="Models\DashboardSensorPresentation.cs" />
+    <Compile Include="..\..\Models\DashboardSnapshotFreshness.cs" Link="Models\DashboardSnapshotFreshness.cs" />
+    <Compile Include="..\..\Models\FanCommandSafetyRecoveryException.cs" Link="Models\FanCommandSafetyRecoveryException.cs" />
+    <Compile Include="..\..\Models\SensorReadingAvailability.cs" Link="Models\SensorReadingAvailability.cs" />
+    <Compile Include="..\..\Models\DashboardTileViewModel.cs" Link="Models\DashboardTileViewModel.cs" />
     <Compile Include="..\..\Models\IdracProfile.cs" Link="Models\IdracProfile.cs" />
     <Compile Include="..\..\Models\SensorReading.cs" Link="Models\SensorReading.cs" />
     <Compile Include="..\..\Models\SensorSubtitleFormatter.cs" Link="Models\SensorSubtitleFormatter.cs" />
@@ -29,6 +34,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.1.3" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 </Project>

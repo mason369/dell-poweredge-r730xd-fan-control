@@ -344,45 +344,31 @@ public sealed class FanPreset
 
     public int CalculateFanPercent(double temperatureCelsius)
     {
+        return ToPercent(CalculateFanPercentValue(temperatureCelsius));
+    }
+
+    public double CalculateFanPercentValue(double temperatureCelsius)
+    {
         if (!IsTemperatureCurvePreset)
         {
             throw new InvalidOperationException(LocalizationService.Format("Validation.CurvePresetKind", Kind));
         }
 
         var points = NormalizeCurvePoints(CurvePoints);
-        if (temperatureCelsius <= points[0].TemperatureCelsius)
-        {
-            return ToPercent(points[0].FanPercent);
-        }
-
-        var last = points[^1];
-        if (temperatureCelsius >= last.TemperatureCelsius)
-        {
-            return ToPercent(last.FanPercent);
-        }
-
-        for (var index = 1; index < points.Count; index++)
-        {
-            var previous = points[index - 1];
-            var current = points[index];
-            if (temperatureCelsius <= current.TemperatureCelsius)
-            {
-                var temperatureSpan = current.TemperatureCelsius - previous.TemperatureCelsius;
-                var progress = (temperatureCelsius - previous.TemperatureCelsius) / temperatureSpan;
-                if (SmoothCurve)
-                {
-                    progress = SmoothProgress(progress);
-                }
-
-                var fanSpan = current.FanPercent - previous.FanPercent;
-                return ToPercent(previous.FanPercent + fanSpan * progress);
-            }
-        }
-
-        throw new InvalidOperationException(LocalizationService.T("Validation.CurveEvaluationUnreachable"));
+        return CalculateFanPercentFromCurvePoints(
+            points,
+            temperatureCelsius,
+            SmoothCurve,
+            usePowerAxis: false,
+            "Validation.CurveEvaluationUnreachable");
     }
 
     public int CalculateFanPercentForPower(double powerWatts)
+    {
+        return ToPercent(CalculateFanPercentValueForPower(powerWatts));
+    }
+
+    public double CalculateFanPercentValueForPower(double powerWatts)
     {
         if (!IsPowerCurvePreset)
         {
@@ -390,36 +376,12 @@ public sealed class FanPreset
         }
 
         var points = NormalizePowerCurvePoints(CurvePoints);
-        if (powerWatts <= points[0].PowerWatts)
-        {
-            return ToPercent(points[0].FanPercent);
-        }
-
-        var last = points[^1];
-        if (powerWatts >= last.PowerWatts)
-        {
-            return ToPercent(last.FanPercent);
-        }
-
-        for (var index = 1; index < points.Count; index++)
-        {
-            var previous = points[index - 1];
-            var current = points[index];
-            if (powerWatts <= current.PowerWatts)
-            {
-                var powerSpan = current.PowerWatts - previous.PowerWatts;
-                var progress = (powerWatts - previous.PowerWatts) / powerSpan;
-                if (SmoothCurve)
-                {
-                    progress = SmoothProgress(progress);
-                }
-
-                var fanSpan = current.FanPercent - previous.FanPercent;
-                return ToPercent(previous.FanPercent + fanSpan * progress);
-            }
-        }
-
-        throw new InvalidOperationException(LocalizationService.T("Validation.PowerCurveEvaluationUnreachable"));
+        return CalculateFanPercentFromCurvePoints(
+            points,
+            powerWatts,
+            SmoothCurve,
+            usePowerAxis: true,
+            "Validation.PowerCurveEvaluationUnreachable");
     }
 
     public static List<FanCurvePoint> ParseCurvePoints(string text)
@@ -574,78 +536,163 @@ public sealed class FanPreset
             maxFan);
     }
 
-    private static int CalculateFanPercentFromPoints(IReadOnlyList<FanCurvePoint> points, double temperatureCelsius, bool smooth)
+    private static double CalculateFanPercentFromPoints(IReadOnlyList<FanCurvePoint> points, double temperatureCelsius, bool smooth)
     {
-        if (temperatureCelsius <= points[0].TemperatureCelsius)
+        return CalculateFanPercentFromCurvePoints(
+            points,
+            temperatureCelsius,
+            smooth,
+            usePowerAxis: false,
+            "Validation.CurveEvaluationUnreachable");
+    }
+
+    private static double CalculateFanPercentFromPowerPoints(IReadOnlyList<FanCurvePoint> points, double powerWatts, bool smooth)
+    {
+        return CalculateFanPercentFromCurvePoints(
+            points,
+            powerWatts,
+            smooth,
+            usePowerAxis: true,
+            "Validation.PowerCurveEvaluationUnreachable");
+    }
+
+    private static double CalculateFanPercentFromCurvePoints(
+        IReadOnlyList<FanCurvePoint> points,
+        double input,
+        bool smooth,
+        bool usePowerAxis,
+        string unreachableMessageKey)
+    {
+        static double AxisValue(FanCurvePoint point, bool powerAxis) =>
+            powerAxis ? point.PowerWatts : point.TemperatureCelsius;
+
+        var firstInput = AxisValue(points[0], usePowerAxis);
+        if (input <= firstInput)
         {
-            return ToPercent(points[0].FanPercent);
+            return points[0].FanPercent;
         }
 
         var last = points[^1];
-        if (temperatureCelsius >= last.TemperatureCelsius)
+        var lastInput = AxisValue(last, usePowerAxis);
+        if (input >= lastInput)
         {
-            return ToPercent(last.FanPercent);
+            return last.FanPercent;
         }
 
+        var intervalIndex = 0;
         for (var index = 1; index < points.Count; index++)
         {
-            var previous = points[index - 1];
-            var current = points[index];
-            if (temperatureCelsius <= current.TemperatureCelsius)
+            if (input <= AxisValue(points[index], usePowerAxis))
             {
-                var temperatureSpan = current.TemperatureCelsius - previous.TemperatureCelsius;
-                var progress = (temperatureCelsius - previous.TemperatureCelsius) / temperatureSpan;
-                if (smooth)
-                {
-                    progress = SmoothProgress(progress);
-                }
-
-                var fanSpan = current.FanPercent - previous.FanPercent;
-                return ToPercent(previous.FanPercent + fanSpan * progress);
+                intervalIndex = index - 1;
+                break;
             }
         }
 
-        throw new InvalidOperationException(LocalizationService.T("Validation.CurveEvaluationUnreachable"));
+        if (intervalIndex < 0 || intervalIndex >= points.Count - 1)
+        {
+            throw new InvalidOperationException(LocalizationService.T(unreachableMessageKey));
+        }
+
+        var previous = points[intervalIndex];
+        var current = points[intervalIndex + 1];
+        var previousInput = AxisValue(previous, usePowerAxis);
+        var currentInput = AxisValue(current, usePowerAxis);
+        var span = currentInput - previousInput;
+        var progress = Math.Clamp((input - previousInput) / span, 0, 1);
+        if (!smooth || points.Count == 2)
+        {
+            return previous.FanPercent + ((current.FanPercent - previous.FanPercent) * progress);
+        }
+
+        var tangents = CalculateMonotoneTangents(points, usePowerAxis);
+        var progressSquared = progress * progress;
+        var progressCubed = progressSquared * progress;
+        var startBasis = (2 * progressCubed) - (3 * progressSquared) + 1;
+        var startTangentBasis = progressCubed - (2 * progressSquared) + progress;
+        var endBasis = (-2 * progressCubed) + (3 * progressSquared);
+        var endTangentBasis = progressCubed - progressSquared;
+        var interpolated =
+            (startBasis * previous.FanPercent) +
+            (startTangentBasis * span * tangents[intervalIndex]) +
+            (endBasis * current.FanPercent) +
+            (endTangentBasis * span * tangents[intervalIndex + 1]);
+        var minimum = Math.Min(previous.FanPercent, current.FanPercent);
+        var maximum = Math.Max(previous.FanPercent, current.FanPercent);
+        return Math.Clamp(interpolated, minimum, maximum);
     }
 
-    private static int CalculateFanPercentFromPowerPoints(IReadOnlyList<FanCurvePoint> points, double powerWatts, bool smooth)
+    private static double[] CalculateMonotoneTangents(IReadOnlyList<FanCurvePoint> points, bool usePowerAxis)
     {
-        if (powerWatts <= points[0].PowerWatts)
+        static double AxisValue(FanCurvePoint point, bool powerAxis) =>
+            powerAxis ? point.PowerWatts : point.TemperatureCelsius;
+
+        var intervalCount = points.Count - 1;
+        var spans = new double[intervalCount];
+        var slopes = new double[intervalCount];
+        for (var index = 0; index < intervalCount; index++)
         {
-            return ToPercent(points[0].FanPercent);
+            spans[index] = AxisValue(points[index + 1], usePowerAxis) - AxisValue(points[index], usePowerAxis);
+            slopes[index] = (points[index + 1].FanPercent - points[index].FanPercent) / spans[index];
         }
 
-        var last = points[^1];
-        if (powerWatts >= last.PowerWatts)
+        var tangents = new double[points.Count];
+        if (points.Count == 2)
         {
-            return ToPercent(last.FanPercent);
+            tangents[0] = slopes[0];
+            tangents[1] = slopes[0];
+            return tangents;
         }
 
-        for (var index = 1; index < points.Count; index++)
+        tangents[0] = CalculateEndpointTangent(spans[0], spans[1], slopes[0], slopes[1]);
+        tangents[^1] = CalculateEndpointTangent(
+            spans[^1],
+            spans[^2],
+            slopes[^1],
+            slopes[^2]);
+
+        for (var index = 1; index < points.Count - 1; index++)
         {
-            var previous = points[index - 1];
-            var current = points[index];
-            if (powerWatts <= current.PowerWatts)
+            var previousSlope = slopes[index - 1];
+            var nextSlope = slopes[index];
+            if (previousSlope == 0 || nextSlope == 0 || Math.Sign(previousSlope) != Math.Sign(nextSlope))
             {
-                var powerSpan = current.PowerWatts - previous.PowerWatts;
-                var progress = (powerWatts - previous.PowerWatts) / powerSpan;
-                if (smooth)
-                {
-                    progress = SmoothProgress(progress);
-                }
-
-                var fanSpan = current.FanPercent - previous.FanPercent;
-                return ToPercent(previous.FanPercent + fanSpan * progress);
+                tangents[index] = 0;
+                continue;
             }
+
+            var previousSpan = spans[index - 1];
+            var nextSpan = spans[index];
+            var firstWeight = (2 * nextSpan) + previousSpan;
+            var secondWeight = nextSpan + (2 * previousSpan);
+            tangents[index] = (firstWeight + secondWeight) /
+                ((firstWeight / previousSlope) + (secondWeight / nextSlope));
         }
 
-        throw new InvalidOperationException(LocalizationService.T("Validation.PowerCurveEvaluationUnreachable"));
+        return tangents;
     }
 
-    private static double SmoothProgress(double progress)
+    private static double CalculateEndpointTangent(
+        double endpointSpan,
+        double adjacentSpan,
+        double endpointSlope,
+        double adjacentSlope)
     {
-        var clamped = Math.Clamp(progress, 0, 1);
-        return clamped * clamped * (3 - (2 * clamped));
+        var tangent = (((2 * endpointSpan) + adjacentSpan) * endpointSlope -
+            (endpointSpan * adjacentSlope)) /
+            (endpointSpan + adjacentSpan);
+        if (Math.Sign(tangent) != Math.Sign(endpointSlope))
+        {
+            return 0;
+        }
+
+        if (Math.Sign(endpointSlope) != Math.Sign(adjacentSlope) &&
+            Math.Abs(tangent) > Math.Abs(3 * endpointSlope))
+        {
+            return 3 * endpointSlope;
+        }
+
+        return tangent;
     }
 
     private static List<FanCurvePoint> NormalizeCurvePoints(IEnumerable<FanCurvePoint> points)

@@ -60,4 +60,6 @@ Generated\ Files/
 settings.json
 secrets.json
 AGENTS.md
+/.claude
+CLAUDE.md
 /docs

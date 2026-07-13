@@ -7,13 +7,51 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Assert-PathUnderRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    $rootPath = [System.IO.Path]::GetFullPath($Root).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $targetPath = [System.IO.Path]::GetFullPath($Path).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $rootPrefix = "$rootPath$([System.IO.Path]::DirectorySeparatorChar)"
+    if (-not $targetPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Description must stay under repository root '$rootPath'; resolved path was '$targetPath'."
+    }
+}
+
+function Remove-DirectoryIfPresent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    if (Test-Path -LiteralPath $Path) {
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+    }
+
+    if (Test-Path -LiteralPath $Path) {
+        throw "Failed to remove $Description at '$Path'. Close any process using that directory and run the publish script again."
+    }
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $projectPath = Join-Path $repoRoot "DellR730xdFanControlCenter.csproj"
 $resolvedOutputDirectory = Join-Path $repoRoot $OutputDirectory
 $intermediateDirectory = Join-Path $repoRoot "obj\unpackaged-exe"
 
-New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
-New-Item -ItemType Directory -Path $intermediateDirectory -Force | Out-Null
+Assert-PathUnderRoot -Path $resolvedOutputDirectory -Root $repoRoot -Description "Unpackaged exe output directory"
+Assert-PathUnderRoot -Path $intermediateDirectory -Root $repoRoot -Description "Unpackaged exe intermediate directory"
 
 $runningFromOutput = Get-Process DellR730xdFanControlCenter -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -like "$resolvedOutputDirectory*" }
@@ -21,6 +59,10 @@ if ($runningFromOutput) {
     $processList = ($runningFromOutput | ForEach-Object { "$($_.Id): $($_.Path)" }) -join "; "
     throw "Cannot publish to '$resolvedOutputDirectory' while the published app is running. Close these processes first: $processList"
 }
+
+Remove-DirectoryIfPresent -Path $resolvedOutputDirectory -Description "unpackaged exe output directory"
+New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
+New-Item -ItemType Directory -Path $intermediateDirectory -Force | Out-Null
 
 $publishArguments = @(
     "publish",

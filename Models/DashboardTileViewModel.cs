@@ -15,19 +15,17 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
     private string _unit = string.Empty;
     private string _subtitle = string.Empty;
     private string _status = string.Empty;
+    private string _automationVisualStateText = string.Empty;
+    private string _automationFreshnessText = string.Empty;
     private string _accentHex = "#FF64748B";
     private string _valueHex = "#FF172033";
-    private double _temperatureIconOpacity;
-    private double _fanIconOpacity;
-    private double _powerIconOpacity;
-    private double _voltageIconOpacity;
-    private double _currentIconOpacity;
-    private double _healthIconOpacity;
-    private bool _isFanAnimated;
-    private double _fanRotationSeconds = 2;
-    private double _electricalIconOpacity;
-    private bool _isElectricalAnimated;
-    private double _electricalPulseSeconds = 0.9;
+    private DashboardIconKind _iconKind = DashboardIconKind.GenericStatus;
+    private DashboardVisualState _visualState = DashboardVisualState.Unavailable;
+    private DashboardMotionKind _motionKind = DashboardMotionKind.None;
+    private double _normalizedLevel;
+    private double _motionPeriodSeconds;
+    private bool _isMotionActive;
+    private bool _isDataFresh;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -40,13 +38,25 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
     public string Title
     {
         get => _title;
-        set => SetField(ref _title, value);
+        set
+        {
+            if (SetField(ref _title, value))
+            {
+                OnPropertyChanged(nameof(AutomationName));
+            }
+        }
     }
 
     public string Value
     {
         get => _value;
-        set => SetField(ref _value, value);
+        set
+        {
+            if (SetField(ref _value, value))
+            {
+                OnPropertyChanged(nameof(AutomationName));
+            }
+        }
     }
 
     public double ValueFontSize
@@ -64,7 +74,13 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
     public string Unit
     {
         get => _unit;
-        set => SetField(ref _unit, value);
+        set
+        {
+            if (SetField(ref _unit, value))
+            {
+                OnPropertyChanged(nameof(AutomationName));
+            }
+        }
     }
 
     public string Subtitle
@@ -76,7 +92,37 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
     public string Status
     {
         get => _status;
-        set => SetField(ref _status, value);
+        set
+        {
+            if (SetField(ref _status, value))
+            {
+                OnPropertyChanged(nameof(AutomationName));
+            }
+        }
+    }
+
+    public string AutomationVisualStateText
+    {
+        get => _automationVisualStateText;
+        set
+        {
+            if (SetField(ref _automationVisualStateText, value))
+            {
+                OnPropertyChanged(nameof(AutomationName));
+            }
+        }
+    }
+
+    public string AutomationFreshnessText
+    {
+        get => _automationFreshnessText;
+        set
+        {
+            if (SetField(ref _automationFreshnessText, value))
+            {
+                OnPropertyChanged(nameof(AutomationName));
+            }
+        }
     }
 
     public string AccentHex
@@ -108,70 +154,46 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
         }
     }
 
-    public double TemperatureIconOpacity
+    public DashboardIconKind IconKind
     {
-        get => _temperatureIconOpacity;
-        set => SetField(ref _temperatureIconOpacity, value);
+        get => _iconKind;
+        set => SetField(ref _iconKind, value);
     }
 
-    public double FanIconOpacity
+    public DashboardVisualState VisualState
     {
-        get => _fanIconOpacity;
-        set => SetField(ref _fanIconOpacity, value);
+        get => _visualState;
+        set => SetField(ref _visualState, value);
     }
 
-    public double PowerIconOpacity
+    public DashboardMotionKind MotionKind
     {
-        get => _powerIconOpacity;
-        set => SetField(ref _powerIconOpacity, value);
+        get => _motionKind;
+        set => SetField(ref _motionKind, value);
     }
 
-    public double VoltageIconOpacity
+    public double NormalizedLevel
     {
-        get => _voltageIconOpacity;
-        set => SetField(ref _voltageIconOpacity, value);
+        get => _normalizedLevel;
+        set => SetField(ref _normalizedLevel, value);
     }
 
-    public double CurrentIconOpacity
+    public double MotionPeriodSeconds
     {
-        get => _currentIconOpacity;
-        set => SetField(ref _currentIconOpacity, value);
+        get => _motionPeriodSeconds;
+        set => SetField(ref _motionPeriodSeconds, value);
     }
 
-    public double HealthIconOpacity
+    public bool IsMotionActive
     {
-        get => _healthIconOpacity;
-        set => SetField(ref _healthIconOpacity, value);
+        get => _isMotionActive;
+        set => SetField(ref _isMotionActive, value);
     }
 
-    public bool IsFanAnimated
+    public bool IsDataFresh
     {
-        get => _isFanAnimated;
-        set => SetField(ref _isFanAnimated, value);
-    }
-
-    public double FanRotationSeconds
-    {
-        get => _fanRotationSeconds;
-        set => SetField(ref _fanRotationSeconds, value);
-    }
-
-    public double ElectricalIconOpacity
-    {
-        get => _electricalIconOpacity;
-        set => SetField(ref _electricalIconOpacity, value);
-    }
-
-    public bool IsElectricalAnimated
-    {
-        get => _isElectricalAnimated;
-        set => SetField(ref _isElectricalAnimated, value);
-    }
-
-    public double ElectricalPulseSeconds
-    {
-        get => _electricalPulseSeconds;
-        set => SetField(ref _electricalPulseSeconds, value);
+        get => _isDataFresh;
+        set => SetField(ref _isDataFresh, value);
     }
 
     public SolidColorBrush AccentBrush => ToBrush(AccentHex);
@@ -179,6 +201,14 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
     public SolidColorBrush IconBackgroundBrush => ToBrush(WithAlpha(AccentHex, "20"));
 
     public SolidColorBrush ValueBrush => ToBrush(ValueHex);
+
+    public string AutomationName => JoinNonEmpty(
+        ", ",
+        Title,
+        JoinNonEmpty(" ", Value, Unit),
+        Status,
+        AutomationVisualStateText,
+        AutomationFreshnessText);
 
     public void UpdateFrom(DashboardTileViewModel next)
     {
@@ -194,19 +224,17 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
         Unit = next.Unit;
         Subtitle = next.Subtitle;
         Status = next.Status;
+        AutomationVisualStateText = next.AutomationVisualStateText;
+        AutomationFreshnessText = next.AutomationFreshnessText;
         AccentHex = next.AccentHex;
         ValueHex = next.ValueHex;
-        TemperatureIconOpacity = next.TemperatureIconOpacity;
-        FanIconOpacity = next.FanIconOpacity;
-        PowerIconOpacity = next.PowerIconOpacity;
-        VoltageIconOpacity = next.VoltageIconOpacity;
-        CurrentIconOpacity = next.CurrentIconOpacity;
-        HealthIconOpacity = next.HealthIconOpacity;
-        IsFanAnimated = next.IsFanAnimated;
-        FanRotationSeconds = next.FanRotationSeconds;
-        ElectricalIconOpacity = next.ElectricalIconOpacity;
-        IsElectricalAnimated = next.IsElectricalAnimated;
-        ElectricalPulseSeconds = next.ElectricalPulseSeconds;
+        IconKind = next.IconKind;
+        VisualState = next.VisualState;
+        MotionKind = next.MotionKind;
+        NormalizedLevel = next.NormalizedLevel;
+        MotionPeriodSeconds = next.MotionPeriodSeconds;
+        IsMotionActive = next.IsMotionActive;
+        IsDataFresh = next.IsDataFresh;
     }
 
     public override string ToString()
@@ -236,6 +264,13 @@ public sealed class DashboardTileViewModel : INotifyPropertyChanged
         var green = Convert.ToByte(hex.Substring(5, 2), 16);
         var blue = Convert.ToByte(hex.Substring(7, 2), 16);
         return new SolidColorBrush(Color.FromArgb(alpha, red, green, blue));
+    }
+
+    private static string JoinNonEmpty(string separator, params string[] parts)
+    {
+        return string.Join(
+            separator,
+            parts.Where(part => !string.IsNullOrWhiteSpace(part)).Select(part => part.Trim()));
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

@@ -9,6 +9,26 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Assert-PathUnderRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Description
+    )
+
+    $rootPath = [System.IO.Path]::GetFullPath($Root).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $targetPath = [System.IO.Path]::GetFullPath($Path).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $rootPrefix = "$rootPath$([System.IO.Path]::DirectorySeparatorChar)"
+    if (-not $targetPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Description must stay under repository root '$rootPath'; resolved path was '$targetPath'."
+    }
+}
+
 function Test-IsElevated {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -79,6 +99,10 @@ if (-not $targetFramework) {
 }
 
 $legacyPackagedPublishDirectory = Join-Path $repoRoot "bin\$Configuration\$targetFramework\$RuntimeIdentifier\publish"
+
+Assert-PathUnderRoot -Path $resolvedOutputDirectory -Root $repoRoot -Description "Signed MSIX output directory"
+Assert-PathUnderRoot -Path $intermediateDirectory -Root $repoRoot -Description "Signed MSIX intermediate directory"
+Assert-PathUnderRoot -Path $legacyPackagedPublishDirectory -Root $repoRoot -Description "Legacy packaged publish directory"
 
 $codeSigningOid = "1.3.6.1.5.5.7.3.3"
 $certificate = Get-ChildItem Cert:\CurrentUser\My |
@@ -171,10 +195,15 @@ if ($signature.Status -ne "Valid") {
 }
 
 $inspectionDirectory = Join-Path $resolvedOutputDirectory "_package-inspection"
+$inspectionArchivePath = Join-Path $resolvedOutputDirectory "_package-inspection.zip"
 Remove-DirectoryIfPresent -Path $inspectionDirectory -Description "previous MSIX inspection directory"
+if (Test-Path -LiteralPath $inspectionArchivePath) {
+    Remove-Item -LiteralPath $inspectionArchivePath -Force -ErrorAction Stop
+}
 New-Item -ItemType Directory -Path $inspectionDirectory -Force | Out-Null
 try {
-    Expand-Archive -LiteralPath $package.FullName -DestinationPath $inspectionDirectory -Force
+    Copy-Item -LiteralPath $package.FullName -Destination $inspectionArchivePath -Force -ErrorAction Stop
+    Expand-Archive -LiteralPath $inspectionArchivePath -DestinationPath $inspectionDirectory -Force
     $generatedManifestPath = Join-Path $inspectionDirectory "AppxManifest.xml"
     if (-not (Test-Path -LiteralPath $generatedManifestPath)) {
         throw "MSIX package is missing AppxManifest.xml."
@@ -215,6 +244,10 @@ try {
     }
 }
 finally {
+    if (Test-Path -LiteralPath $inspectionArchivePath) {
+        Remove-Item -LiteralPath $inspectionArchivePath -Force -ErrorAction Stop
+    }
+
     Remove-DirectoryIfPresent -Path $inspectionDirectory -Description "MSIX inspection directory"
 }
 

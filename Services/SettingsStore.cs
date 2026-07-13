@@ -54,7 +54,36 @@ public sealed class SettingsStore
         Normalize(settings);
         Directory.CreateDirectory(SettingsDirectory);
         var json = JsonSerializer.Serialize(settings, _jsonOptions);
-        File.WriteAllText(SettingsPath, json, Encoding.UTF8);
+        var tempSettingsPath = Path.Combine(SettingsDirectory, $".settings-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (var stream = new FileStream(
+                       tempSettingsPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            {
+                using var writer = new StreamWriter(
+                    stream,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    bufferSize: 4096,
+                    leaveOpen: true);
+                writer.Write(json);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            File.Move(tempSettingsPath, SettingsPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempSettingsPath))
+            {
+                File.Delete(tempSettingsPath);
+            }
+        }
     }
 
     private static void Normalize(AppSettings settings)

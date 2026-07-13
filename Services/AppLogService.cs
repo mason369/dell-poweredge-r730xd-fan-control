@@ -26,6 +26,7 @@ public sealed class AppLogService
     private readonly object _flushLock = new();
     private int _pendingWriteCount;
     private DateTimeOffset? _lastTimestamp;
+    private Exception? _pendingWriteFailure;
     private TaskCompletionSource? _flushCompletion;
 
     public AppLogService()
@@ -110,16 +111,14 @@ public sealed class AppLogService
 
     public Task FlushAsync()
     {
-        if (Volatile.Read(ref _pendingWriteCount) == 0)
-        {
-            return Task.CompletedTask;
-        }
-
         lock (_flushLock)
         {
             if (Volatile.Read(ref _pendingWriteCount) == 0)
             {
-                return Task.CompletedTask;
+                var failure = ConsumePendingWriteFailure();
+                return failure is null
+                    ? Task.CompletedTask
+                    : Task.FromException(CreateLogWriteException(failure));
             }
 
             _flushCompletion ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -201,7 +200,8 @@ public sealed class AppLogService
             }
             catch (Exception ex)
             {
-                WriteFailed?.Invoke(this, ex);
+                CaptureWriteFailure(ex);
+                NotifyWriteFailed(ex);
             }
             finally
             {
@@ -209,6 +209,27 @@ public sealed class AppLogService
                 {
                     CompleteFlushWaiter();
                 }
+            }
+        }
+    }
+
+    private void NotifyWriteFailed(Exception ex)
+    {
+        var handler = WriteFailed;
+        if (handler is null)
+        {
+            return;
+        }
+
+        foreach (var subscriber in handler.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler<Exception>)subscriber)(this, ex);
+            }
+            catch (Exception handlerException)
+            {
+                CaptureWriteFailure(new InvalidOperationException("运行日志写入失败事件处理失败。", handlerException));
             }
         }
     }
@@ -235,15 +256,51 @@ public sealed class AppLogService
         }
     }
 
+    private void CaptureWriteFailure(Exception ex)
+    {
+        lock (_flushLock)
+        {
+            _pendingWriteFailure ??= ex;
+        }
+    }
+
+    private Exception? ConsumePendingWriteFailure()
+    {
+        var failure = _pendingWriteFailure;
+        _pendingWriteFailure = null;
+        return failure;
+    }
+
+    private static InvalidOperationException CreateLogWriteException(Exception failure)
+    {
+        return new InvalidOperationException("运行日志写入失败。", failure);
+    }
+
     private void CompleteFlushWaiter()
     {
         TaskCompletionSource? completion;
+        Exception? failure = null;
         lock (_flushLock)
         {
             completion = _flushCompletion;
             _flushCompletion = null;
+            if (completion is not null)
+            {
+                failure = ConsumePendingWriteFailure();
+            }
         }
 
-        completion?.TrySetResult();
+        if (completion is null)
+        {
+            return;
+        }
+
+        if (failure is not null)
+        {
+            completion.TrySetException(CreateLogWriteException(failure));
+            return;
+        }
+
+        completion.TrySetResult();
     }
 }

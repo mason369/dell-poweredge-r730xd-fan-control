@@ -5,5 +5,5 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="AppDisplayName" xml:space="preserve"><value>R730XD 智控風扇中心</value></data>
-  <data name="AppDescription" xml:space="preserve"><value>監控管理控制器感測器，控制全部或單一風扇，支援戴爾自動模式與軟體恆溫策略。</value></data>
+  <data name="AppDescription" xml:space="preserve"><value>監控 BMC 感測器，控制全部或單一風扇，支援 Dell 自動模式與軟體恆溫策略。</value></data>
 </root>

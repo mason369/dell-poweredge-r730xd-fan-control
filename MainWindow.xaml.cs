@@ -35,11 +35,13 @@ public sealed partial class MainWindow : Window
         Closed += OnWindowClosed;
 
         _windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+        // Create the page before registering the native tray callback so every
+        // tray failure has a MainPage boundary that can display and log it.
+        RootFrame.Navigate(typeof(MainPage));
+
         _trayIcon = CreateTrayIcon();
         ApplyLocalization();
-
-        // Navigate the root frame to the main page on startup.
-        RootFrame.Navigate(typeof(MainPage));
     }
 
     private TrayIconManager CreateTrayIcon()
@@ -75,6 +77,7 @@ public sealed partial class MainWindow : Window
             RunPageAction(page => page.ShowSettingsView());
         };
         trayIcon.ExitRequested += (_, _) => ExitApplication();
+        trayIcon.CommandFailed += (_, ex) => ReportTrayFailure(ex);
         return trayIcon;
     }
 
@@ -127,24 +130,55 @@ public sealed partial class MainWindow : Window
 
     private void RunPageAction(Action<MainPage> action)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
             if (RootFrame.Content is MainPage page)
             {
-                action(page);
+                try
+                {
+                    action(page);
+                }
+                catch (Exception ex)
+                {
+                    page.ReportTrayCommandFailure(ex);
+                }
             }
-        });
+        }))
+        {
+            throw new InvalidOperationException("无法将托盘操作加入界面线程队列，应用可能正在关闭。");
+        }
     }
 
     private void RunPageCommand(Func<MainPage, System.Threading.Tasks.Task> command)
     {
-        DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryEnqueue(async () =>
         {
             if (RootFrame.Content is MainPage page)
             {
-                await command(page);
+                try
+                {
+                    await command(page);
+                }
+                catch (Exception ex)
+                {
+                    page.ReportTrayCommandFailure(ex);
+                }
             }
-        });
+        }))
+        {
+            throw new InvalidOperationException("无法将托盘命令加入界面线程队列，应用可能正在关闭。");
+        }
+    }
+
+    private void ReportTrayFailure(Exception ex)
+    {
+        if (RootFrame.Content is MainPage page)
+        {
+            page.ReportTrayCommandFailure(ex);
+            return;
+        }
+
+        throw new InvalidOperationException("托盘命令失败，但主页面尚未就绪，无法显示失败详情。", ex);
     }
 
     [DllImport("user32.dll")]

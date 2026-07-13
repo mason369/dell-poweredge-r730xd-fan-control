@@ -5,5 +5,5 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
   <data name="AppDisplayName" xml:space="preserve"><value>R730XD 智控风扇中心</value></data>
-  <data name="AppDescription" xml:space="preserve"><value>监控管理控制器传感器，控制全部或单个风扇，支持戴尔自动模式与软件恒温策略。</value></data>
+  <data name="AppDescription" xml:space="preserve"><value>监控 BMC 传感器，控制全部或单个风扇，支持 Dell 自动模式与软件恒温策略。</value></data>
 </root>

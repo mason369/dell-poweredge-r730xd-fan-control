@@ -70,10 +70,33 @@ public sealed partial class IpmiCommandService
         CancellationToken cancellationToken)
     {
         await SetManualModeAsync(profile, cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync(
-            profile,
-            ["raw", "0x30", "0x30", "0x02", ToHexByte(targetByte), ToHexByte(percent)],
-            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ExecuteAsync(
+                profile,
+                ["raw", "0x30", "0x30", "0x02", ToHexByte(targetByte), ToHexByte(percent)],
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception fanSetFailure)
+        {
+            try
+            {
+                await ExecuteAsync(
+                    profile,
+                    ["raw", "0x30", "0x30", "0x01", "0x01"],
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception recoveryFailure)
+            {
+                throw new InvalidOperationException(
+                    "进入手动风扇模式后，设置目标百分比失败；随后发送一次 Dell 自动恢复命令也失败。当前 BMC 风扇模式无法确认，可能仍停留在手动模式并保持旧转速。",
+                    new AggregateException(fanSetFailure, recoveryFailure));
+            }
+
+            throw new FanCommandSafetyRecoveryException(
+                "进入手动风扇模式后，设置目标百分比失败；已发送一次 Dell 自动恢复命令并确认成功。原手动控制请求仍标记为失败。",
+                fanSetFailure);
+        }
     }
 
     private async Task<IpmiCommandResult> ExecuteAsync(
@@ -105,8 +128,6 @@ public sealed partial class IpmiCommandService
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(profile.CommandTimeoutSeconds));
 
-        var stopwatch = Stopwatch.StartNew();
-
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
         {
@@ -126,6 +147,8 @@ public sealed partial class IpmiCommandService
             process.StartInfo.ArgumentList.Add(argument);
         }
 
+        var startedAt = DateTimeOffset.Now;
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             if (!process.Start())
@@ -150,6 +173,7 @@ public sealed partial class IpmiCommandService
             var stderr = await stderrTask.ConfigureAwait(false);
 
             stopwatch.Stop();
+            var finishedAt = DateTimeOffset.Now;
             var result = new IpmiCommandResult(process.ExitCode, stdout, stderr);
             CommandCompleted?.Invoke(
                 this,
@@ -159,6 +183,8 @@ public sealed partial class IpmiCommandService
                     Succeeded = process.ExitCode == 0,
                     ExitCode = process.ExitCode,
                     Elapsed = stopwatch.Elapsed,
+                    StartedAt = startedAt,
+                    FinishedAt = finishedAt,
                 });
 
             return result;
