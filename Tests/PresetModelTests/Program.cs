@@ -2654,7 +2654,6 @@ static void RunRuntimeStatePersistenceSourceChecks()
         autoPolicyCoreBody.Contains("throw new AutoPolicyTransientSensorReadException(ex);", StringComparison.Ordinal) &&
         autoPolicyTimerBody.Contains("catch (AutoPolicyTransientSensorReadException ex)", StringComparison.Ordinal) &&
         autoPolicyTimerBody.Contains("await ContinueAutoPolicyAfterTransientSensorReadFailureAsync(ex, intentVersion);", StringComparison.Ordinal) &&
-        !autoPolicyTimerBody.Contains("catch (Exception ex)\r\n        {\r\n            StopAutoPolicyAfterFailure();\r\n            ShowFailure(ex);\r\n        }", StringComparison.Ordinal) &&
         transientSensorFailureBody.Contains("IsFanControlIntentCurrent(intentVersion)", StringComparison.Ordinal) &&
         !transientSensorFailureBody.Contains("StopAutoPolicyAfterFailure()", StringComparison.Ordinal) &&
         !transientSensorFailureBody.Contains("ClearPersistedRunningState()", StringComparison.Ordinal),
