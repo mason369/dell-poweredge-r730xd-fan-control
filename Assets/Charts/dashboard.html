@@ -344,10 +344,6 @@
     let customRangeStart = "";
     let customRangeEnd = "";
     let lastPayload = null;
-    let pendingHostWheelDeltaY = 0;
-    let pendingHostWheelTicks = 0;
-    let pendingHostWheelShouldAnimate = false;
-    let hostWheelFrameRequested = false;
 
     function initCharts() {
       chartIds.forEach((id) => {
@@ -1249,40 +1245,24 @@
           return;
         }
 
-        const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-          ? 40
-          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-            ? window.innerHeight || 760
-            : 1;
-        const deltaY = event.deltaY * scale;
+        const deltaY = getHostWheelDeltaY(event);
         if (!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.01) {
           return;
         }
 
-        const wheelTicks = getHostWheelTicks(event, deltaY);
         const shouldAnimateHostWheel = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(event.deltaY) >= 80;
         event.preventDefault();
         event.stopPropagation();
-        if (wheelTicks === 0) {
-          pendingHostWheelDeltaY += deltaY;
-        } else {
-          pendingHostWheelTicks += wheelTicks;
-        }
-
-        pendingHostWheelShouldAnimate = pendingHostWheelShouldAnimate || shouldAnimateHostWheel;
-        if (!hostWheelFrameRequested) {
-          hostWheelFrameRequested = true;
-          requestAnimationFrame(postPendingHostWheelDelta);
-        }
+        window.chrome.webview.postMessage({ type: "wheel", deltaY, animate: shouldAnimateHostWheel });
       }, { capture: true, passive: false });
     }
 
-    function getHostWheelTicks(event, deltaY) {
+    function getHostWheelDeltaY(event) {
       if (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL && Math.abs(event.deltaY) < 80) {
-        return 0;
+        return event.deltaY;
       }
 
-      const sign = Math.sign(deltaY);
+      const sign = Math.sign(event.deltaY);
       if (sign === 0) {
         return 0;
       }
@@ -1292,22 +1272,8 @@
         : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
           ? 1
           : 100;
-      return sign * Math.max(1, Math.round(Math.abs(event.deltaY) / unit));
-    }
-
-    function postPendingHostWheelDelta() {
-      hostWheelFrameRequested = false;
-      const deltaY = pendingHostWheelDeltaY;
-      const wheelTicks = pendingHostWheelTicks;
-      const animate = pendingHostWheelShouldAnimate;
-      pendingHostWheelDeltaY = 0;
-      pendingHostWheelTicks = 0;
-      pendingHostWheelShouldAnimate = false;
-      if ((!Number.isFinite(deltaY) || Math.abs(deltaY) < 0.01) && wheelTicks === 0) {
-        return;
-      }
-
-      window.chrome.webview.postMessage({ type: "wheel", deltaY, animate, wheelTicks });
+      const ticks = Math.min(60, Math.max(1, Math.round(Math.abs(event.deltaY) / unit)));
+      return sign * ticks * 100;
     }
 
     initCharts();

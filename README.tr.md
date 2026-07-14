@@ -7,7 +7,7 @@ iDRAC/IPMI üzerinden Dell PowerEdge R730xd fanlarını kontrol eden ve donanım
 ## İndirme ve kapsam
 
 - [En son GitHub Release](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest) sayfasından `DellR730xdFanControlCenter-win-x64.zip` dosyasını indirin, tamamını çıkarın ve `DellR730xdFanControlCenter.exe` dosyasını çalıştırın.
-- Geçerli kaynak sürümü `1.1.0`dır. Release `v1.1.0` eşleşen tag üzerinden oluşturulur ve paketteki exe/dll dosya sürümü `1.1.0.0`dır.
+- Geçerli kaynak sürümü `1.1.2`dir. En son yayımlanan Release hâlâ `v1.1.0`dır ve paketindeki exe/dll dosya sürümü `1.1.0.0`dır; `1.1.2`, yalnızca eşleşen tag oluşturulduktan sonra resmî Release olur.
 - Hedef donanım Dell PowerEdge R730xd'dir. Yerel olarak yalnızca iDRAC 2.82 kullanan R730xd gözlemlenmiştir; diğer firmware sürümleri gözetim altında doğrulanmalıdır.
 
 ## Özellikler

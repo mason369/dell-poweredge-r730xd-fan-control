@@ -19,6 +19,22 @@ Require(defaults.Count >= 5, "Default preset list should include restore, balanc
 Require(defaults.All(preset => preset.CanDelete), "Starter presets should expose the same delete action as custom presets.");
 Require(new AppSettings().SensorRefreshSeconds == 1, "Default SDR polling interval should remain the original 1 second setting.");
 
+var wheelScrollState = new VisualizationWheelScrollState();
+var rapidWheelTarget = 0d;
+for (var wheelIndex = 0; wheelIndex < 5; wheelIndex++)
+{
+    var inFlightAnimatedOffset = wheelIndex * 30d;
+    rapidWheelTarget = wheelScrollState.Accumulate(inFlightAnimatedOffset, 100d, 2000d, wheelIndex * 20L);
+}
+
+Require(
+    rapidWheelTarget == 500d,
+    "Rapid wheel input should accumulate from the prior animation target instead of losing unfinished distance by reading the in-flight visual offset.");
+var nextWheelBurstTarget = wheelScrollState.Accumulate(320d, 100d, 2000d, VisualizationWheelScrollState.BurstTimeoutMilliseconds + 100L);
+Require(
+    nextWheelBurstTarget == 420d,
+    "A later wheel burst should start from the current page offset so scrollbar or navigation changes cannot leave a stale target behind.");
+
 var localizedSensorString = new SensorReading
 {
     Key = "温度",
@@ -1762,10 +1778,10 @@ static void RunCurveEditorInteractionPerformanceChecks()
 
     Require(
         pageSource.Contains("_pendingVisualizationWheelShouldAnimate", StringComparison.Ordinal) &&
-        pageSource.Contains("VisualizationMouseWheelTickDeltaY", StringComparison.Ordinal) &&
-        pageSource.Contains("deltaY += wheelTicks * VisualizationMouseWheelTickDeltaY;", StringComparison.Ordinal) &&
+        pageSource.Contains("VisualizationMouseWheelDeltaY", StringComparison.Ordinal) &&
+        pageSource.Contains("_visualizationWheelScrollState.Accumulate(", StringComparison.Ordinal) &&
         pageSource.Contains("ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: !animate);", StringComparison.Ordinal),
-        "Wheel events forwarded from the chart WebView should normalize discrete mouse input and still use animated ChangeView instead of direct presenter wheel calls.");
+        "Wheel events forwarded from the chart WebView should accumulate an absolute target across an animated burst and still use animated ChangeView instead of direct presenter wheel calls.");
     Require(
         pageSource.Contains("_syncingTemperatureCurveInputsFromCanvas", StringComparison.Ordinal) &&
         pageSource.Contains("_syncingPowerCurveInputsFromCanvas", StringComparison.Ordinal),
@@ -1884,15 +1900,16 @@ static void RunRequestScrollResponsivenessChecks()
         "Chart WebView payloads should send a bounded sampled history instead of cloning and serializing the entire retained history on every refresh.");
     Require(
         pageSource.Contains("_pendingVisualizationWheelDeltaY", StringComparison.Ordinal) &&
-        pageSource.Contains("_pendingVisualizationWheelTicks", StringComparison.Ordinal) &&
         pageSource.Contains("_pendingVisualizationWheelShouldAnimate", StringComparison.Ordinal) &&
-        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate, wheelTicks)", StringComparison.Ordinal),
-        "Forwarded WebView wheel messages should coalesce pixel distance, discrete wheel ticks, and whether the host should use platform smoothing before scrolling the outer page.");
+        pageSource.Contains("_visualizationWheelScrollState", StringComparison.Ordinal) &&
+        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate)", StringComparison.Ordinal) &&
+        !pageSource.Contains("_pendingVisualizationWheelTicks", StringComparison.Ordinal),
+        "Forwarded WebView wheel messages should coalesce normalized distance while preserving one cumulative target for the full animated wheel burst.");
     Require(
         pageXaml.Contains("PointerWheelChanged=\"OnContentPanelPointerWheelChanged\"", StringComparison.Ordinal) &&
         pageSource.Contains("private void OnContentPanelPointerWheelChanged", StringComparison.Ordinal) &&
         pageSource.Contains("e.GetCurrentPoint(ContentPanel).Properties.MouseWheelDelta", StringComparison.Ordinal) &&
-        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate, wheelTicks);", StringComparison.Ordinal) &&
+        pageSource.Contains("ScheduleVisualizationWheelScroll(deltaY, animate);", StringComparison.Ordinal) &&
         pageSource.Contains("e.Handled = true;", StringComparison.Ordinal),
         "Native page wheel input and chart WebView wheel messages should converge on the same queued scroll path and distance model.");
     Require(
@@ -1910,18 +1927,13 @@ static void RunRequestScrollResponsivenessChecks()
         pageSource.Contains("SensorsView.Visibility == Visibility.Visible", StringComparison.Ordinal),
         "Sensor table localization rows should be deferred while the Sensors page is hidden so request completion does not refresh an off-screen ListView during overview scrolling.");
     Require(
-        dashboardHtml.Contains("let pendingHostWheelDeltaY = 0;", StringComparison.Ordinal) &&
-        dashboardHtml.Contains("let pendingHostWheelTicks = 0;", StringComparison.Ordinal) &&
-        dashboardHtml.Contains("let pendingHostWheelShouldAnimate = false;", StringComparison.Ordinal) &&
-        dashboardHtml.Contains("const wheelTicks = getHostWheelTicks(event, deltaY);", StringComparison.Ordinal) &&
+        dashboardHtml.Contains("const deltaY = getHostWheelDeltaY(event);", StringComparison.Ordinal) &&
         dashboardHtml.Contains("const shouldAnimateHostWheel = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL || Math.abs(event.deltaY) >= 80;", StringComparison.Ordinal) &&
-        dashboardHtml.Contains("requestAnimationFrame(postPendingHostWheelDelta);", StringComparison.Ordinal),
-        "The chart WebView should coalesce wheel forwarding to one host message per animation frame while preserving whether the input was a discrete wheel gesture and how many native wheel ticks it represents.");
+        !dashboardHtml.Contains("requestAnimationFrame(postPendingHostWheelDelta);", StringComparison.Ordinal) &&
+        !dashboardHtml.Contains("pendingHostWheelTicks", StringComparison.Ordinal),
+        "The chart WebView should normalize each wheel event before forwarding it without adding a second animation-frame queue ahead of the host dispatcher.");
     Require(
-        !wheelHandlerBody.Contains("window.chrome.webview.postMessage", StringComparison.Ordinal),
-        "The chart WebView should not post one host wheel message for every raw wheel event.");
-    Require(
-        dashboardHtml.Contains("window.chrome.webview.postMessage({ type: \"wheel\", deltaY, animate, wheelTicks });", StringComparison.Ordinal) &&
+        wheelHandlerBody.Contains("window.chrome.webview.postMessage({ type: \"wheel\", deltaY, animate: shouldAnimateHostWheel });", StringComparison.Ordinal) &&
         dashboardHtml.Contains("zoomOnMouseWheel: false", StringComparison.Ordinal) &&
         dashboardHtml.Contains("moveOnMouseWheel: false", StringComparison.Ordinal) &&
         dashboardHtml.Contains("moveOnMouseMove: false", StringComparison.Ordinal),
@@ -2649,15 +2661,27 @@ static void RunRuntimeStatePersistenceSourceChecks()
         !stopAutoEmergencyBody.Contains("ResetAutoPolicyModeSummary();", StringComparison.Ordinal),
         "Emergency Dell-auto protection should stop the software auto timer, persist Dell auto as the active hardware mode, clear auto caches, and show a visible warning so stale curve/smart-auto state cannot keep running.");
     Require(
+        autoPolicyTimerBody.Contains("catch (FanCommandSafetyRecoveryException ex)", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("StopAutoPolicyAfterEmergencyDellAuto();", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("SetModeSummary(\"Mode.DellAuto\");", StringComparison.Ordinal) &&
+        ContainsBefore(
+            autoPolicyTimerBody,
+            "catch (FanCommandSafetyRecoveryException ex)",
+            "catch (Exception ex)"),
+        "A running auto-policy fan command that fails after confirmed Dell automatic recovery must stop the software timer and persist/show Dell auto instead of falling through to the generic manual-state failure handler.");
+    Require(
         source.Contains("private sealed class AutoPolicyTransientSensorReadException", StringComparison.Ordinal) &&
         autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.ReadSensors", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.RefreshAfterFanCommand", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.RefreshAfterEmergencyDellAuto", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("failureStage is AutoPolicyTickFailureStage.ReadSensors or AutoPolicyTickFailureStage.RefreshAfterFanCommand", StringComparison.Ordinal) &&
         autoPolicyCoreBody.Contains("throw new AutoPolicyTransientSensorReadException(ex);", StringComparison.Ordinal) &&
         autoPolicyTimerBody.Contains("catch (AutoPolicyTransientSensorReadException ex)", StringComparison.Ordinal) &&
         autoPolicyTimerBody.Contains("await ContinueAutoPolicyAfterTransientSensorReadFailureAsync(ex, intentVersion);", StringComparison.Ordinal) &&
         transientSensorFailureBody.Contains("IsFanControlIntentCurrent(intentVersion)", StringComparison.Ordinal) &&
         !transientSensorFailureBody.Contains("StopAutoPolicyAfterFailure()", StringComparison.Ordinal) &&
         !transientSensorFailureBody.Contains("ClearPersistedRunningState()", StringComparison.Ordinal),
-        "Already-running auto policy ticks should keep retrying after transient SDR/RMCP+ sensor-read failures instead of clearing the running preset and falling back to manual mode.");
+        "Already-running auto policy ticks should keep retrying after transient SDR/RMCP+ reads, including the refresh after a successful normal fan command, without treating emergency Dell-auto refresh failures as retryable software-auto state.");
     Require(
         source.Contains("if (shouldReapply)", StringComparison.Ordinal) &&
         source.Contains("await ApplyPresetAsync(savedPreset)", StringComparison.Ordinal),
@@ -3016,13 +3040,13 @@ static void RunReleaseVersionMetadataChecks()
     var project = File.ReadAllText(FindRepositoryFile("DellR730xdFanControlCenter.csproj"));
     var manifest = File.ReadAllText(FindRepositoryFile("Package.appxmanifest"));
     Require(
-        project.Contains("<Version>1.1.0</Version>", StringComparison.Ordinal) &&
-        project.Contains("<AssemblyVersion>1.1.0.0</AssemblyVersion>", StringComparison.Ordinal) &&
-        project.Contains("<FileVersion>1.1.0.0</FileVersion>", StringComparison.Ordinal) &&
-        project.Contains("<InformationalVersion>1.1.0</InformationalVersion>", StringComparison.Ordinal),
+        project.Contains("<Version>1.1.2</Version>", StringComparison.Ordinal) &&
+        project.Contains("<AssemblyVersion>1.1.2.0</AssemblyVersion>", StringComparison.Ordinal) &&
+        project.Contains("<FileVersion>1.1.2.0</FileVersion>", StringComparison.Ordinal) &&
+        project.Contains("<InformationalVersion>1.1.2</InformationalVersion>", StringComparison.Ordinal),
         "Release binaries should carry an explicit application version so fixed builds are distinguishable from 1.0.0 artifacts.");
     Require(
-        manifest.Contains("Version=\"1.1.0.0\"", StringComparison.Ordinal),
+        manifest.Contains("Version=\"1.1.2.0\"", StringComparison.Ordinal),
         "MSIX package identity version should be bumped with release fixes so Windows can install an update instead of rejecting same-version packages.");
 }
 

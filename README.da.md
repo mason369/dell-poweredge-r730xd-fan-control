@@ -7,7 +7,7 @@ WinUI 3-app til Windows 10/11, der styrer blæsere og overvåger hardware i en D
 ## Download og omfang
 
 - Hent `DellR730xdFanControlCenter-win-x64.zip` fra den [seneste GitHub Release](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest), pak alt ud, og start `DellR730xdFanControlCenter.exe`.
-- Den aktuelle kildekode er `1.1.0`. Release `v1.1.0` bygges fra det tilsvarende tag, og pakkens exe/dll har filversion `1.1.0.0`.
+- Den aktuelle kildekode er `1.1.2`. Den senest udgivne Release er fortsat `v1.1.0`, og pakkens exe/dll har filversion `1.1.0.0`; `1.1.2` bliver først en officiel Release, når det tilsvarende tag er bygget.
 - Målhardwaren er Dell PowerEdge R730xd. Kun R730xd med iDRAC 2.82 er observeret lokalt; anden firmware skal testes under opsyn.
 
 ## Funktioner

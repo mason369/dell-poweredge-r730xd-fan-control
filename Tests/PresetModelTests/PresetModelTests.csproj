@@ -25,6 +25,7 @@
     <Compile Include="..\..\Models\IdracProfile.cs" Link="Models\IdracProfile.cs" />
     <Compile Include="..\..\Models\SensorReading.cs" Link="Models\SensorReading.cs" />
     <Compile Include="..\..\Models\SensorSubtitleFormatter.cs" Link="Models\SensorSubtitleFormatter.cs" />
+    <Compile Include="..\..\Models\VisualizationWheelScrollState.cs" Link="Models\VisualizationWheelScrollState.cs" />
     <Compile Include="..\..\Services\AppLogOperation.cs" Link="Services\AppLogOperation.cs" />
     <Compile Include="..\..\Services\AppLogService.cs" Link="Services\AppLogService.cs" />
     <Compile Include="..\..\Services\CommandTraceEventArgs.cs" Link="Services\CommandTraceEventArgs.cs" />

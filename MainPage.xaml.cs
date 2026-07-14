@@ -37,7 +37,7 @@ public sealed partial class MainPage : Page
     private const double CurveCanvasPadding = 34;
     private const double CurvePointHitRadius = 18;
     private const int CurvePreviewSampleCount = 120;
-    private const double VisualizationMouseWheelTickDeltaY = 100d;
+    private const double VisualizationMouseWheelDeltaY = 100d;
     private const string HeroThermalTemperatureCurveAutoChinese = "温度曲线自动";
     private const string HeroThermalPowerCurveAutoChinese = "功耗曲线自动";
     private const string HeroThermalSmartPolicyChinese = "软件恒温策略";
@@ -90,8 +90,8 @@ public sealed partial class MainPage : Page
     private bool _visualizationInitialized;
     private bool _visualizationReady;
     private bool _visualizationSnapshotUpdateScheduled;
+    private readonly VisualizationWheelScrollState _visualizationWheelScrollState = new();
     private double _pendingVisualizationWheelDeltaY;
-    private int _pendingVisualizationWheelTicks;
     private bool _pendingVisualizationWheelShouldAnimate;
     private bool _visualizationWheelScrollScheduled;
     private bool _overviewMetricsDirty = true;
@@ -518,8 +518,7 @@ public sealed partial class MainPage : Page
 
         var animate = root.TryGetProperty("animate", out var animateProperty) &&
             animateProperty.ValueKind == JsonValueKind.True;
-        var wheelTicks = ReadVisualizationWheelTicks(root);
-        ScheduleVisualizationWheelScroll(deltaY, animate, wheelTicks);
+        ScheduleVisualizationWheelScroll(deltaY, animate);
     }
 
     private void OnContentPanelPointerWheelChanged(object sender, PointerRoutedEventArgs e)
@@ -531,50 +530,14 @@ public sealed partial class MainPage : Page
         }
 
         var animate = Math.Abs(nativeWheelDelta) >= 120;
-        var wheelTicks = animate
-            ? Math.Clamp((int)Math.Round(-nativeWheelDelta / 120d), -60, 60)
-            : 0;
-        var deltaY = wheelTicks == 0
-            ? -nativeWheelDelta * VisualizationMouseWheelTickDeltaY / 120d
-            : 0;
-        ScheduleVisualizationWheelScroll(deltaY, animate, wheelTicks);
+        var deltaY = -nativeWheelDelta * VisualizationMouseWheelDeltaY / 120d;
+        ScheduleVisualizationWheelScroll(deltaY, animate);
         e.Handled = true;
     }
 
-    private static int ReadVisualizationWheelTicks(JsonElement root)
+    private void ScheduleVisualizationWheelScroll(double deltaY, bool animate)
     {
-        if (!root.TryGetProperty("wheelTicks", out var wheelTicksProperty) ||
-            wheelTicksProperty.ValueKind != JsonValueKind.Number)
-        {
-            return 0;
-        }
-
-        if (wheelTicksProperty.TryGetInt32(out var wheelTicks))
-        {
-            return Math.Clamp(wheelTicks, -60, 60);
-        }
-
-        if (wheelTicksProperty.TryGetDouble(out var wheelTicksValue) &&
-            !double.IsNaN(wheelTicksValue) &&
-            !double.IsInfinity(wheelTicksValue))
-        {
-            return Math.Clamp((int)Math.Round(wheelTicksValue), -60, 60);
-        }
-
-        return 0;
-    }
-
-    private void ScheduleVisualizationWheelScroll(double deltaY, bool animate, int wheelTicks)
-    {
-        if (wheelTicks == 0)
-        {
-            _pendingVisualizationWheelDeltaY += deltaY;
-        }
-        else
-        {
-            _pendingVisualizationWheelTicks = Math.Clamp(_pendingVisualizationWheelTicks + wheelTicks, -60, 60);
-        }
-
+        _pendingVisualizationWheelDeltaY = Math.Clamp(_pendingVisualizationWheelDeltaY + deltaY, -6000d, 6000d);
         _pendingVisualizationWheelShouldAnimate |= animate;
         if (_visualizationWheelScrollScheduled)
         {
@@ -592,26 +555,21 @@ public sealed partial class MainPage : Page
     private void ApplyPendingVisualizationWheelScroll()
     {
         _visualizationWheelScrollScheduled = false;
-        var wheelTicks = _pendingVisualizationWheelTicks;
         var deltaY = _pendingVisualizationWheelDeltaY;
         var animate = _pendingVisualizationWheelShouldAnimate;
-        _pendingVisualizationWheelTicks = 0;
         _pendingVisualizationWheelDeltaY = 0;
         _pendingVisualizationWheelShouldAnimate = false;
-        if (wheelTicks != 0)
-        {
-            deltaY += wheelTicks * VisualizationMouseWheelTickDeltaY;
-        }
 
         if (Math.Abs(deltaY) < 0.01)
         {
             return;
         }
 
-        var nextOffset = Math.Clamp(
-            ContentScrollViewer.VerticalOffset + deltaY,
-            0,
-            ContentScrollViewer.ScrollableHeight);
+        var nextOffset = _visualizationWheelScrollState.Accumulate(
+            ContentScrollViewer.VerticalOffset,
+            deltaY,
+            ContentScrollViewer.ScrollableHeight,
+            Environment.TickCount64);
         ContentScrollViewer.ChangeView(null, nextOffset, null, disableAnimation: !animate);
     }
 
@@ -2181,6 +2139,21 @@ public sealed partial class MainPage : Page
                 ShowFailure(logException);
             }
         }
+        catch (FanCommandSafetyRecoveryException ex)
+        {
+            try
+            {
+                StopAutoPolicyAfterEmergencyDellAuto();
+                SetModeSummary("Mode.DellAuto");
+                ShowFailure(ex);
+            }
+            catch (Exception statePersistenceFailure)
+            {
+                ShowFailure(new InvalidOperationException(
+                    $"{ex.Message}{Environment.NewLine}{F("Status.DellAutoStatePersistenceFailed", statePersistenceFailure.Message)}",
+                    new AggregateException(ex, statePersistenceFailure)));
+            }
+        }
         catch (FanControlIntentSupersededException ex)
         {
             AddLog(T("Log.Info"), ex.Message);
@@ -2273,7 +2246,7 @@ public sealed partial class MainPage : Page
                 ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
                 failureStage = AutoPolicyTickFailureStage.ApplyFanCommand;
                 await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);
-                failureStage = AutoPolicyTickFailureStage.RefreshAfterFanCommand;
+                failureStage = AutoPolicyTickFailureStage.RefreshAfterEmergencyDellAuto;
                 var emergencyRefreshElapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken);
                 var emergencyMessage = F("Status.EmergencyAuto", cpuTemp);
                 operation.Succeed(
@@ -2367,6 +2340,8 @@ public sealed partial class MainPage : Page
             {
                 try
                 {
+                    fanCommandProperties ??= new Dictionary<string, string>();
+                    fanCommandProperties["failureStage"] = failureStage.ToString();
                     operation.Fail(ex, fanCommandProperties);
                     await FlushAppLogAsync();
                 }
@@ -2378,7 +2353,7 @@ public sealed partial class MainPage : Page
                 }
             }
 
-            if (failureStage == AutoPolicyTickFailureStage.ReadSensors)
+            if (failureStage is AutoPolicyTickFailureStage.ReadSensors or AutoPolicyTickFailureStage.RefreshAfterFanCommand)
             {
                 throw new AutoPolicyTransientSensorReadException(ex);
             }
@@ -2819,7 +2794,7 @@ public sealed partial class MainPage : Page
             catch (Exception statePersistenceFailure)
             {
                 visibleFailure = new InvalidOperationException(
-                    $"{ex.Message}{Environment.NewLine}Dell 自动模式已由硬件命令恢复，但应用未能保存对应的界面或 LastRunning 状态：{statePersistenceFailure.Message}",
+                    $"{ex.Message}{Environment.NewLine}{F("Status.DellAutoStatePersistenceFailed", statePersistenceFailure.Message)}",
                     new AggregateException(ex, statePersistenceFailure));
             }
 
@@ -5991,6 +5966,7 @@ public sealed partial class MainPage : Page
         UpdateSensorState,
         ApplyFanCommand,
         RefreshAfterFanCommand,
+        RefreshAfterEmergencyDellAuto,
     }
 
     private sealed class AutoPolicyTransientSensorReadException : Exception
