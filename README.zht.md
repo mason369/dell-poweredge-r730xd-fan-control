@@ -7,7 +7,7 @@
 ## 下載與適用範圍
 
 - 從 [GitHub 最新 Release](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest) 下載 `DellR730xdFanControlCenter-win-x64.zip`，完整解壓後執行 `DellR730xdFanControlCenter.exe`。
-- 當前原始碼版本為 `1.1.2`。最新已發布的 Release 仍為 `v1.1.0`，套件內 exe/dll 的檔案版本為 `1.1.0.0`；`1.1.2` 需在對應 tag 建置後才成為正式 Release。
+- 當前原始碼與最新已發布的 Release 均為 `v1.1.2`；套件內 exe/dll 的檔案版本為 `1.1.2.0`，原始碼、tag 與二進位檔對應同一版本。
 - 目標硬體是 Dell PowerEdge R730xd。本機僅觀察過 R730xd / iDRAC 2.82；其他韌體必須在有人值守時驗證。
 
 ## 主要功能

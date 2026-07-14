@@ -7,7 +7,7 @@ WinUI 3 aplikacija za Windows 10/11 koja upravlja ventilatorima i nadgleda hardv
 ## Preuzimanje i opseg
 
 - Preuzmite `DellR730xdFanControlCenter-win-x64.zip` sa [najnovijeg GitHub Releasea](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest), raspakujte sve i pokrenite `DellR730xdFanControlCenter.exe`.
-- Trenutni izvorni kod je `1.1.2`. Najnoviji objavljeni Release i dalje je `v1.1.0`, a exe/dll u tom paketu imaju verziju datoteke `1.1.0.0`; `1.1.2` postaje službeni Release tek nakon izrade odgovarajuće oznake.
+- Trenutni izvorni kod i najnoviji objavljeni Release su `v1.1.2`; exe/dll u paketu imaju verziju datoteke `1.1.2.0`, pa izvorni kod, oznaka i binarne datoteke označavaju istu verziju.
 - Ciljni hardver je Dell PowerEdge R730xd. Lokalno je posmatran samo R730xd s iDRAC 2.82; drugi firmware mora se provjeravati pod nadzorom.
 
 ## Mogućnosti
