@@ -24,6 +24,18 @@ public sealed partial class IpmiCommandService
         return ExecuteFanSetSequenceAsync(profile, 0xff, percent, cancellationToken);
     }
 
+    public Task SetAllFansSpeedInConfirmedManualModeAsync(
+        IdracProfile profile,
+        int percent,
+        CancellationToken cancellationToken)
+    {
+        AppSettings.ValidatePercent(percent, nameof(percent));
+        return ExecuteAsync(
+            profile,
+            ["raw", "0x30", "0x30", "0x02", "0xff", ToHexByte(percent)],
+            cancellationToken);
+    }
+
     public Task SetSingleFanManualSpeedAsync(IdracProfile profile, int fanIndex, int percent, CancellationToken cancellationToken)
     {
         if (fanIndex is < 1 or > 6)

@@ -7,7 +7,7 @@ WinUI 3-app for Windows 10/11 som styrer vifter og overvåker maskinvare i Dell 
 ## Nedlasting og omfang
 
 - Last ned `DellR730xdFanControlCenter-win-x64.zip` fra [nyeste GitHub Release](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest), pakk ut alt og kjør `DellR730xdFanControlCenter.exe`.
-- Gjeldende kildekode og den nyeste publiserte releasen er `v1.1.2`; pakkens exe/dll har filversjon `1.1.2.0`, slik at kildekode, tagg og binærfiler viser samme versjon.
+- Gjeldende kildekode og den nyeste publiserte releasen er `v1.1.3`; pakkens exe/dll har filversjon `1.1.3.0`, slik at kildekode, tagg og binærfiler viser samme versjon.
 - Målmaskinvaren er Dell PowerEdge R730xd. Bare R730xd med iDRAC 2.82 er observert lokalt; annen fastvare må valideres under tilsyn.
 
 ## Funksjoner

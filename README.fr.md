@@ -7,7 +7,7 @@ Application WinUI 3 pour Windows 10/11 destinée au contrôle des ventilateurs e
 ## Téléchargement et périmètre
 
 - Téléchargez `DellR730xdFanControlCenter-win-x64.zip` depuis le [dernier GitHub Release](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest), extrayez tout puis lancez `DellR730xdFanControlCenter.exe`.
-- Le code source actuel et le dernier Release publié sont en version `v1.1.2` ; les exe/dll du paquet portent la version de fichier `1.1.2.0`, de sorte que le code source, le tag et les binaires désignent la même version.
+- Le code source actuel et le dernier Release publié sont en version `v1.1.3` ; les exe/dll du paquet portent la version de fichier `1.1.3.0`, de sorte que le code source, le tag et les binaires désignent la même version.
 - Le matériel ciblé est le Dell PowerEdge R730xd. Seul un R730xd avec iDRAC 2.82 a été observé localement; les autres firmwares doivent être validés sous surveillance.
 
 ## Fonctions

@@ -7,7 +7,7 @@ Applicazione WinUI 3 per Windows 10/11 dedicata al controllo ventole e al monito
 ## Download e ambito
 
 - Scaricare `DellR730xdFanControlCenter-win-x64.zip` dall'[ultimo GitHub Release](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest), estrarre tutto e avviare `DellR730xdFanControlCenter.exe`.
-- Il codice sorgente attuale e l'ultimo Release pubblicato sono `v1.1.2`; gli exe/dll nel pacchetto hanno versione file `1.1.2.0`, quindi sorgente, tag e file binari indicano la stessa versione.
+- Il codice sorgente attuale e l'ultimo Release pubblicato sono `v1.1.3`; gli exe/dll nel pacchetto hanno versione file `1.1.3.0`, quindi sorgente, tag e file binari indicano la stessa versione.
 - L'hardware di destinazione è Dell PowerEdge R730xd. Localmente è stato osservato solo R730xd con iDRAC 2.82; altri firmware richiedono verifica sorvegliata.
 
 ## Funzioni

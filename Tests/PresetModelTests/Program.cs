@@ -615,11 +615,40 @@ static void RunFanCommandSafetyRecoveryChecks()
             ["EnterManual"],
             "Dell automatic recovery must not run when entering manual mode itself was never confirmed successful.");
 
+        File.Delete(logPath);
+        ConfigureFakeIpmiExitCodes(manual: 23, speed: 0, automatic: 24);
+        var confirmedManualService = new IpmiCommandService();
+        confirmedManualService
+            .SetAllFansSpeedInConfirmedManualModeAsync(profile, 38, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+        RequireSequence(
+            logPath,
+            ["SetFanSpeed"],
+            "An already-running automatic policy must update only the fan percentage without re-entering manual mode or changing to Dell automatic mode.");
+
+        File.Delete(logPath);
+        ConfigureFakeIpmiExitCodes(manual: 25, speed: 26, automatic: 27);
+        var rejectedConfirmedManualService = new IpmiCommandService();
+        var rejectedConfirmedManualFailure = CaptureException(
+            () => rejectedConfirmedManualService
+                .SetAllFansSpeedInConfirmedManualModeAsync(profile, 39, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult());
+        Require(
+            rejectedConfirmedManualFailure.GetType().Name != "FanCommandSafetyRecoveryException",
+            "A percentage failure in an already-confirmed manual session must remain the original command failure instead of reporting a mode recovery that was not attempted.");
+        RequireSequence(
+            logPath,
+            ["SetFanSpeed"],
+            "A failed automatic percentage update must not retry the target, re-enter manual mode, or switch to Dell automatic mode.");
+
         var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
         Require(
             pageSource.Contains("catch (FanCommandSafetyRecoveryException", StringComparison.Ordinal) &&
-            pageSource.Contains("MarkActivePreset(\"dell-auto\", persistRunningState: true)", StringComparison.Ordinal),
-            "The UI failure boundary must visibly fail the requested command while aligning its summary and LastRunning state with the confirmed Dell automatic recovery.");
+            pageSource.Contains("MarkActivePreset(\"dell-auto\", persistRunningState: true)", StringComparison.Ordinal) &&
+            pageSource.Contains("SetAllFansSpeedInConfirmedManualModeAsync", StringComparison.Ordinal),
+            "First-tick and user-command recovery must align the UI with confirmed Dell automatic mode, while later automatic ticks use the no-mode-change percentage command.");
     }
     finally
     {
@@ -720,8 +749,11 @@ static void RunAutoPolicyUnchangedTargetSkipSourceChecks()
     var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
     var tickStartIndex = source.IndexOf("private async Task<bool> RunAutoPolicyOnceCoreAsync", StringComparison.Ordinal);
     var percentIndex = source.IndexOf("var percent = CalculateFanPercentForAutoTick", tickStartIndex, StringComparison.Ordinal);
-    var skipIndex = source.IndexOf("ShouldSkipUnchangedAutoPolicyFanCommand", percentIndex, StringComparison.Ordinal);
-    var commandIndex = source.IndexOf("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken)", percentIndex, StringComparison.Ordinal);
+    var unchangedSkipIndex = source.IndexOf("ShouldSkipUnchangedAutoPolicyFanCommand", percentIndex, StringComparison.Ordinal);
+    var failedSkipIndex = source.IndexOf("ShouldSkipPreviouslyFailedAutoPolicyFanCommand", percentIndex, StringComparison.Ordinal);
+    var confirmedModeCommandIndex = source.IndexOf("await _ipmi.SetAllFansSpeedInConfirmedManualModeAsync(profile, percent, cancellationToken)", percentIndex, StringComparison.Ordinal);
+    var firstCommandIndex = source.IndexOf("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken)", percentIndex, StringComparison.Ordinal);
+    var commandIndex = Math.Min(confirmedModeCommandIndex, firstCommandIndex);
     var rememberIndex = source.IndexOf("RememberAutoPolicyFanTarget(targetKey, percent)", commandIndex, StringComparison.Ordinal);
     var postCommandRefreshIndex = source.IndexOf("await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken)", commandIndex, StringComparison.Ordinal);
     var readSensorsIndex = source.IndexOf("var readings = await _ipmi.ReadSensorsAsync(profile, cancellationToken)", tickStartIndex, StringComparison.Ordinal);
@@ -730,15 +762,21 @@ static void RunAutoPolicyUnchangedTargetSkipSourceChecks()
     Require(
         tickStartIndex >= 0 &&
         percentIndex > tickStartIndex &&
-        skipIndex > percentIndex &&
-        commandIndex > skipIndex &&
+        unchangedSkipIndex > percentIndex &&
+        failedSkipIndex > unchangedSkipIndex &&
+        commandIndex > failedSkipIndex &&
+        confirmedModeCommandIndex > failedSkipIndex &&
+        firstCommandIndex > failedSkipIndex &&
         rememberIndex > commandIndex &&
         postCommandRefreshIndex > commandIndex,
-        "Auto-policy ticks should skip unchanged calculated fan percentages before sending another all-fan raw command, and should read sensors again after an actual fan command.");
+        "Auto-policy ticks should skip unchanged or previously failed percentages before sending a raw command, use the no-mode-change command after the first success, and refresh sensors after an actual command.");
     Require(
         source.Contains("BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, \"SkipUnchangedFanPercent\")", StringComparison.Ordinal) &&
+        source.Contains("\"SkipPreviouslyFailedFanPercent\"", StringComparison.Ordinal) &&
+        source.Contains("RememberFailedAutoPolicyFanTarget(targetKey, percent);", StringComparison.Ordinal) &&
+        source.Contains("[\"retrySuppressed\"] = bool.TrueString", StringComparison.Ordinal) &&
         source.Contains("ClearAutoPolicyFanTargetCache();", StringComparison.Ordinal),
-        "Unchanged auto-policy skips should be logged explicitly, and manual/Dell/stop paths should clear the cached automatic fan target.");
+        "Unchanged and previously failed auto-policy targets should be logged explicitly, and manual/Dell/stop paths should clear both successful and failed target caches.");
     Require(
         source.Contains("ForceNextAutoPolicyFanCommand();", StringComparison.Ordinal) &&
         source.Contains("!_forceNextAutoPolicyFanCommand", StringComparison.Ordinal) &&
@@ -748,7 +786,7 @@ static void RunAutoPolicyUnchangedTargetSkipSourceChecks()
     Require(
         readSensorsIndex > tickStartIndex &&
         clearStaleIndex > readSensorsIndex &&
-        clearStaleIndex < skipIndex,
+        clearStaleIndex < unchangedSkipIndex,
         "A successful auto-policy SDR read should clear stale top-level failure banners before any unchanged-target skip can return.");
 }
 
@@ -763,9 +801,11 @@ static void RunAutoPolicyFailureContextSourceChecks()
     Require(
         autoPolicyBody.Length > 0 &&
         autoPolicyBody.Contains("Dictionary<string, string>? fanCommandProperties = null;", StringComparison.Ordinal) &&
-        autoPolicyBody.Contains("fanCommandProperties = BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, \"SetAllFansManualSpeed\");", StringComparison.Ordinal) &&
+        autoPolicyBody.Contains("updateConfirmedManualMode ? \"SetFanSpeedInConfirmedManualMode\" : \"SetAllFansManualSpeed\"", StringComparison.Ordinal) &&
+        autoPolicyBody.Contains("fanCommandProperties[\"modeChangeAttempted\"]", StringComparison.Ordinal) &&
+        autoPolicyBody.Contains("fanCommandProperties[\"retrySuppressed\"] = bool.TrueString;", StringComparison.Ordinal) &&
         autoPolicyBody.Contains("operation.Fail(ex, fanCommandProperties);", StringComparison.Ordinal),
-        "Auto-policy failures after calculating a fan target should log the computed CPU temperature, power reading, target percent, and raw-command action with the failed operation.");
+        "Auto-policy failures after calculating a fan target should log the computed CPU temperature, power reading, target percent, whether a mode change was attempted, and whether the failed target was suppressed.");
     Require(
         source.Contains("private static Dictionary<string, string> BuildAutoPolicyFanCommandProperties(double cpuTemp, int percent, double? powerWatts, string action)", StringComparison.Ordinal) &&
         source.Contains("[\"cpuTemperatureCelsius\"] = cpuTemp.ToString(\"0.0\", CultureInfo.InvariantCulture)", StringComparison.Ordinal) &&
@@ -1873,6 +1913,9 @@ static void RunRequestScrollResponsivenessChecks()
     var wheelHandlerBody = wheelHandlerStart >= 0 && wheelHandlerEnd > wheelHandlerStart
         ? dashboardHtml[wheelHandlerStart..wheelHandlerEnd]
         : string.Empty;
+    var scrollPresetBody = ExtractMethodBody(pageSource, "ScrollPresetIntoView");
+    var scheduledSnapshotBody = ExtractMethodBody(pageSource, "SendScheduledVisualizationSnapshot");
+    var sendSnapshotBody = ExtractMethodBody(pageSource, "SendVisualizationSnapshot");
 
     Require(
         pageSource.Contains("ScheduleVisualizationSnapshot();", StringComparison.Ordinal) &&
@@ -1885,9 +1928,16 @@ static void RunRequestScrollResponsivenessChecks()
         "Chart payload updates should reuse the snapshot built for history persistence instead of rebuilding the same sensor snapshot on the UI thread.");
     Require(
         pageSource.Contains("Task.Run(() => JsonSerializer.Serialize(payload, VisualizationJsonOptions))", StringComparison.Ordinal) &&
+        sendSnapshotBody.Contains("await Task.Run(() => JsonSerializer.Serialize(payload, VisualizationJsonOptions))", StringComparison.Ordinal) &&
+        !sendSnapshotBody.Contains("ContinueWith", StringComparison.Ordinal) &&
+        scheduledSnapshotBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
         !pageSource.Contains("var payload = BuildVisualizationPayload();\r\n            var json = JsonSerializer.Serialize(payload, VisualizationJsonOptions);", StringComparison.Ordinal) &&
         !pageSource.Contains("var payload = BuildVisualizationPayload();\n            var json = JsonSerializer.Serialize(payload, VisualizationJsonOptions);", StringComparison.Ordinal),
         "Chart payload JSON serialization should run off the UI thread before posting the finished JSON to WebView2.");
+    Require(
+        CountOccurrences(scrollPresetBody, "if (!DispatcherQueue.TryEnqueue") == 2 &&
+        CountOccurrences(scrollPresetBody, "Status.UiDispatchFailed") == 2,
+        "Both preset-scroll dispatcher stages should expose queue rejection instead of silently losing the requested scroll.");
     Require(
         !pageSource.Contains("RecordVisualizationHistoryPoint(snapshotTime);\r\n            SendVisualizationSnapshot();", StringComparison.Ordinal) &&
         !pageSource.Contains("RecordVisualizationHistoryPoint(snapshotTime);\n            SendVisualizationSnapshot();", StringComparison.Ordinal),
@@ -1944,10 +1994,16 @@ static void RunRequestIoResponsivenessChecks()
 {
     var pageSource = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
     var logSource = File.ReadAllText(FindRepositoryFile(Path.Combine("Services", "AppLogService.cs")));
+    var queueHistoryBody = ExtractMethodBody(pageSource, "QueueVisualizationHistoryPersistence");
+    var reportHistoryFailureBody = ExtractMethodBody(pageSource, "ReportVisualizationHistoryFailure");
 
     Require(
         pageSource.Contains("QueueVisualizationHistoryPersistence(historyPoint, timestamp);", StringComparison.Ordinal) &&
-        pageSource.Contains("Task.Run(() => PersistVisualizationHistoryPoint(historyPoint, timestamp))", StringComparison.Ordinal),
+        queueHistoryBody.Contains("await Task.Run(() => PersistVisualizationHistoryPoint(historyPoint, timestamp))", StringComparison.Ordinal) &&
+        queueHistoryBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        !queueHistoryBody.Contains("ContinueWith", StringComparison.Ordinal) &&
+        reportHistoryFailureBody.Contains("if (!DispatcherQueue.TryEnqueue", StringComparison.Ordinal) &&
+        reportHistoryFailureBody.Contains("Status.UiDispatchFailed", StringComparison.Ordinal),
         "Chart history persistence should be queued to a background task instead of appending JSONL on the UI thread after each request.");
     Require(
         !pageSource.Contains("TryAppendVisualizationHistoryPoint(historyPoint, timestamp);", StringComparison.Ordinal),
@@ -2544,10 +2600,16 @@ static void RunRuntimeStatePersistenceSourceChecks()
         : string.Empty;
     var connectBodyForIntent = ExtractMethodBody(source, "ConnectAndStartPollingAsync");
     var deletePresetBody = ExtractMethodBody(source, "OnDeletePresetClick");
-    var autoPolicyTimerBody = ExtractMethodBody(source, "OnAutoPolicyTimerTick");
+    var autoPolicyTimerBoundaryBody = ExtractMethodBody(source, "OnAutoPolicyTimerTick");
+    var autoPolicyTimerBody = ExtractMethodBody(source, "RunAutoPolicyTimerTickAsync");
     var autoPolicyCoreBody = ExtractMethodBody(source, "RunAutoPolicyOnceCoreAsync");
     var transientSensorFailureBody = source.Contains("private async Task ContinueAutoPolicyAfterTransientSensorReadFailureAsync", StringComparison.Ordinal)
         ? ExtractMethodBody(source, "ContinueAutoPolicyAfterTransientSensorReadFailureAsync")
+        : string.Empty;
+    var applyQuickFanStart = source.IndexOf("public Task ApplyQuickFanSpeedAsync", StringComparison.Ordinal);
+    var applyQuickFanEnd = source.IndexOf("public Task RefreshSensorsFromTrayAsync", applyQuickFanStart, StringComparison.Ordinal);
+    var applyQuickFanBody = applyQuickFanStart >= 0 && applyQuickFanEnd > applyQuickFanStart
+        ? source[applyQuickFanStart..applyQuickFanEnd]
         : string.Empty;
     var applyAllFansBody = ExtractMethodBody(source, "ApplyAllFansAsync");
     var setSingleFanBody = ExtractMethodBody(source, "OnSetSingleFanClick");
@@ -2555,6 +2617,10 @@ static void RunRuntimeStatePersistenceSourceChecks()
     var restoreDefaultManualBody = ExtractMethodBody(source, "RestoreDefaultManualAsync");
     var resetDellAutomaticBody = ExtractMethodBody(source, "ResetDellAutomaticModeAsync");
     var runUiCommandBody = ExtractMethodBody(source, "RunUiCommandAsync");
+    var setAllFansClickBody = ExtractMethodBody(source, "OnSetAllFansClick");
+    var resetAutoClickBody = ExtractMethodBody(source, "OnResetAutoClick");
+    var restoreDefaultClickBody = ExtractMethodBody(source, "OnRestoreDefaultClick");
+    var startAutoPolicyClickBody = ExtractMethodBody(source, "OnStartAutoPolicyClick");
     var stopAutoManualOverrideBody = source.Contains("private void StopAutoPolicyForManualOverride()", StringComparison.Ordinal)
         ? ExtractMethodBody(source, "StopAutoPolicyForManualOverride")
         : string.Empty;
@@ -2623,13 +2689,63 @@ static void RunRuntimeStatePersistenceSourceChecks()
         applyCurveBody.Contains("_activeAutoPolicyIntentVersion = intentVersion;", StringComparison.Ordinal) &&
         startSmartBody.Contains("var intentVersion = BeginFanControlIntent();", StringComparison.Ordinal) &&
         startSmartBody.Contains("_activeAutoPolicyIntentVersion = intentVersion;", StringComparison.Ordinal) &&
-        autoPolicyTimerBody.Contains("var intentVersion = _activeAutoPolicyIntentVersion;", StringComparison.Ordinal) &&
+        autoPolicyTimerBoundaryBody.Contains("var intentVersion = _activeAutoPolicyIntentVersion;", StringComparison.Ordinal) &&
         autoPolicyTimerBody.Contains("!IsFanControlIntentCurrent(intentVersion)", StringComparison.Ordinal) &&
         autoPolicyCoreBody.Contains("ThrowIfFanControlIntentSuperseded(intentVersion, T(\"Status.AutoStarted\"));", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("await _ipmi.SetAllFansSpeedInConfirmedManualModeAsync(profile, percent, cancellationToken);", StringComparison.Ordinal) &&
         autoPolicyCoreBody.Contains("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);", StringComparison.Ordinal) &&
         autoPolicyCoreBody.IndexOf("ThrowIfFanControlIntentSuperseded(intentVersion, T(\"Status.AutoStarted\"));", StringComparison.Ordinal) <
-        autoPolicyCoreBody.IndexOf("await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);", StringComparison.Ordinal),
+        autoPolicyCoreBody.IndexOf("await _ipmi.SetAllFansSpeedInConfirmedManualModeAsync(profile, percent, cancellationToken);", StringComparison.Ordinal),
         "Fan-control commands should use a latest-user-intent version so startup restore, queued auto starts, and in-flight auto ticks cannot override a newer manual or Dell-auto command.");
+    Require(
+        CountOccurrences(applyAllFansBody, "ThrowIfFanControlIntentSuperseded(intentVersion, description);") >= 3 &&
+        CountOccurrences(setSingleFanBody, "ThrowIfFanControlIntentSuperseded(intentVersion, description);") >= 3 &&
+        CountOccurrences(applyManualPresetBody, "ThrowIfFanControlIntentSuperseded(intentVersion, description);") >= 3 &&
+        CountOccurrences(restoreDefaultManualBody, "ThrowIfFanControlIntentSuperseded(intentVersion, description);") >= 3 &&
+        CountOccurrences(resetDellAutomaticBody, "ThrowIfFanControlIntentSuperseded(intentVersion, description);") >= 3 &&
+        applyAllFansBody.Contains("fanControlIntentVersion: intentVersion", StringComparison.Ordinal) &&
+        setSingleFanBody.Contains("fanControlIntentVersion: intentVersion", StringComparison.Ordinal) &&
+        applyManualPresetBody.Contains("fanControlIntentVersion: intentVersion", StringComparison.Ordinal) &&
+        restoreDefaultManualBody.Contains("fanControlIntentVersion: intentVersion", StringComparison.Ordinal) &&
+        resetDellAutomaticBody.Contains("fanControlIntentVersion: intentVersion", StringComparison.Ordinal),
+        "Every explicit fan command should re-check the latest intent after the raw command and sensor refresh, and pass its version to the shared failure boundary so an older completion cannot invalidate a newer command.");
+    Require(
+        autoPolicyCoreBody.Contains("await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.IndexOf(
+            "ThrowIfFanControlIntentSuperseded(intentVersion, T(\"Status.AutoStarted\"));",
+            autoPolicyCoreBody.IndexOf("await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);", StringComparison.Ordinal),
+            StringComparison.Ordinal) >
+        autoPolicyCoreBody.IndexOf("await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);", StringComparison.Ordinal) &&
+        CountOccurrences(autoPolicyCoreBody, "ThrowIfFanControlIntentSuperseded(intentVersion, T(\"Status.AutoStarted\"));") >= 10 &&
+        autoPolicyCoreBody.Contains("if (!IsFanControlIntentCurrent(intentVersion))", StringComparison.Ordinal) &&
+        CountOccurrences(autoPolicyTimerBody, "if (IsFanControlIntentCurrent(intentVersion))") >= 4 &&
+        source.Contains("long? fanControlIntentVersion = null", StringComparison.Ordinal) &&
+        runUiCommandBody.Contains("var supersededByNewFanControlIntent = fanControlIntentVersion.HasValue", StringComparison.Ordinal) &&
+        runUiCommandBody.Contains("if (!supersededByNewFanControlIntent)", StringComparison.Ordinal),
+        "Automatic and shared UI command paths should re-check intent after awaited hardware work and must not let an old Dell-auto recovery invalidate a newer user command.");
+    Require(
+        setAllFansClickBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        setAllFansClickBody.Contains("ShowFailure(ex);", StringComparison.Ordinal) &&
+        setSingleFanBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        setSingleFanBody.Contains("ShowFailure(ex);", StringComparison.Ordinal),
+        "All-fan and single-fan async event handlers should keep validation and command setup inside a top-level visible exception boundary.");
+    Require(
+        resetAutoClickBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        resetAutoClickBody.Contains("ShowFailure(ex);", StringComparison.Ordinal) &&
+        restoreDefaultClickBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        restoreDefaultClickBody.Contains("ShowFailure(ex);", StringComparison.Ordinal) &&
+        source.Contains("private void OnVisitIdracClick(object sender, RoutedEventArgs e)", StringComparison.Ordinal),
+        "Dell-auto click handlers should expose setup failures, and the iDRAC launcher should not use an unnecessary async-void boundary.");
+    Require(
+        startAutoPolicyClickBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        startAutoPolicyClickBody.Contains("ShowFailure(ex);", StringComparison.Ordinal) &&
+        !startAutoPolicyClickBody.Contains("StopAutoPolicyAfterFailure();", StringComparison.Ordinal),
+        "Smart-auto setup failures that occur before a new fan-control intent exists should preserve the current mode and only expose the real failure.");
+    Require(
+        !applyQuickFanBody.Contains("AllFanSlider.Value", StringComparison.Ordinal) &&
+        ContainsBefore(applyAllFansBody, "await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);", "AllFanSlider.Value = percent;") &&
+        ContainsBefore(restoreDefaultManualBody, "await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);", "AllFanSlider.Value = percent;"),
+        "Tray quick speeds and restore-manual presets should update displayed percentages only after the hardware command succeeds.");
     Require(
         source.Contains("private void StopAutoPolicyForManualOverride()", StringComparison.Ordinal) &&
         ContainsBefore(runUiCommandBody, "beforeWaitForIpmiLock?.Invoke();", "await _ipmiOperationLock.WaitAsync") &&
@@ -2642,8 +2758,11 @@ static void RunRuntimeStatePersistenceSourceChecks()
         stopAutoManualOverrideBody.Contains("SetAutoPolicySummary(false);", StringComparison.Ordinal) &&
         stopAutoManualOverrideBody.Contains("ClearPersistedRunningState();", StringComparison.Ordinal) &&
         stopAutoManualOverrideBody.Contains("ClearAutoPolicyFanTargetCache();", StringComparison.Ordinal) &&
-        stopAutoManualOverrideBody.Contains("ClearForcedAutoPolicyFanCommand();", StringComparison.Ordinal),
-        "Manual fan and Dell automatic commands should stop software auto policy before waiting for the IPMI lock so later temperature-based ticks cannot overwrite the user command.");
+        stopAutoManualOverrideBody.Contains("ClearForcedAutoPolicyFanCommand();", StringComparison.Ordinal) &&
+        stopAutoManualOverrideBody.Contains("hadConfirmedAutomaticFanTarget", StringComparison.Ordinal) &&
+        stopAutoManualOverrideBody.Contains("wasUnconfirmedAutomaticStart", StringComparison.Ordinal) &&
+        ContainsBefore(stopAutoManualOverrideBody, "if (hadConfirmedAutomaticFanTarget)", "ResetAutoPolicyModeSummary();"),
+        "Manual fan and Dell automatic commands should stop software auto policy before waiting for the IPMI lock, while changing the displayed mode only when the previous confirmed hardware state justifies it.");
     Require(
         deletePresetBody.Contains("InvalidateFanControlIntent();", StringComparison.Ordinal) &&
         deletePresetBody.Contains("StopAutoPolicyForManualOverride();", StringComparison.Ordinal),
@@ -2670,18 +2789,30 @@ static void RunRuntimeStatePersistenceSourceChecks()
             "catch (Exception ex)"),
         "A running auto-policy fan command that fails after confirmed Dell automatic recovery must stop the software timer and persist/show Dell auto instead of falling through to the generic manual-state failure handler.");
     Require(
+        source.Contains("private sealed class AutoPolicyFanTargetRejectedException", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("catch (AutoPolicyFanTargetRejectedException ex)", StringComparison.Ordinal) &&
+        autoPolicyTimerBody.Contains("await ContinueAutoPolicyAfterFanTargetFailureAsync(ex, intentVersion);", StringComparison.Ordinal) &&
+        source.Contains("private async Task ContinueAutoPolicyAfterFanTargetFailureAsync", StringComparison.Ordinal) &&
+        !ExtractMethodBody(source, "ContinueAutoPolicyAfterFanTargetFailureAsync").Contains("StopAutoPolicyAfterFailure()", StringComparison.Ordinal) &&
+        !ExtractMethodBody(source, "ContinueAutoPolicyAfterFanTargetFailureAsync").Contains("ClearPersistedRunningState()", StringComparison.Ordinal),
+        "A rejected later automatic percentage must leave the current automatic mode and LastRunning state active while suppressing that target instead of converting the UI to manual mode.");
+    Require(
         source.Contains("private sealed class AutoPolicyTransientSensorReadException", StringComparison.Ordinal) &&
         autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.ReadSensors", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.UpdateSensorState", StringComparison.Ordinal) &&
         autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.RefreshAfterFanCommand", StringComparison.Ordinal) &&
         autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.RefreshAfterEmergencyDellAuto", StringComparison.Ordinal) &&
-        autoPolicyCoreBody.Contains("failureStage is AutoPolicyTickFailureStage.ReadSensors or AutoPolicyTickFailureStage.RefreshAfterFanCommand", StringComparison.Ordinal) &&
-        autoPolicyCoreBody.Contains("throw new AutoPolicyTransientSensorReadException(ex);", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("AutoPolicyTickFailureStage.UpdateSensorState or", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("throw new AutoPolicyTransientSensorReadException(terminalFailure ?? ex);", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("if (failureStage is AutoPolicyTickFailureStage.RefreshAfterEmergencyDellAuto)", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("StopAutoPolicyAfterEmergencyDellAuto();", StringComparison.Ordinal) &&
+        autoPolicyCoreBody.Contains("SetModeSummary(\"Mode.DellAuto\");", StringComparison.Ordinal) &&
         autoPolicyTimerBody.Contains("catch (AutoPolicyTransientSensorReadException ex)", StringComparison.Ordinal) &&
         autoPolicyTimerBody.Contains("await ContinueAutoPolicyAfterTransientSensorReadFailureAsync(ex, intentVersion);", StringComparison.Ordinal) &&
         transientSensorFailureBody.Contains("IsFanControlIntentCurrent(intentVersion)", StringComparison.Ordinal) &&
         !transientSensorFailureBody.Contains("StopAutoPolicyAfterFailure()", StringComparison.Ordinal) &&
         !transientSensorFailureBody.Contains("ClearPersistedRunningState()", StringComparison.Ordinal),
-        "Already-running auto policy ticks should keep retrying after transient SDR/RMCP+ reads, including the refresh after a successful normal fan command, without treating emergency Dell-auto refresh failures as retryable software-auto state.");
+        "Already-running auto policy ticks should continue after pre-target SDR processing or normal post-command refresh failures, while a confirmed emergency Dell-auto command must remain displayed as Dell auto even if its follow-up refresh fails.");
     Require(
         source.Contains("if (shouldReapply)", StringComparison.Ordinal) &&
         source.Contains("await ApplyPresetAsync(savedPreset)", StringComparison.Ordinal),
@@ -2975,6 +3106,10 @@ static void RunStartupFailureBoundarySourceChecks()
     var source = File.ReadAllText(FindRepositoryFile("MainPage.xaml.cs"));
     var pageLoadedBody = ExtractMethodBody(source, "OnPageLoaded");
     var reconnectBody = ExtractMethodBody(source, "OnSensorPollingRetryTimerTick");
+    var testConnectionBody = ExtractMethodBody(source, "OnTestConnectionClick");
+    var refreshSensorsBody = ExtractMethodBody(source, "OnRefreshSensorsClick");
+    var pollingTimerBoundaryBody = ExtractMethodBody(source, "OnSensorPollingTimerTick");
+    var autoPolicyTimerBoundaryBody = ExtractMethodBody(source, "OnAutoPolicyTimerTick");
     var connectBody = ExtractMethodBody(source, "ConnectAndStartPollingAsync");
     var startPollingBody = source.Contains("private async Task StartSensorPollingAsync", StringComparison.Ordinal)
         ? ExtractMethodBody(source, "StartSensorPollingAsync")
@@ -2991,6 +3126,20 @@ static void RunStartupFailureBoundarySourceChecks()
         reconnectBody.Contains("ShowFailure(ex);", StringComparison.Ordinal) &&
         reconnectBody.Contains("StopSensorPollingRetry();", StringComparison.Ordinal),
         "The async-void polling reconnect callback should stop and surface unexpected failures instead of escaping through DispatcherQueue.");
+    Require(
+        testConnectionBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        testConnectionBody.Contains("ShowFailure(ex);", StringComparison.Ordinal) &&
+        refreshSensorsBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        refreshSensorsBody.Contains("ShowFailure(ex);", StringComparison.Ordinal),
+        "Connection and sensor-refresh async-void event handlers should surface setup or logging failures at their top-level boundary.");
+    Require(
+        pollingTimerBoundaryBody.Contains("await RunSensorPollingTimerTickAsync();", StringComparison.Ordinal) &&
+        pollingTimerBoundaryBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        pollingTimerBoundaryBody.Contains("_sensorPollingTimer.Stop();", StringComparison.Ordinal) &&
+        autoPolicyTimerBoundaryBody.Contains("await RunAutoPolicyTimerTickAsync(intentVersion);", StringComparison.Ordinal) &&
+        autoPolicyTimerBoundaryBody.Contains("catch (Exception ex)", StringComparison.Ordinal) &&
+        autoPolicyTimerBoundaryBody.Contains("StopAutoPolicyAfterFailure();", StringComparison.Ordinal),
+        "Polling and auto-policy timer callbacks should keep pre-lock skip logging and state transitions inside a top-level async-void exception boundary.");
     Require(
         connectBody.Contains("await StartSensorPollingAsync();", StringComparison.Ordinal) &&
         !connectBody.Contains("StartSensorPolling();", StringComparison.Ordinal) &&
@@ -3040,13 +3189,13 @@ static void RunReleaseVersionMetadataChecks()
     var project = File.ReadAllText(FindRepositoryFile("DellR730xdFanControlCenter.csproj"));
     var manifest = File.ReadAllText(FindRepositoryFile("Package.appxmanifest"));
     Require(
-        project.Contains("<Version>1.1.2</Version>", StringComparison.Ordinal) &&
-        project.Contains("<AssemblyVersion>1.1.2.0</AssemblyVersion>", StringComparison.Ordinal) &&
-        project.Contains("<FileVersion>1.1.2.0</FileVersion>", StringComparison.Ordinal) &&
-        project.Contains("<InformationalVersion>1.1.2</InformationalVersion>", StringComparison.Ordinal),
+        project.Contains("<Version>1.1.3</Version>", StringComparison.Ordinal) &&
+        project.Contains("<AssemblyVersion>1.1.3.0</AssemblyVersion>", StringComparison.Ordinal) &&
+        project.Contains("<FileVersion>1.1.3.0</FileVersion>", StringComparison.Ordinal) &&
+        project.Contains("<InformationalVersion>1.1.3</InformationalVersion>", StringComparison.Ordinal),
         "Release binaries should carry an explicit application version so fixed builds are distinguishable from 1.0.0 artifacts.");
     Require(
-        manifest.Contains("Version=\"1.1.2.0\"", StringComparison.Ordinal),
+        manifest.Contains("Version=\"1.1.3.0\"", StringComparison.Ordinal),
         "MSIX package identity version should be bumped with release fixes so Windows can install an update instead of rejecting same-version packages.");
 }
 

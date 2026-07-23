@@ -10,7 +10,7 @@
   <Identity
     Name="837533FB-9E81-4332-8A56-2DC54A5701AE"
     Publisher="CN=mason369"
-    Version="1.1.2.0" />
+    Version="1.1.3.0" />
 
   <mp:PhoneIdentity PhoneProductId="837533FB-9E81-4332-8A56-2DC54A5701AE" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

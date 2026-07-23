@@ -103,6 +103,8 @@ public sealed partial class MainPage : Page
     private FanPreset? _activeCurvePreset;
     private int? _lastAutoPolicyFanPercent;
     private string? _lastAutoPolicyTargetKey;
+    private int? _lastFailedAutoPolicyFanPercent;
+    private string? _lastFailedAutoPolicyTargetKey;
     private bool _forceNextAutoPolicyFanCommand;
     private long _fanControlIntentVersion;
     private long _activeAutoPolicyIntentVersion;
@@ -132,6 +134,14 @@ public sealed partial class MainPage : Page
     {
         public FanControlIntentSupersededException(string message)
             : base(message)
+        {
+        }
+    }
+
+    private sealed class AutoPolicyFanTargetRejectedException : InvalidOperationException
+    {
+        public AutoPolicyFanTargetRejectedException(string message, Exception innerException)
+            : base(message, innerException)
         {
         }
     }
@@ -575,8 +585,6 @@ public sealed partial class MainPage : Page
 
     public Task ApplyQuickFanSpeedAsync(int percent)
     {
-        AllFanSlider.Value = percent;
-        AllFanPercentBox.Value = percent;
         return ApplyAllFansAsync(percent);
     }
 
@@ -732,13 +740,20 @@ public sealed partial class MainPage : Page
 
     private async void OnTestConnectionClick(object sender, RoutedEventArgs e)
     {
-        if (_sensorPollingTimer.IsEnabled || _sensorPollingRetryTimer.IsEnabled || _sensorPollingRetryRunning)
+        try
         {
-            CancelSensorPollingFromUser();
-            return;
-        }
+            if (_sensorPollingTimer.IsEnabled || _sensorPollingRetryTimer.IsEnabled || _sensorPollingRetryRunning)
+            {
+                CancelSensorPollingFromUser();
+                return;
+            }
 
-        await ConnectAndStartPollingAsync();
+            await ConnectAndStartPollingAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
     }
 
     private void CancelSensorPollingFromUser()
@@ -750,7 +765,14 @@ public sealed partial class MainPage : Page
 
     private async void OnRefreshSensorsClick(object sender, RoutedEventArgs e)
     {
-        await RefreshSensorsAsync();
+        try
+        {
+            await RefreshSensorsAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
     }
 
     private async Task RefreshSensorsAsync()
@@ -967,6 +989,25 @@ public sealed partial class MainPage : Page
 
     private async void OnSensorPollingTimerTick(object? sender, object e)
     {
+        try
+        {
+            await RunSensorPollingTimerTickAsync();
+        }
+        catch (Exception ex)
+        {
+            _sensorPollingTimer.Stop();
+            StopSensorPollingRetry();
+            _sensorPollingTickRunning = false;
+            _isConnecting = false;
+            _hasDisconnected = true;
+            SetDashboardTileFreshness(false);
+            UpdatePollingStatusTexts();
+            ShowFailure(ex);
+        }
+    }
+
+    private async Task RunSensorPollingTimerTickAsync()
+    {
         var intervalSeconds = Math.Max(1, _settings.SensorRefreshSeconds);
         if (_autoPolicyRunning)
         {
@@ -1083,7 +1124,14 @@ public sealed partial class MainPage : Page
 
     private async void OnSetAllFansClick(object sender, RoutedEventArgs e)
     {
-        await ApplyAllFansAsync(ReadInt(AllFanPercentBox, T("Field.AllFanPercent")));
+        try
+        {
+            await ApplyAllFansAsync(ReadInt(AllFanPercentBox, T("Field.AllFanPercent")));
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
     }
 
     private async Task ApplyAllFansAsync(int percent)
@@ -1098,53 +1146,68 @@ public sealed partial class MainPage : Page
                 ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 var profile = ReadProfile();
                 await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
+                AllFanSlider.Value = percent;
+                AllFanPercentBox.Value = percent;
                 _activeCurvePreset = null;
                 ClearAutoPolicyFanTargetCache();
                 SetModeSummary("Mode.Manual");
                 MarkActivePreset(null, persistRunningState: true);
                 var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 successMessage = F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds);
             },
             beforeWaitForIpmiLock: StopAutoPolicyForManualOverride,
-            successMessageFactory: () => successMessage);
+            successMessageFactory: () => successMessage,
+            fanControlIntentVersion: intentVersion);
     }
 
     private async void OnSetSingleFanClick(object sender, RoutedEventArgs e)
     {
-        if (!_settings.EnableIndividualFanTargets)
+        try
         {
-            ShowStatus(T("Status.SingleFanDisabled"), InfoBarSeverity.Warning);
-            return;
-        }
-
-        if (sender is not Button button || button.Tag is not int fanIndex)
-        {
-            ShowStatus(T("Status.UnknownFan"), InfoBarSeverity.Error);
-            return;
-        }
-
-        var channel = FanChannels.First(fan => fan.Index == fanIndex);
-        var percent = CheckedPercent(channel.Percent, F("Field.SingleFanPercent", fanIndex));
-
-        var description = F("Status.FanSet", fanIndex, percent);
-        var intentVersion = BeginFanControlIntent();
-        string? successMessage = null;
-        await RunUiCommandAsync(
-            description,
-            async token =>
+            if (!_settings.EnableIndividualFanTargets)
             {
-                ThrowIfFanControlIntentSuperseded(intentVersion, description);
-                var profile = ReadProfile();
-                await _ipmi.SetSingleFanManualSpeedAsync(profile, fanIndex, percent, token);
-                _activeCurvePreset = null;
-                ClearAutoPolicyFanTargetCache();
-                SetModeSummary("Mode.Manual");
-                MarkActivePreset(null, persistRunningState: true);
-                var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
-                successMessage = F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds);
-            },
-            beforeWaitForIpmiLock: StopAutoPolicyForManualOverride,
-            successMessageFactory: () => successMessage);
+                ShowStatus(T("Status.SingleFanDisabled"), InfoBarSeverity.Warning);
+                return;
+            }
+
+            if (sender is not Button button || button.Tag is not int fanIndex)
+            {
+                ShowStatus(T("Status.UnknownFan"), InfoBarSeverity.Error);
+                return;
+            }
+
+            var channel = FanChannels.First(fan => fan.Index == fanIndex);
+            var percent = CheckedPercent(channel.Percent, F("Field.SingleFanPercent", fanIndex));
+
+            var description = F("Status.FanSet", fanIndex, percent);
+            var intentVersion = BeginFanControlIntent();
+            string? successMessage = null;
+            await RunUiCommandAsync(
+                description,
+                async token =>
+                {
+                    ThrowIfFanControlIntentSuperseded(intentVersion, description);
+                    var profile = ReadProfile();
+                    await _ipmi.SetSingleFanManualSpeedAsync(profile, fanIndex, percent, token);
+                    ThrowIfFanControlIntentSuperseded(intentVersion, description);
+                    _activeCurvePreset = null;
+                    ClearAutoPolicyFanTargetCache();
+                    SetModeSummary("Mode.Manual");
+                    MarkActivePreset(null, persistRunningState: true);
+                    var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+                    ThrowIfFanControlIntentSuperseded(intentVersion, description);
+                    successMessage = F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds);
+                },
+                beforeWaitForIpmiLock: StopAutoPolicyForManualOverride,
+                successMessageFactory: () => successMessage,
+                fanControlIntentVersion: intentVersion);
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
     }
 
     private async void OnApplyPresetClick(object sender, RoutedEventArgs e)
@@ -1706,7 +1769,7 @@ public sealed partial class MainPage : Page
 
     private void ScrollPresetIntoView(string presetId)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
             try
             {
@@ -1725,7 +1788,7 @@ public sealed partial class MainPage : Page
                     return;
                 }
 
-                DispatcherQueue.TryEnqueue(() =>
+                if (!DispatcherQueue.TryEnqueue(() =>
                 {
                     try
                     {
@@ -1746,23 +1809,43 @@ public sealed partial class MainPage : Page
                     {
                         ShowFailure(ex);
                     }
-                });
+                }))
+                {
+                    ShowFailure(new InvalidOperationException(F("Status.UiDispatchFailed", preset.DisplayName)));
+                }
             }
             catch (Exception ex)
             {
                 ShowFailure(ex);
             }
-        });
+        }))
+        {
+            ShowFailure(new InvalidOperationException(F("Status.UiDispatchFailed", presetId)));
+        }
     }
 
     private async void OnResetAutoClick(object sender, RoutedEventArgs e)
     {
-        await ResetDellAutomaticModeAsync();
+        try
+        {
+            await ResetDellAutomaticModeAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
     }
 
     private async void OnRestoreDefaultClick(object sender, RoutedEventArgs e)
     {
-        await ResetDellAutomaticModeAsync();
+        try
+        {
+            await ResetDellAutomaticModeAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowFailure(ex);
+        }
     }
 
     private Task ApplyPresetAsync(FanPreset preset)
@@ -1803,6 +1886,7 @@ public sealed partial class MainPage : Page
                 ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 var profile = ReadProfile();
                 await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 AllFanSlider.Value = percent;
                 AllFanPercentBox.Value = percent;
                 _activeCurvePreset = null;
@@ -1810,10 +1894,12 @@ public sealed partial class MainPage : Page
                 SetModeSummary("Mode.PresetManual", preset.DisplayName, percent);
                 MarkActivePreset(preset.Id, persistRunningState: true);
                 var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 successMessage = F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds);
             },
             beforeWaitForIpmiLock: StopAutoPolicyForManualOverride,
-            successMessageFactory: () => successMessage);
+            successMessageFactory: () => successMessage,
+            fanControlIntentVersion: intentVersion);
     }
 
     private async Task RestoreDefaultManualAsync(string? activePresetId = "restore-manual", int? percentOverride = null)
@@ -1829,18 +1915,21 @@ public sealed partial class MainPage : Page
                 ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 PersistSettingsFromControls();
                 var profile = ReadProfile();
+                await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 AllFanSlider.Value = percent;
                 AllFanPercentBox.Value = percent;
-                await _ipmi.SetAllFansManualSpeedAsync(profile, percent, token);
                 _activeCurvePreset = null;
                 ClearAutoPolicyFanTargetCache();
                 SetModeSummary("Mode.ManualPercent", percent);
                 MarkActivePreset(activePresetId, persistRunningState: true);
                 var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 successMessage = F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds);
             },
             beforeWaitForIpmiLock: StopAutoPolicyForManualOverride,
-            successMessageFactory: () => successMessage);
+            successMessageFactory: () => successMessage,
+            fanControlIntentVersion: intentVersion);
     }
 
     private async Task ResetDellAutomaticModeAsync(string? activePresetId = "dell-auto")
@@ -1855,15 +1944,18 @@ public sealed partial class MainPage : Page
                 ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 var profile = ReadProfile();
                 await _ipmi.SetDellAutomaticModeAsync(profile, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 _activeCurvePreset = null;
                 ClearAutoPolicyFanTargetCache();
                 SetModeSummary("Mode.DellAuto");
                 MarkActivePreset(activePresetId, persistRunningState: true);
                 var elapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, token);
+                ThrowIfFanControlIntentSuperseded(intentVersion, description);
                 successMessage = F("Status.FanCommandSensorsRefreshed", elapsed.TotalSeconds);
             },
             beforeWaitForIpmiLock: StopAutoPolicyForManualOverride,
-            successMessageFactory: () => successMessage);
+            successMessageFactory: () => successMessage,
+            fanControlIntentVersion: intentVersion);
     }
 
     private async Task ApplyCurvePresetAsync(FanPreset preset)
@@ -1889,7 +1981,8 @@ public sealed partial class MainPage : Page
                 {
                     if (!await RunAutoPolicyOnceCoreAsync(token, intentVersion))
                     {
-                        return;
+                        throw new FanControlIntentSupersededException(
+                            $"{T("Hero.RequestShortSkipped")}: {F("Status.CurvePresetStarted", curvePreset.DisplayName)}");
                     }
 
                     firstTickSucceeded = true;
@@ -1903,10 +1996,15 @@ public sealed partial class MainPage : Page
                 }
                 catch
                 {
-                    StopAutoPolicyAfterFailure();
+                    if (IsFanControlIntentCurrent(intentVersion))
+                    {
+                        StopAutoPolicyAfterFailure();
+                    }
+
                     throw;
                 }
-            });
+            },
+            fanControlIntentVersion: intentVersion);
 
         if (started && firstTickSucceeded)
         {
@@ -1927,7 +2025,6 @@ public sealed partial class MainPage : Page
         }
         catch (Exception ex)
         {
-            StopAutoPolicyAfterFailure();
             ShowFailure(ex);
         }
     }
@@ -1956,13 +2053,15 @@ public sealed partial class MainPage : Page
                 PrepareAutoPolicyRunningState();
                 if (!await RunAutoPolicyOnceCoreAsync(token, intentVersion))
                 {
-                    return;
+                    throw new FanControlIntentSupersededException(
+                        $"{T("Hero.RequestShortSkipped")}: {T("Status.AutoStarted")}");
                 }
 
                 firstTickSucceeded = true;
                 PersistSmartAutoRunningState();
                 await WriteDurableUiLogAsync(T("Log.Info"), T("Status.AutoStarted"));
-            });
+            },
+            fanControlIntentVersion: intentVersion);
 
         if (started && firstTickSucceeded)
         {
@@ -2005,6 +2104,8 @@ public sealed partial class MainPage : Page
 
     private void StopAutoPolicyForManualOverride()
     {
+        var hadConfirmedAutomaticFanTarget = _autoPolicyRunning && _lastAutoPolicyFanPercent.HasValue;
+        var wasUnconfirmedAutomaticStart = _autoPolicyRunning && !_lastAutoPolicyFanPercent.HasValue;
         _autoPolicyTimer.Stop();
         _activeAutoPolicyIntentVersion = 0;
         _activeCurvePreset = null;
@@ -2013,7 +2114,15 @@ public sealed partial class MainPage : Page
         StartAutoButton.IsEnabled = true;
         StopAutoButton.IsEnabled = false;
         SetAutoPolicySummary(false);
-        ResetAutoPolicyModeSummary();
+        if (hadConfirmedAutomaticFanTarget)
+        {
+            ResetAutoPolicyModeSummary();
+        }
+        else if (wasUnconfirmedAutomaticStart)
+        {
+            SetModeSummary("Mode.Idle");
+        }
+
         MarkActivePreset(null);
         ClearPersistedRunningState();
     }
@@ -2098,6 +2207,34 @@ public sealed partial class MainPage : Page
     private async void OnAutoPolicyTimerTick(object? sender, object e)
     {
         var intentVersion = _activeAutoPolicyIntentVersion;
+        try
+        {
+            await RunAutoPolicyTimerTickAsync(intentVersion);
+        }
+        catch (Exception ex)
+        {
+            _autoPolicyTickRunning = false;
+            if (IsFanControlIntentCurrent(intentVersion))
+            {
+                try
+                {
+                    StopAutoPolicyAfterFailure();
+                }
+                catch (Exception stateException)
+                {
+                    ShowFailure(new InvalidOperationException(
+                        $"{ex.Message}{Environment.NewLine}{stateException.Message}",
+                        new AggregateException(ex, stateException)));
+                    return;
+                }
+            }
+
+            ShowFailure(ex);
+        }
+    }
+
+    private async Task RunAutoPolicyTimerTickAsync(long intentVersion)
+    {
         if (intentVersion == 0 || !IsFanControlIntentCurrent(intentVersion))
         {
             _autoPolicyTimer.Stop();
@@ -2135,7 +2272,27 @@ public sealed partial class MainPage : Page
             }
             catch (Exception logException)
             {
-                StopAutoPolicyAfterFailure();
+                if (IsFanControlIntentCurrent(intentVersion))
+                {
+                    StopAutoPolicyAfterFailure();
+                }
+
+                ShowFailure(logException);
+            }
+        }
+        catch (AutoPolicyFanTargetRejectedException ex)
+        {
+            try
+            {
+                await ContinueAutoPolicyAfterFanTargetFailureAsync(ex, intentVersion);
+            }
+            catch (Exception logException)
+            {
+                if (IsFanControlIntentCurrent(intentVersion))
+                {
+                    StopAutoPolicyAfterFailure();
+                }
+
                 ShowFailure(logException);
             }
         }
@@ -2143,8 +2300,12 @@ public sealed partial class MainPage : Page
         {
             try
             {
-                StopAutoPolicyAfterEmergencyDellAuto();
-                SetModeSummary("Mode.DellAuto");
+                if (IsFanControlIntentCurrent(intentVersion))
+                {
+                    StopAutoPolicyAfterEmergencyDellAuto();
+                    SetModeSummary("Mode.DellAuto");
+                }
+
                 ShowFailure(ex);
             }
             catch (Exception statePersistenceFailure)
@@ -2168,7 +2329,11 @@ public sealed partial class MainPage : Page
         }
         catch (Exception ex)
         {
-            StopAutoPolicyAfterFailure();
+            if (IsFanControlIntentCurrent(intentVersion))
+            {
+                StopAutoPolicyAfterFailure();
+            }
+
             ShowFailure(ex);
         }
         finally
@@ -2193,6 +2358,22 @@ public sealed partial class MainPage : Page
         StopAutoButton.IsEnabled = true;
         SetAutoPolicySummary(true);
         ShowFailure(ex.InnerException ?? ex);
+        await FlushAppLogAsync();
+    }
+
+    private async Task ContinueAutoPolicyAfterFanTargetFailureAsync(
+        AutoPolicyFanTargetRejectedException ex,
+        long intentVersion)
+    {
+        if (!IsFanControlIntentCurrent(intentVersion))
+        {
+            return;
+        }
+
+        StartAutoButton.IsEnabled = false;
+        StopAutoButton.IsEnabled = true;
+        SetAutoPolicySummary(true);
+        ShowFailure(ex);
         await FlushAppLogAsync();
     }
 
@@ -2246,8 +2427,10 @@ public sealed partial class MainPage : Page
                 ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
                 failureStage = AutoPolicyTickFailureStage.ApplyFanCommand;
                 await _ipmi.SetDellAutomaticModeAsync(profile, cancellationToken);
+                ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
                 failureStage = AutoPolicyTickFailureStage.RefreshAfterEmergencyDellAuto;
                 var emergencyRefreshElapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken);
+                ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
                 var emergencyMessage = F("Status.EmergencyAuto", cpuTemp);
                 operation.Succeed(
                     emergencyMessage,
@@ -2259,6 +2442,7 @@ public sealed partial class MainPage : Page
                     });
                 operationCompleted = true;
                 await FlushAppLogAsync();
+                ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
                 StopAutoPolicyAfterEmergencyDellAuto();
                 SetModeSummary("Mode.DellAuto");
                 AddVolatileLog(T("Log.Warn"), emergencyMessage);
@@ -2278,19 +2462,83 @@ public sealed partial class MainPage : Page
                 operation.Succeed(unchangedMessage, unchangedProperties);
                 operationCompleted = true;
                 await FlushAppLogAsync();
+                ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
                 SetAutoModeSummary(activeCurvePreset, percent);
                 AddVolatileLog(T("Log.Info"), unchangedMessage);
                 SetHeroRequestStatus(unchangedMessage);
                 return true;
             }
 
-            fanCommandProperties = BuildAutoPolicyFanCommandProperties(cpuTemp, percent, powerWatts, "SetAllFansManualSpeed");
+            if (ShouldSkipPreviouslyFailedAutoPolicyFanCommand(targetKey, percent))
+            {
+                var failedTargetMessage = F("Status.AutoFanFailedTargetSkipped", percent);
+                var failedTargetProperties = BuildAutoPolicyFanCommandProperties(
+                    cpuTemp,
+                    percent,
+                    powerWatts,
+                    "SkipPreviouslyFailedFanPercent");
+                if (_lastAutoPolicyFanPercent.HasValue)
+                {
+                    failedTargetProperties["lastConfirmedFanPercent"] =
+                        _lastAutoPolicyFanPercent.Value.ToString(CultureInfo.InvariantCulture);
+                }
+
+                failedTargetProperties["modeChangeAttempted"] = bool.FalseString;
+                failedTargetProperties["retrySuppressed"] = bool.TrueString;
+                operation.Succeed(failedTargetMessage, failedTargetProperties);
+                operationCompleted = true;
+                await FlushAppLogAsync();
+                ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
+                AddVolatileLog(T("Log.Warn"), failedTargetMessage);
+                ShowStatus(failedTargetMessage, InfoBarSeverity.Warning);
+                return true;
+            }
+
+            var updateConfirmedManualMode = CanUpdateAutoPolicyFanPercentWithoutModeChange(targetKey);
+            fanCommandProperties = BuildAutoPolicyFanCommandProperties(
+                cpuTemp,
+                percent,
+                powerWatts,
+                updateConfirmedManualMode ? "SetFanSpeedInConfirmedManualMode" : "SetAllFansManualSpeed");
+            fanCommandProperties["modeChangeAttempted"] = (!updateConfirmedManualMode).ToString(CultureInfo.InvariantCulture);
             ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
             failureStage = AutoPolicyTickFailureStage.ApplyFanCommand;
-            await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);
+            try
+            {
+                if (updateConfirmedManualMode)
+                {
+                    await _ipmi.SetAllFansSpeedInConfirmedManualModeAsync(profile, percent, cancellationToken);
+                }
+                else
+                {
+                    await _ipmi.SetAllFansManualSpeedAsync(profile, percent, cancellationToken);
+                }
+            }
+            catch (Exception ex) when (updateConfirmedManualMode)
+            {
+                ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
+                RememberFailedAutoPolicyFanTarget(targetKey, percent);
+                fanCommandProperties["retrySuppressed"] = bool.TrueString;
+                if (_lastAutoPolicyFanPercent.HasValue)
+                {
+                    fanCommandProperties["lastConfirmedFanPercent"] =
+                        _lastAutoPolicyFanPercent.Value.ToString(CultureInfo.InvariantCulture);
+                }
+
+                throw new AutoPolicyFanTargetRejectedException(
+                    F(
+                        "Status.AutoFanTargetRejected",
+                        percent,
+                        _lastAutoPolicyFanPercent ?? percent,
+                        ex.Message),
+                    ex);
+            }
+
+            ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
             RememberAutoPolicyFanTarget(targetKey, percent);
             failureStage = AutoPolicyTickFailureStage.RefreshAfterFanCommand;
             var appliedRefreshElapsed = await RefreshSensorsAfterFanCommandCoreAsync(profile, cancellationToken);
+            ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
             var message = activeCurvePreset is null
                 ? F("Status.SmartFanApplied", cpuTemp, percent)
                 : activeCurvePreset.IsPowerCurvePreset
@@ -2303,6 +2551,7 @@ public sealed partial class MainPage : Page
             operation.Succeed(message, successProperties);
             operationCompleted = true;
             await FlushAppLogAsync();
+            ThrowIfFanControlIntentSuperseded(intentVersion, T("Status.AutoStarted"));
             SetAutoModeSummary(activeCurvePreset, percent);
             AddVolatileLog(T("Log.Info"), message);
             SetHeroRequestStatus(message);
@@ -2336,6 +2585,7 @@ public sealed partial class MainPage : Page
         }
         catch (Exception ex)
         {
+            Exception? terminalFailure = null;
             if (!operationCompleted)
             {
                 try
@@ -2347,15 +2597,52 @@ public sealed partial class MainPage : Page
                 }
                 catch (Exception logException)
                 {
-                    throw new InvalidOperationException(
+                    terminalFailure = new InvalidOperationException(
                         $"{ex.Message}{Environment.NewLine}{F("Status.LogWriteFailed", logException.Message)}",
                         new AggregateException(ex, logException));
                 }
             }
 
-            if (failureStage is AutoPolicyTickFailureStage.ReadSensors or AutoPolicyTickFailureStage.RefreshAfterFanCommand)
+            if (failureStage is AutoPolicyTickFailureStage.RefreshAfterEmergencyDellAuto)
             {
-                throw new AutoPolicyTransientSensorReadException(ex);
+                if (IsFanControlIntentCurrent(intentVersion))
+                {
+                    try
+                    {
+                        StopAutoPolicyAfterEmergencyDellAuto();
+                        SetModeSummary("Mode.DellAuto");
+                    }
+                    catch (Exception statePersistenceFailure)
+                    {
+                        terminalFailure = new InvalidOperationException(
+                            $"{(terminalFailure ?? ex).Message}{Environment.NewLine}{F("Status.DellAutoStatePersistenceFailed", statePersistenceFailure.Message)}",
+                            new AggregateException(terminalFailure ?? ex, statePersistenceFailure));
+                    }
+                }
+
+                if (terminalFailure is not null)
+                {
+                    throw terminalFailure;
+                }
+
+                throw;
+            }
+
+            if (failureStage is AutoPolicyTickFailureStage.ReadSensors or
+                AutoPolicyTickFailureStage.UpdateSensorState or
+                AutoPolicyTickFailureStage.RefreshAfterFanCommand)
+            {
+                throw new AutoPolicyTransientSensorReadException(terminalFailure ?? ex);
+            }
+
+            if (!IsFanControlIntentCurrent(intentVersion))
+            {
+                throw new FanControlIntentSupersededException($"{T("Hero.RequestShortSkipped")}: {T("Status.AutoStarted")}");
+            }
+
+            if (terminalFailure is not null)
+            {
+                throw terminalFailure;
             }
 
             throw;
@@ -2450,17 +2737,41 @@ public sealed partial class MainPage : Page
                string.Equals(_lastAutoPolicyTargetKey, targetKey, StringComparison.OrdinalIgnoreCase);
     }
 
+    private bool ShouldSkipPreviouslyFailedAutoPolicyFanCommand(string targetKey, int percent)
+    {
+        return !_forceNextAutoPolicyFanCommand &&
+               _lastFailedAutoPolicyFanPercent == percent &&
+               string.Equals(_lastFailedAutoPolicyTargetKey, targetKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool CanUpdateAutoPolicyFanPercentWithoutModeChange(string targetKey)
+    {
+        return !_forceNextAutoPolicyFanCommand &&
+               _lastAutoPolicyFanPercent.HasValue &&
+               string.Equals(_lastAutoPolicyTargetKey, targetKey, StringComparison.OrdinalIgnoreCase);
+    }
+
     private void RememberAutoPolicyFanTarget(string targetKey, int percent)
     {
         _lastAutoPolicyTargetKey = targetKey;
         _lastAutoPolicyFanPercent = percent;
+        _lastFailedAutoPolicyTargetKey = null;
+        _lastFailedAutoPolicyFanPercent = null;
         ClearForcedAutoPolicyFanCommand();
+    }
+
+    private void RememberFailedAutoPolicyFanTarget(string targetKey, int percent)
+    {
+        _lastFailedAutoPolicyTargetKey = targetKey;
+        _lastFailedAutoPolicyFanPercent = percent;
     }
 
     private void ClearAutoPolicyFanTargetCache()
     {
         _lastAutoPolicyTargetKey = null;
         _lastAutoPolicyFanPercent = null;
+        _lastFailedAutoPolicyTargetKey = null;
+        _lastFailedAutoPolicyFanPercent = null;
     }
 
     private void ForceNextAutoPolicyFanCommand()
@@ -2500,10 +2811,9 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private async void OnVisitIdracClick(object sender, RoutedEventArgs e)
+    private void OnVisitIdracClick(object sender, RoutedEventArgs e)
     {
         OpenIdrac();
-        await Task.CompletedTask;
     }
 
     private void OpenIdrac()
@@ -2700,7 +3010,8 @@ public sealed partial class MainPage : Page
         Func<CancellationToken, Task> command,
         bool waitForIpmiLock = true,
         Action? beforeWaitForIpmiLock = null,
-        Func<string?>? successMessageFactory = null)
+        Func<string?>? successMessageFactory = null,
+        long? fanControlIntentVersion = null)
     {
         var lockTaken = false;
         AppLogOperation? operation = null;
@@ -2730,9 +3041,19 @@ public sealed partial class MainPage : Page
 
             lockTaken = true;
             await command(cancellation.Token);
+            if (fanControlIntentVersion.HasValue)
+            {
+                ThrowIfFanControlIntentSuperseded(fanControlIntentVersion.Value, description);
+            }
+
             operation.Succeed(description);
             operationCompleted = true;
             await FlushAppLogAsync();
+            if (fanControlIntentVersion.HasValue)
+            {
+                ThrowIfFanControlIntentSuperseded(fanControlIntentVersion.Value, description);
+            }
+
             var successMessage = successMessageFactory?.Invoke();
             if (!string.IsNullOrWhiteSpace(successMessage))
             {
@@ -2786,10 +3107,15 @@ public sealed partial class MainPage : Page
         catch (FanCommandSafetyRecoveryException ex)
         {
             Exception visibleFailure = ex;
+            var supersededByNewFanControlIntent = fanControlIntentVersion.HasValue &&
+                !IsFanControlIntentCurrent(fanControlIntentVersion.Value);
             try
             {
-                StopAutoPolicyAfterEmergencyDellAuto();
-                SetModeSummary("Mode.DellAuto");
+                if (!supersededByNewFanControlIntent)
+                {
+                    StopAutoPolicyAfterEmergencyDellAuto();
+                    SetModeSummary("Mode.DellAuto");
+                }
             }
             catch (Exception statePersistenceFailure)
             {
@@ -3310,24 +3636,16 @@ public sealed partial class MainPage : Page
         _sensorHistory.RemoveAll(point => point.UnixMilliseconds > 0 && point.UnixMilliseconds < cutoff);
     }
 
-    private void QueueVisualizationHistoryPersistence(SensorDashboardHistoryPoint historyPoint, DateTimeOffset timestamp)
+    private async void QueueVisualizationHistoryPersistence(SensorDashboardHistoryPoint historyPoint, DateTimeOffset timestamp)
     {
-        _ = Task.Run(() => PersistVisualizationHistoryPoint(historyPoint, timestamp))
-            .ContinueWith(
-                task =>
-                {
-                    var exception = task.Exception?.GetBaseException();
-                    if (exception is null)
-                    {
-                        return;
-                    }
-
-                    DispatcherQueue.TryEnqueue(() =>
-                        ReportVisualizationHistoryFailure("Dashboard.HistoryWriteFailed", exception));
-                },
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted,
-                TaskScheduler.Default);
+        try
+        {
+            await Task.Run(() => PersistVisualizationHistoryPoint(historyPoint, timestamp));
+        }
+        catch (Exception ex)
+        {
+            ReportVisualizationHistoryFailure("Dashboard.HistoryWriteFailed", ex);
+        }
     }
 
     private void PersistVisualizationHistoryPoint(SensorDashboardHistoryPoint historyPoint, DateTimeOffset timestamp)
@@ -3343,12 +3661,25 @@ public sealed partial class MainPage : Page
         var message = F(key, ex.Message);
         if (!DispatcherQueue.HasThreadAccess)
         {
-            DispatcherQueue.TryEnqueue(() => ReportVisualizationHistoryFailure(key, ex));
+            if (!DispatcherQueue.TryEnqueue(() => ReportVisualizationHistoryFailure(key, ex)))
+            {
+                throw new InvalidOperationException(F("Status.UiDispatchFailed", "JSONL"), ex);
+            }
+
             return;
         }
 
-        AddLog(T("Log.Error"), message, "Visualization", "HistoryPersistence");
-        ShowStatus(message, InfoBarSeverity.Error);
+        try
+        {
+            AddLog(T("Log.Error"), message, "Visualization", "HistoryPersistence");
+            ShowStatus(message, InfoBarSeverity.Error);
+        }
+        catch (Exception reportException)
+        {
+            ShowFailure(new InvalidOperationException(
+                $"{message}{Environment.NewLine}{F("Status.LogWriteFailed", reportException.Message)}",
+                new AggregateException(ex, reportException)));
+        }
     }
 
     private string VisualizationHistoryDirectory => System.IO.Path.Combine(_settingsStore.SettingsDirectory, "chart-history");
@@ -3403,58 +3734,36 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void SendScheduledVisualizationSnapshot()
+    private async void SendScheduledVisualizationSnapshot()
     {
         _visualizationSnapshotUpdateScheduled = false;
-        SendVisualizationSnapshot();
-    }
-
-    private void SendVisualizationSnapshot()
-    {
-        if (!IsOverviewViewVisible())
-        {
-            _visualizationSnapshotDirty = true;
-            return;
-        }
-
-        if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
-        {
-            _visualizationSnapshotDirty = true;
-            return;
-        }
-
         try
         {
-            var payload = BuildVisualizationPayload();
-            _ = Task.Run(() => JsonSerializer.Serialize(payload, VisualizationJsonOptions))
-                .ContinueWith(
-                    task =>
-                    {
-                        DispatcherQueue.TryEnqueue(() => CompleteVisualizationSnapshotSend(task));
-                    },
-                    CancellationToken.None,
-                    TaskContinuationOptions.None,
-                    TaskScheduler.Default);
+            await SendVisualizationSnapshot();
         }
         catch (Exception ex)
         {
+            _visualizationSnapshotDirty = true;
             ShowFailure(ex);
         }
     }
 
-    private void CompleteVisualizationSnapshotSend(Task<string> serializationTask)
+    private async Task SendVisualizationSnapshot()
     {
-        if (serializationTask.IsFaulted)
+        if (!IsOverviewViewVisible())
         {
-            ShowFailure(serializationTask.Exception?.GetBaseException() ?? new InvalidOperationException("Chart payload serialization failed."));
+            _visualizationSnapshotDirty = true;
             return;
         }
 
-        if (serializationTask.IsCanceled)
+        if (!_visualizationReady || VisualizationWebView.CoreWebView2 is null)
         {
-            ShowFailure(new OperationCanceledException("Chart payload serialization was canceled."));
+            _visualizationSnapshotDirty = true;
             return;
         }
+
+        var payload = BuildVisualizationPayload();
+        var json = await Task.Run(() => JsonSerializer.Serialize(payload, VisualizationJsonOptions));
 
         if (!IsOverviewViewVisible())
         {
@@ -3468,7 +3777,7 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        VisualizationWebView.CoreWebView2.PostWebMessageAsJson(serializationTask.Result);
+        VisualizationWebView.CoreWebView2.PostWebMessageAsJson(json);
         VisualizationStateText.Text = _lastPollTime.HasValue
             ? F("Dashboard.VisualizationUpdated", _lastPollTime.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture))
             : T("Dashboard.VisualizationReady");

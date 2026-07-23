@@ -7,7 +7,7 @@
 ## التنزيل ونطاق الدعم
 
 - نزّل `DellR730xdFanControlCenter-win-x64.zip` من [أحدث إصدار GitHub](https://github.com/mason369/dell-poweredge-r730xd-fan-control/releases/latest)، وفك الحزمة كاملة، ثم شغّل `DellR730xdFanControlCenter.exe`.
-- إصدار المصدر الحالي وأحدث Release منشور هما `v1.1.2`، وإصدار ملفات exe/dll في الحزمة هو `1.1.2.0`؛ يشير المصدر والوسم والملفات إلى الإصدار نفسه.
+- إصدار المصدر الحالي وأحدث Release منشور هما `v1.1.3`، وإصدار ملفات exe/dll في الحزمة هو `1.1.3.0`؛ يشير المصدر والوسم والملفات إلى الإصدار نفسه.
 - العتاد المستهدف هو Dell PowerEdge R730xd. تمت الملاحظة محليًا على R730xd مع iDRAC 2.82 فقط؛ أي firmware آخر يحتاج إلى تحقق بوجود مراقب.
 
 ## الميزات
